@@ -13,6 +13,7 @@ import (
 func GetStreams(skipClearing bool) error {
 	if !skipClearing {
 		// init
+		log.Println("Loading from JSON...")
 		fromJson, err := loadFromJSON()
 		if err == nil {
 			Streams = fromJson
@@ -58,6 +59,7 @@ func GetStreams(skipClearing bool) error {
 
 	Streams = NewStreams
 
+	fmt.Print("Saving to JSON...\n")
 	_ = saveToJSON(Streams)
 
 	return nil
