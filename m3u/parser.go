@@ -35,11 +35,13 @@ func GetStreams(skipClearing bool) error {
 			defer mutex.Unlock()
 
 			fmt.Printf("Processing: %s... This will probably take a while...\n", filePath)
-			Streams = mergeStreamInfo(Streams, streamInfo)
+			NewStreams = mergeStreamInfo(NewStreams, streamInfo)
 		}(path, index)
 	}
 
 	wg.Wait()
+
+	Streams = NewStreams
 
 	return nil
 }
