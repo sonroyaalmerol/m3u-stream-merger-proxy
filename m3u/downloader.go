@@ -41,12 +41,12 @@ func downloadM3UFile(url, localFilePath string) error {
 func deleteExistingM3UFiles(dataPath string) error {
 	err := os.RemoveAll(dataPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("RemoveAll error: %v", err)
 	}
 
 	err = os.MkdirAll(dataPath, os.ModePerm)
 	if err != nil {
-		return err
+		return fmt.Errorf("MkdirAll error: %v", err)
 	}
 
 	return nil
@@ -68,7 +68,7 @@ func loadM3UFiles(skipClearing bool) error {
 		localM3uPath := filepath.Join(".", "data", fmt.Sprintf("m3u_%d.m3u", index))
 		err := downloadM3UFile(m3uUrl, localM3uPath)
 		if err != nil {
-			return err
+			return fmt.Errorf("downloadM3UFile error: %v", err)
 		}
 
 		m3uFilePaths = append(m3uFilePaths, localM3uPath)

@@ -24,7 +24,7 @@ func GetStreams(skipClearing bool) error {
 
 	err := loadM3UFiles(skipClearing)
 	if err != nil {
-		return err
+		return fmt.Errorf("loadM3UFiles error: %v", err)
 	}
 
 	var wg sync.WaitGroup
@@ -38,7 +38,7 @@ func GetStreams(skipClearing bool) error {
 			streamInfo, err := parseM3UFile(filePath, m3uIndex)
 			if err != nil {
 				// Handle error appropriately, e.g., log it
-				log.Println(err.Error())
+				log.Println(fmt.Errorf("parseM3UFile error: %v", err))
 				return
 			}
 
@@ -100,7 +100,7 @@ func parseM3UFile(filePath string, m3uIndex int) ([]StreamInfo, error) {
 
 	file, err := os.Open(filePath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("MkdirAll error: %v", err)
 	}
 	defer file.Close()
 
@@ -143,7 +143,7 @@ func parseM3UFile(filePath string, m3uIndex int) ([]StreamInfo, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("scanner error: %v", err)
 	}
 
 	return streams, nil

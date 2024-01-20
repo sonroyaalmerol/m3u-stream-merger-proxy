@@ -21,7 +21,7 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request) {
 
 	_, err := fmt.Fprintf(w, "#EXTM3U\n")
 	if err != nil {
-		log.Println(err.Error())
+		log.Println(fmt.Errorf("Fprintf error: %v", err))
 	}
 
 	for _, stream := range Streams {
