@@ -45,21 +45,32 @@ func GetStreams(skipClearing bool) error {
 
 // mergeStreamInfo merges two slices of StreamInfo based on Title.
 func mergeStreamInfo(existing, new []StreamInfo) []StreamInfo {
+	var wg sync.WaitGroup
+	var mutex sync.Mutex
+
 	for _, stream := range new {
 		fmt.Printf("Processing: %s\n", stream.Title)
-		found := false
-		for i, existingStream := range existing {
-			if stream.Title == existingStream.Title {
-				fmt.Printf("Merging: %s\n", existingStream.Title)
-				existing[i].URLs = append(existing[i].URLs, stream.URLs...)
-				found = true
-				break
+		wg.Add(1)
+		go func(s StreamInfo) {
+			defer wg.Done()
+			mutex.Lock()
+			defer mutex.Unlock()
+			found := false
+			for i, existingStream := range existing {
+				if s.Title == existingStream.Title {
+					fmt.Printf("Merging: %s\n", existingStream.Title)
+					existing[i].URLs = append(existing[i].URLs, s.URLs...)
+					found = true
+					break
+				}
 			}
-		}
-		if !found {
-			existing = append(existing, stream)
-		}
+			if !found {
+				existing = append(existing, s)
+			}
+		}(stream)
 	}
+
+	wg.Wait()
 	return existing
 }
 

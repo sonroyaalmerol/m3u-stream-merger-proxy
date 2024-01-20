@@ -13,6 +13,7 @@ var (
 )
 
 func downloadM3UFile(url, localFilePath string) error {
+	fmt.Printf("Downloading M3U file: %s\n", url)
 	// Perform HTTP GET request to fetch the M3U file
 	resp, err := http.Get(url)
 	if err != nil {
