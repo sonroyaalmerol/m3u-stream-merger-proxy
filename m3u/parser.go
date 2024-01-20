@@ -2,6 +2,7 @@ package m3u
 
 import (
 	"bufio"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -45,9 +46,11 @@ func GetStreams(skipClearing bool) error {
 // mergeStreamInfo merges two slices of StreamInfo based on Title.
 func mergeStreamInfo(existing, new []StreamInfo) []StreamInfo {
 	for _, stream := range new {
+		fmt.Printf("Processing: %s\n", stream.Title)
 		found := false
 		for i, existingStream := range existing {
 			if stream.Title == existingStream.Title {
+				fmt.Printf("Merging: %s\n", existingStream.Title)
 				existing[i].URLs = append(existing[i].URLs, stream.URLs...)
 				found = true
 				break
@@ -61,6 +64,7 @@ func mergeStreamInfo(existing, new []StreamInfo) []StreamInfo {
 }
 
 func parseM3UFile(filePath string) ([]StreamInfo, error) {
+	fmt.Printf("Parsing: %s\n", filePath)
 	var streams []StreamInfo
 
 	file, err := os.Open(filePath)
