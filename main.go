@@ -88,7 +88,6 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			// Log the error
 			log.Printf("Error copying MP4 stream to response: %s\n", err.Error())
-			http.Error(w, "Error copying MP4 stream to response", http.StatusInternalServerError)
 			return
 		}
 	}
