@@ -14,12 +14,38 @@ var (
 
 func downloadM3UFile(url, localFilePath string) error {
 	fmt.Printf("Downloading M3U file: %s\n", url)
-	// Perform HTTP GET request to fetch the M3U file
-	resp, err := http.Get(url)
+
+	// Set the custom User-Agent header
+	userAgent := "IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)"
+
+	// Create a new HTTP client with a custom User-Agent header
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Follow redirects while preserving the custom User-Agent header
+			req.Header.Set("User-Agent", userAgent)
+			return nil
+		},
+	}
+
+	// Create the GET request
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("error creating GET request: %v", err)
+	}
+
+	req.Header.Set("User-Agent", userAgent)
+
+	// Perform the HTTP request
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("error fetching M3U file: %v", err)
 	}
 	defer resp.Body.Close()
+
+	// Check for unexpected status code
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
 
 	// Create or truncate the local file
 	file, err := os.Create(localFilePath)
@@ -31,6 +57,10 @@ func downloadM3UFile(url, localFilePath string) error {
 	// Copy the content from the HTTP response to the local file
 	_, err = io.Copy(file, resp.Body)
 	if err != nil {
+		// Check for unexpected EOF error
+		if err == io.ErrUnexpectedEOF {
+			return fmt.Errorf("unexpected EOF error: %v", err)
+		}
 		return fmt.Errorf("error copying content to local file: %v", err)
 	}
 
