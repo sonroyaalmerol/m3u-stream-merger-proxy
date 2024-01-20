@@ -52,8 +52,6 @@ func deleteExistingM3UFiles(dataPath string) error {
 }
 
 func loadM3UFiles(skipClearing bool) error {
-	index := 1
-
 	if !skipClearing {
 		dataPath := filepath.Join(".", "data")
 		err := deleteExistingM3UFiles(dataPath)
@@ -64,6 +62,7 @@ func loadM3UFiles(skipClearing bool) error {
 		m3uFilePaths = []string{}
 	}
 
+	index := 1
 	for {
 		m3uUrl, m3uExists := os.LookupEnv(fmt.Sprintf("M3U_URL_%d", index))
 		if !m3uExists {
@@ -77,6 +76,8 @@ func loadM3UFiles(skipClearing bool) error {
 		}
 
 		m3uFilePaths = append(m3uFilePaths, localM3uPath)
+
+		index++
 	}
 
 	return nil
