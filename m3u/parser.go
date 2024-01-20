@@ -19,12 +19,12 @@ func GetStreams(skipClearing bool) error {
 	var wg sync.WaitGroup
 	var mutex sync.Mutex
 
-	for _, path := range m3uFilePaths {
+	for index, path := range m3uFilePaths {
 		wg.Add(1)
-		go func(filePath string) {
+		go func(filePath string, m3uIndex int) {
 			defer wg.Done()
 
-			streamInfo, err := parseM3UFile(filePath)
+			streamInfo, err := parseM3UFile(filePath, m3uIndex)
 			if err != nil {
 				// Handle error appropriately, e.g., log it
 				log.Println(err.Error())
@@ -36,7 +36,7 @@ func GetStreams(skipClearing bool) error {
 
 			fmt.Printf("Processing: %s... This will probably take a while...\n", filePath)
 			Streams = mergeStreamInfo(Streams, streamInfo)
-		}(path)
+		}(path, index)
 	}
 
 	wg.Wait()
@@ -73,7 +73,7 @@ func mergeStreamInfo(existing, new []StreamInfo) []StreamInfo {
 	return existing
 }
 
-func parseM3UFile(filePath string) ([]StreamInfo, error) {
+func parseM3UFile(filePath string, m3uIndex int) ([]StreamInfo, error) {
 	fmt.Printf("Parsing: %s\n", filePath)
 	var streams []StreamInfo
 
@@ -107,8 +107,8 @@ func parseM3UFile(filePath string) ([]StreamInfo, error) {
 			// Extract URL
 			currentStream.URLs = []StreamURL{
 				{
-					Content: line,
-					Used:    false,
+					Content:  line,
+					M3UIndex: m3uIndex,
 				},
 			}
 			streams = append(streams, currentStream)

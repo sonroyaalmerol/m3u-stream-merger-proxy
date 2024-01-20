@@ -8,6 +8,6 @@ type StreamInfo struct {
 }
 
 type StreamURL struct {
-	Used    bool
-	Content string
+	Content  string
+	M3UIndex int
 }

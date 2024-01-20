@@ -41,44 +41,32 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	// Proxy the MP4 stream
-	url := ""
-	var urlUsed *m3u.StreamURL
+	var resp *http.Response
 
-	for _, u := range stream.URLs {
-		if !u.Used {
-			urlUsed = &u
-			url = u.Content
-			u.Used = true
-			break
-		}
-	}
-
-	if url == "" {
-		w.WriteHeader(http.StatusForbidden)
-		w.Write([]byte("Forbidden - No streams available."))
-		return
-	}
-
-	resp, err := http.Get(url)
-	if err != nil {
-		// Log the error
-		log.Printf("Error fetching MP4 stream: %s\n", err.Error())
-
-		urlUsed.Used = false
-		// Check if the connection is still open before writing to the response
-		select {
-		case <-r.Context().Done():
-			// Connection closed, handle accordingly
-			log.Println("Client disconnected")
+	for i, url := range stream.URLs {
+		resp, err := http.Get(url.Content)
+		if err != nil {
+			if i < len(stream.URLs) {
+				continue
+			}
+			// Log the error
+			log.Printf("Error fetching MP4 stream, exhausted all streams: %s\n", err.Error())
+			// Check if the connection is still open before writing to the response
+			select {
+			case <-r.Context().Done():
+				// Connection closed, handle accordingly
+				log.Println("Client disconnected")
+				return
+			default:
+				// Connection still open, proceed with writing to the response
+				http.Error(w, "Error fetching MP4 stream. Exhausted all streams.", http.StatusInternalServerError)
+			}
 			return
-		default:
-			// Connection still open, proceed with writing to the response
-			http.Error(w, "Error fetching MP4 stream", http.StatusInternalServerError)
 		}
-		return
+
+		defer resp.Body.Close()
+		break
 	}
-	defer resp.Body.Close()
 
 	// Log the successful response
 	log.Printf("Sent MP4 stream to %s\n", r.RemoteAddr)
@@ -95,8 +83,6 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			// Log the error
 			log.Printf("Error copying MP4 stream to response: %s\n", err.Error())
-
-			urlUsed.Used = false
 			http.Error(w, "Error copying MP4 stream to response", http.StatusInternalServerError)
 			return
 		}
