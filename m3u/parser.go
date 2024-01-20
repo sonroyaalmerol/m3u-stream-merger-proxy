@@ -44,8 +44,13 @@ func GetStreams(skipClearing bool) error {
 			mutex.Lock()
 			defer mutex.Unlock()
 
-			fmt.Printf("Processing: %s... This will probably take a while...\n", filePath)
-			NewStreams = mergeStreamInfo(NewStreams, streamInfo)
+			// Check if the NewStreams slice is empty, if so, assign the NewStreams directly
+			if len(NewStreams) == 0 {
+				NewStreams = streamInfo
+			} else {
+				fmt.Printf("Merging: %s... This will probably take a while...\n", filePath)
+				NewStreams = mergeStreamInfo(NewStreams, streamInfo)
+			}
 		}(path, index)
 	}
 
