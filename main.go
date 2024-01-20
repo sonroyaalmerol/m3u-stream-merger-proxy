@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -87,7 +89,11 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 		_, err := io.Copy(w, resp.Body)
 		if err != nil {
 			// Log the error
-			log.Printf("Error copying MP4 stream to response: %s\n", err.Error())
+			if errors.Is(err, syscall.EPIPE) {
+				log.Println("Client disconnected after fetching MP4 stream")
+			} else {
+				log.Printf("Error copying MP4 stream to response: %s\n", err.Error())
+			}
 			return
 		}
 	}
