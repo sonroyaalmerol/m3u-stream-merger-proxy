@@ -100,7 +100,7 @@ func parseM3UFile(filePath string, m3uIndex int) ([]StreamInfo, error) {
 
 	file, err := os.Open(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("MkdirAll error: %v", err)
+		return nil, fmt.Errorf("Open error: %v", err)
 	}
 	defer file.Close()
 
