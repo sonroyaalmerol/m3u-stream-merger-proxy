@@ -11,6 +11,16 @@ import (
 
 // GetStreams retrieves and merges stream information from multiple M3U files.
 func GetStreams(skipClearing bool) error {
+	if !skipClearing {
+		// init
+		fromJson, err := loadFromJSON()
+		if err == nil {
+			Streams = fromJson
+
+			return nil
+		}
+	}
+
 	err := loadM3UFiles(skipClearing)
 	if err != nil {
 		return err
@@ -42,6 +52,8 @@ func GetStreams(skipClearing bool) error {
 	wg.Wait()
 
 	Streams = NewStreams
+
+	_ = saveToJSON(Streams)
 
 	return nil
 }

@@ -54,11 +54,6 @@ func deleteExistingM3UFiles(dataPath string) error {
 
 func loadM3UFiles(skipClearing bool) error {
 	if !skipClearing {
-		dataPath := filepath.Join(".", "data")
-		err := deleteExistingM3UFiles(dataPath)
-		if err != nil {
-			return err
-		}
 		// Clear m3uURLs
 		m3uFilePaths = []string{}
 	}
