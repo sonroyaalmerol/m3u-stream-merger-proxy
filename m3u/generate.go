@@ -26,8 +26,8 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request) {
 
 	for _, stream := range Streams {
 		// Write #EXTINF line
-		_, err := fmt.Fprintf(w, "#EXTINF:-1 tvg-id=\"\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
-			stream.Title, stream.LogoURL, stream.Group, stream.Title)
+		_, err := fmt.Fprintf(w, "#EXTINF:-1 tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
+			stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title)
 		if err != nil {
 			continue
 		}

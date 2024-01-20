@@ -114,9 +114,15 @@ func parseM3UFile(filePath string, m3uIndex int) ([]StreamInfo, error) {
 		if strings.HasPrefix(line, "#EXTINF:") {
 			// Extract stream information from #EXTINF line
 			currentStream = StreamInfo{}
-			parts := strings.SplitN(line, ",", 2)
-			if len(parts) == 2 {
-				currentStream.Title = parts[1]
+			parts := strings.Split(line, " ")
+			for _, part := range parts {
+				if strings.HasPrefix(part, "tvg-id=") {
+					currentStream.TvgID = strings.TrimPrefix(part, "tvg-id=")
+				} else if strings.HasPrefix(part, "tvg-name=") {
+					currentStream.Title = strings.TrimPrefix(part, "tvg-name=")
+				} else if strings.HasPrefix(part, "group-title=") {
+					currentStream.Group = strings.TrimPrefix(part, "group-title=")
+				}
 			}
 		} else if strings.HasPrefix(line, "#EXTVLCOPT:") {
 			// Extract logo URL from #EXTVLCOPT line
