@@ -42,30 +42,35 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	var resp *http.Response
+	defer func() {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+	}()
 
-	for i, url := range stream.URLs {
-		resp, err := http.Get(url.Content)
-		if err != nil {
-			if i < len(stream.URLs) {
-				continue
-			}
-			// Log the error
-			log.Printf("Error fetching MP4 stream, exhausted all streams: %s\n", err.Error())
-			// Check if the connection is still open before writing to the response
-			select {
-			case <-r.Context().Done():
-				// Connection closed, handle accordingly
-				log.Println("Client disconnected")
-				return
-			default:
-				// Connection still open, proceed with writing to the response
-				http.Error(w, "Error fetching MP4 stream. Exhausted all streams.", http.StatusInternalServerError)
-			}
+	for _, url := range stream.URLs {
+		resp, err = http.Get(url.Content)
+		if err == nil {
+			break
+		}
+		// Log the error
+		log.Printf("Error fetching MP4 stream: %s\n", err.Error())
+	}
+
+	if resp == nil {
+		// Log the error
+		log.Println("Error fetching MP4 stream. Exhausted all streams.")
+		// Check if the connection is still open before writing to the response
+		select {
+		case <-r.Context().Done():
+			// Connection closed, handle accordingly
+			log.Println("Client disconnected")
+			return
+		default:
+			// Connection still open, proceed with writing to the response
+			http.Error(w, "Error fetching MP4 stream. Exhausted all streams.", http.StatusInternalServerError)
 			return
 		}
-
-		defer resp.Body.Close()
-		break
 	}
 
 	// Log the successful response
@@ -88,15 +93,10 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Sleep for a short duration to allow the server to detect the client disconnection
-	time.Sleep(100 * time.Millisecond)
-
 	// Explicitly check if the connection is still open after a short delay
 	select {
 	case <-r.Context().Done():
 		log.Printf("Connection still open after copying MP4 stream. The client may have disconnected.")
-	default:
-		// Connection still open after the delay
 	}
 }
 
