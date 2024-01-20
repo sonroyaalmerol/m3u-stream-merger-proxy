@@ -117,11 +117,11 @@ func parseM3UFile(filePath string, m3uIndex int) ([]StreamInfo, error) {
 			parts := strings.Split(line, " ")
 			for _, part := range parts {
 				if strings.HasPrefix(part, "tvg-id=") {
-					currentStream.TvgID = strings.TrimPrefix(part, "tvg-id=")
+					currentStream.TvgID = strings.TrimPrefix(strings.TrimSuffix(part, `"`), `tvg-id="`)
 				} else if strings.HasPrefix(part, "tvg-name=") {
-					currentStream.Title = strings.TrimPrefix(part, "tvg-name=")
+					currentStream.Title = strings.TrimPrefix(strings.TrimSuffix(part, `"`), `tvg-name="`)
 				} else if strings.HasPrefix(part, "group-title=") {
-					currentStream.Group = strings.TrimPrefix(part, "group-title=")
+					currentStream.Group = strings.TrimPrefix(strings.TrimSuffix(part, `"`), `group-title="`)
 				}
 			}
 		} else if strings.HasPrefix(line, "#EXTVLCOPT:") {
