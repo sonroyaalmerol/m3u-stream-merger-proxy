@@ -3,6 +3,7 @@ package m3u
 import (
 	"errors"
 	"fmt"
+	"log"
 	"m3u-stream-merger/utils"
 	"net/http"
 )
@@ -16,6 +17,11 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request) {
 		baseUrl = fmt.Sprintf("http://%s/stream", r.Host)
 	} else {
 		baseUrl = fmt.Sprintf("https://%s/stream", r.Host)
+	}
+
+	_, err := fmt.Fprintf(w, "#EXTM3U\n")
+	if err != nil {
+		log.Println(err.Error())
 	}
 
 	for _, stream := range Streams {
