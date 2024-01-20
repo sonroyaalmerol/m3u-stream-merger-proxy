@@ -17,8 +17,6 @@ func downloadM3UFile(url, localFilePath string) error {
 	// Set the custom User-Agent header
 	userAgent := "IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)"
 
-	fmt.Printf("Downloading M3U file: %s\n", url)
-
 	// Create a new HTTP client with a custom User-Agent header
 	client := &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -30,6 +28,8 @@ func downloadM3UFile(url, localFilePath string) error {
 
 	// Infinite loop for retries
 	for {
+		fmt.Printf("Downloading M3U file: %s\n", url)
+
 		// Create the GET request
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
