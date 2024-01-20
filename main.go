@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"log"
 	"m3u-stream-merger/m3u"
 	"m3u-stream-merger/utils"
 	"net/http"
@@ -13,6 +14,9 @@ import (
 )
 
 func mp4Handler(w http.ResponseWriter, r *http.Request) {
+	// Log the incoming request
+	log.Printf("Received request from %s for URL: %s\n", r.RemoteAddr, r.URL.Path)
+
 	// Extract the m3u ID from the URL path
 	m3uID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/stream/"), ".mp4")
 	if m3uID == "" {
@@ -58,27 +62,55 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := http.Get(url)
 	if err != nil {
+		// Log the error
+		log.Printf("Error fetching MP4 stream: %s\n", err.Error())
+
 		urlUsed.Used = false
-		http.Error(w, "Error fetching MP4 stream", http.StatusInternalServerError)
+		// Check if the connection is still open before writing to the response
+		select {
+		case <-r.Context().Done():
+			// Connection closed, handle accordingly
+			log.Println("Client disconnected")
+			return
+		default:
+			// Connection still open, proceed with writing to the response
+			http.Error(w, "Error fetching MP4 stream", http.StatusInternalServerError)
+		}
 		return
 	}
 	defer resp.Body.Close()
 
-	// Copy the MP4 stream to the response writer
-	_, err = io.Copy(w, resp.Body)
-	if err != nil {
-		urlUsed.Used = false
-		http.Error(w, "Error copying MP4 stream to response", http.StatusInternalServerError)
-		return
-	}
+	// Log the successful response
+	log.Printf("Sent MP4 stream to %s\n", r.RemoteAddr)
 
-	ctx := r.Context()
+	// Check if the connection is still open before copying the MP4 stream to the response
 	select {
-	case <-ctx.Done():
-		// change to unused
-		urlUsed.Used = false
+	case <-r.Context().Done():
+		// Connection closed, handle accordingly
+		log.Println("Client disconnected after fetching MP4 stream")
 		return
 	default:
+		// Connection still open, proceed with writing to the response
+		_, err := io.Copy(w, resp.Body)
+		if err != nil {
+			// Log the error
+			log.Printf("Error copying MP4 stream to response: %s\n", err.Error())
+
+			urlUsed.Used = false
+			http.Error(w, "Error copying MP4 stream to response", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Sleep for a short duration to allow the server to detect the client disconnection
+	time.Sleep(100 * time.Millisecond)
+
+	// Explicitly check if the connection is still open after a short delay
+	select {
+	case <-r.Context().Done():
+		log.Printf("Connection still open after copying MP4 stream. The client may have disconnected.")
+	default:
+		// Connection still open after the delay
 	}
 }
 
@@ -116,7 +148,7 @@ func main() {
 	go updateSource()
 
 	// HTTP handlers
-	http.HandleFunc("/playlist", m3u.GenerateM3UContent)
+	http.HandleFunc("/playlist.m3u", m3u.GenerateM3UContent)
 	http.HandleFunc("/stream/", mp4Handler)
 
 	// Start the server

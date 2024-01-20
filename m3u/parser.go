@@ -34,6 +34,7 @@ func GetStreams(skipClearing bool) error {
 			mutex.Lock()
 			defer mutex.Unlock()
 
+			fmt.Printf("Processing: %s... This will probably take a while...\n", filePath)
 			Streams = mergeStreamInfo(Streams, streamInfo)
 		}(path)
 	}
@@ -49,7 +50,6 @@ func mergeStreamInfo(existing, new []StreamInfo) []StreamInfo {
 	var mutex sync.Mutex
 
 	for _, stream := range new {
-		fmt.Printf("Processing: %s\n", stream.Title)
 		wg.Add(1)
 		go func(s StreamInfo) {
 			defer wg.Done()
@@ -58,7 +58,6 @@ func mergeStreamInfo(existing, new []StreamInfo) []StreamInfo {
 			found := false
 			for i, existingStream := range existing {
 				if s.Title == existingStream.Title {
-					fmt.Printf("Merging: %s\n", existingStream.Title)
 					existing[i].URLs = append(existing[i].URLs, s.URLs...)
 					found = true
 					break
