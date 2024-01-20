@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 var (
@@ -13,10 +14,10 @@ var (
 )
 
 func downloadM3UFile(url, localFilePath string) error {
-	fmt.Printf("Downloading M3U file: %s\n", url)
-
 	// Set the custom User-Agent header
 	userAgent := "IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)"
+
+	fmt.Printf("Downloading M3U file: %s\n", url)
 
 	// Create a new HTTP client with a custom User-Agent header
 	client := &http.Client{
@@ -27,45 +28,61 @@ func downloadM3UFile(url, localFilePath string) error {
 		},
 	}
 
-	// Create the GET request
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return fmt.Errorf("error creating GET request: %v", err)
-	}
-
-	req.Header.Set("User-Agent", userAgent)
-
-	// Perform the HTTP request
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("error fetching M3U file: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Check for unexpected status code
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	// Create or truncate the local file
-	file, err := os.Create(localFilePath)
-	if err != nil {
-		return fmt.Errorf("error creating local file: %v", err)
-	}
-	defer file.Close()
-
-	// Copy the content from the HTTP response to the local file
-	_, err = io.Copy(file, resp.Body)
-	if err != nil {
-		// Check for unexpected EOF error
-		if err == io.ErrUnexpectedEOF {
-			return fmt.Errorf("unexpected EOF error: %v", err)
+	// Infinite loop for retries
+	for {
+		// Create the GET request
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return fmt.Errorf("error creating GET request: %v", err)
 		}
-		return fmt.Errorf("error copying content to local file: %v", err)
-	}
 
-	fmt.Printf("M3U file downloaded successfully to: %s\n", localFilePath)
-	return nil
+		// Set the custom User-Agent header
+		req.Header.Set("User-Agent", userAgent)
+
+		// Perform the HTTP request
+		resp, err := client.Do(req)
+		if err != nil {
+			fmt.Printf("Error fetching M3U file: %v. Retrying in 10 seconds...\n", err)
+			time.Sleep(10 * time.Second)
+			continue
+		}
+
+		// Check for unexpected status code
+		if resp.StatusCode != http.StatusOK {
+			fmt.Printf("Unexpected status code: %d. Retrying in 10 seconds...\n", resp.StatusCode)
+			resp.Body.Close()
+			time.Sleep(10 * time.Second)
+			continue
+		}
+
+		// Create or truncate the local file
+		file, err := os.Create(localFilePath)
+		if err != nil {
+			resp.Body.Close()
+			return fmt.Errorf("error creating local file: %v", err)
+		}
+
+		// Copy the content from the HTTP response to the local file
+		_, err = io.Copy(file, resp.Body)
+		resp.Body.Close()
+		file.Close()
+
+		if err != nil {
+			// Check for unexpected EOF error
+			if err == io.ErrUnexpectedEOF {
+				fmt.Printf("Unexpected EOF error: %v. Retrying in 10 seconds...\n", err)
+				time.Sleep(10 * time.Second)
+				continue
+			}
+
+			fmt.Printf("Error copying content to local file: %v. Retrying in 10 seconds...\n", err)
+			time.Sleep(10 * time.Second)
+			continue
+		}
+
+		fmt.Printf("M3U file downloaded successfully to: %s\n", localFilePath)
+		return nil
+	}
 }
 
 func deleteExistingM3UFiles(dataPath string) error {
