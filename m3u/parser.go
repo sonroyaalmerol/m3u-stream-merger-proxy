@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -112,9 +113,11 @@ func parseM3UFile(filePath string, m3uIndex int) ([]StreamInfo, error) {
 		line := scanner.Text()
 
 		if strings.HasPrefix(line, "#EXTINF:") {
-			// Extract stream information from #EXTINF line
 			currentStream = StreamInfo{}
-			parts := strings.Split(line, " ")
+
+			// Split the line by space, but consider quoted values
+			parts := regexp.MustCompile(`[^\s"]+|"([^"]*)"`).FindAllString(line, -1)
+
 			for _, part := range parts {
 				if strings.HasPrefix(part, "tvg-id=") {
 					currentStream.TvgID = strings.TrimPrefix(strings.TrimSuffix(part, `"`), `tvg-id="`)
@@ -122,6 +125,8 @@ func parseM3UFile(filePath string, m3uIndex int) ([]StreamInfo, error) {
 					currentStream.Title = strings.TrimPrefix(strings.TrimSuffix(part, `"`), `tvg-name="`)
 				} else if strings.HasPrefix(part, "group-title=") {
 					currentStream.Group = strings.TrimPrefix(strings.TrimSuffix(part, `"`), `group-title="`)
+				} else if strings.HasPrefix(part, "tvg-logo=") {
+					currentStream.LogoURL = strings.TrimPrefix(strings.TrimSuffix(part, `"`), `tvg-logo="`)
 				}
 			}
 		} else if strings.HasPrefix(line, "#EXTVLCOPT:") {
