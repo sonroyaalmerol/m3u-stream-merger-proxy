@@ -1,19 +1,31 @@
-# Use the official Go image as the base image
-FROM golang:1.21.5-alpine
+# Start from the official Golang image
+FROM golang:alpine AS build
 
-# Set the working directory inside the container
+# Set the Current Working Directory inside the container
 WORKDIR /app
 
-# Copy the local package files to the container's workspace
-COPY . .
+# Copy go mod and sum files
+COPY go.mod go.sum ./
 
-# Download and install any dependencies
+# Download all dependencies. Dependencies will be cached if the go.mod and go.sum files are not changed
 RUN go mod download
 
-# Build the Go application
+# Copy the source code from the current directory to the Working Directory inside the container
+COPY . .
+
+# Build the Go app
 RUN go build -o main .
+
+####################
+
+FROM scratch
+
+WORKDIR /
+
+COPY --from=build /app/main /gomain
 
 EXPOSE 8080
 
-# Command to run the executable
-ENTRYPOINT ["./main"]
+ENTRYPOINT ["/gomain"]
+
+
