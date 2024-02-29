@@ -53,7 +53,7 @@ version: '3'
 
 services:
   m3u-stream-merger-proxy:
-    image: registry.snry.xyz/sysadmin/m3u-stream-merger:main-latest
+    image: sonroyaalmerol/m3u-stream-merger:latest
     ports:
       - "8080:8080"
     volumes:
