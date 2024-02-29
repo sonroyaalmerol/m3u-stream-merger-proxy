@@ -3,6 +3,8 @@ name: Developer image
 on:  # yamllint disable-line rule:truthy
   push:
     branches: [main]
+    paths-ignore:
+      - '**/README.md'
 
 jobs:
   push:
