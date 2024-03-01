@@ -16,6 +16,9 @@ COPY . .
 # Build the Go app
 RUN go build -o main .
 
+# Run tests
+RUN go test ./...
+
 ####################
 
 FROM scratch
