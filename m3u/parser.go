@@ -149,7 +149,7 @@ func parseM3UFile(filePath string, m3uIndex int) ([]database.StreamInfo, error) 
 			}
 		} else if strings.HasPrefix(line, "http") {
 			// Extract URL
-			currentStream.URLs = []StreamURL{
+			currentStream.URLs = []database.StreamURL{
 				{
 					Content:  line,
 					M3UIndex: m3uIndex,
