@@ -26,7 +26,7 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
             M3UIndex: 1,
         }},
     }, {
-        Title: "stream2"
+        Title: "stream2",
         TvgID: "test2",
         LogoURL: "http://test2.com/image.png",
         Group: "test2",
