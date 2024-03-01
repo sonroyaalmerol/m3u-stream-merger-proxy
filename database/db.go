@@ -106,7 +106,7 @@ func LoadFromSQLite() ([]StreamInfo, error) {
 	var streams []StreamInfo
 	for rows.Next() {
 		var s StreamInfo
-    var streamId int
+    	var streamId int
 		err := rows.Scan(&streamId, &s.Title, &s.TvgID, &s.LogoURL, &s.Group)
 		if err != nil {
 			return nil, fmt.Errorf("error scanning stream: %v", err)
