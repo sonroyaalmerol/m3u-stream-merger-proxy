@@ -3,7 +3,6 @@ package m3u
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"m3u-stream-merger/database"
