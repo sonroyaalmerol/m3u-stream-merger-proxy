@@ -31,7 +31,7 @@ func GetStreams(skipClearing bool) error {
 		}
 	}
 
-	err := loadM3UFiles(skipClearing)
+	err = loadM3UFiles(skipClearing)
 	if err != nil {
 		return fmt.Errorf("loadM3UFiles error: %v", err)
 	}
