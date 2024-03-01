@@ -14,10 +14,10 @@ import (
 func GetStreams(skipClearing bool) error {
 	if !skipClearing {
 		// init
-		log.Println("Loading from JSON...")
-		fromJson, err := loadFromJSON()
+		log.Println("Loading from database...")
+		fromDB, err := loadFromSQLite()
 		if err == nil {
-			Streams = fromJson
+			Streams = fromDB 
 
 			return nil
 		}
@@ -60,8 +60,8 @@ func GetStreams(skipClearing bool) error {
 
 	Streams = NewStreams
 
-	fmt.Print("Saving to JSON...\n")
-	_ = saveToJSON(Streams)
+	fmt.Print("Saving to database...\n")
+	_ = saveToSQLite(Streams)
 
 	return nil
 }
