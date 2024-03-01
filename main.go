@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -97,32 +98,31 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
-	// Explicitly check if the connection is still open after a short delay
-	select {
-	case <-r.Context().Done():
-		log.Printf("Connection still open after copying MP4 stream. The client may have disconnected.")
-	}
 }
 
-func updateSource() {
+func updateSource(ctx context.Context) {
 	for {
-		updateIntervalInHour, exists := os.LookupEnv("UPDATE_INTERVAL")
-		if !exists {
-			updateIntervalInHour = "24"
-		}
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			updateIntervalInHour, exists := os.LookupEnv("UPDATE_INTERVAL")
+			if !exists {
+				updateIntervalInHour = "24"
+			}
 
-		hourInt, err := strconv.Atoi(updateIntervalInHour)
-		if err != nil {
+			hourInt, err := strconv.Atoi(updateIntervalInHour)
+			if err != nil {
 			time.Sleep(24 * time.Hour)
-		} else {
-			time.Sleep(time.Duration(hourInt) * time.Hour) // Adjust the update interval as needed
-		}
+			} else {
+				time.Sleep(time.Duration(hourInt) * time.Hour) // Adjust the update interval as needed
+			}
 
-		// Reload M3U files
-		err = m3u.GetStreams(true)
-		if err != nil {
-			fmt.Printf("Error updating M3U: %v\n", err)
+			// Reload M3U files
+			err = m3u.GetStreams(true)
+			if err != nil {
+				fmt.Printf("Error updating M3U: %v\n", err)
+			}
 		}
 	}
 }
@@ -135,8 +135,12 @@ func main() {
 		return
 	}
 
+	// Context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Start the goroutine for periodic updates
-	go updateSource()
+	go updateSource(ctx)
 
 	// HTTP handlers
 	http.HandleFunc("/playlist.m3u", m3u.GenerateM3UContent)
