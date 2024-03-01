@@ -8,17 +8,20 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+
+	"m3u-stream-merger/database"
 )
 
 // GetStreams retrieves and merges stream information from multiple M3U files.
 func GetStreams(skipClearing bool) error {
 	// Initialize database
-	init()
+	database.InitializeSQLite()
 
 	if !skipClearing {
 		// init
 		log.Println("Loading from database...")
-		fromDB, err := loadFromSQLite()
+		fromDB, err := database.LoadFromSQLite()
 		if err == nil {
 			Streams = fromDB 
 
@@ -64,7 +67,7 @@ func GetStreams(skipClearing bool) error {
 	Streams = NewStreams
 
 	fmt.Print("Saving to database...\n")
-	_ = saveToSQLite(Streams)
+	_ = database.SaveToSQLite(Streams)
 
 	return nil
 }

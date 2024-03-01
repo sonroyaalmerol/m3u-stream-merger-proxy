@@ -1,4 +1,4 @@
-package m3u
+package database
 
 import (
 	"database/sql"
@@ -11,7 +11,7 @@ import (
 
 var db *sql.DB
 
-func init() {
+func InitializeSQLite() {
 	filename := filepath.Join(".", "data", "database.sqlite")
 	var err error
 	db, err = sql.Open("sqlite3", filename)
@@ -50,7 +50,7 @@ func init() {
 	}
 }
 
-func saveToSQLite(streams []StreamInfo) error {
+func SaveToSQLite(streams []StreamInfo) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("error beginning transaction: %v", err)
@@ -96,7 +96,7 @@ func saveToSQLite(streams []StreamInfo) error {
 	return nil
 }
 
-func loadFromSQLite() ([]StreamInfo, error) {
+func LoadFromSQLite() ([]StreamInfo, error) {
 	rows, err := db.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams")
 	if err != nil {
 		return nil, fmt.Errorf("error querying streams: %v", err)
