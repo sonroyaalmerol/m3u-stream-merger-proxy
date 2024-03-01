@@ -38,7 +38,7 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
             M3UIndex: 2,
         }},
     }}
-    err = SaveToSQLite(expected) // Insert test data into the database
+    err := SaveToSQLite(expected) // Insert test data into the database
     if err != nil {
         t.Errorf("SaveToSQLite returned error: %v", err)
     }
