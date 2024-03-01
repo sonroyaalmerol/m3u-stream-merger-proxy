@@ -1,4 +1,8 @@
 package m3u
 
-var Streams []StreamInfo
-var NewStreams []StreamInfo
+import (
+	"m3u-stream-merger/database"
+)
+
+var Streams []database.StreamInfo
+var NewStreams []database.StreamInfo

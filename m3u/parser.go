@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 
-
 	"m3u-stream-merger/database"
 )
 
@@ -72,14 +71,14 @@ func GetStreams(skipClearing bool) error {
 	return nil
 }
 
-// mergeStreamInfo merges two slices of StreamInfo based on Title.
-func mergeStreamInfo(existing, new []StreamInfo) []StreamInfo {
+// mergeStreamInfo merges two slices of database.StreamInfo based on Title.
+func mergeStreamInfo(existing, new []database.StreamInfo) []database.StreamInfo {
 	var wg sync.WaitGroup
 	var mutex sync.Mutex
 
 	for _, stream := range new {
 		wg.Add(1)
-		go func(s StreamInfo) {
+		go func(s database.StreamInfo) {
 			defer wg.Done()
 			mutex.Lock()
 			defer mutex.Unlock()
@@ -101,9 +100,9 @@ func mergeStreamInfo(existing, new []StreamInfo) []StreamInfo {
 	return existing
 }
 
-func parseM3UFile(filePath string, m3uIndex int) ([]StreamInfo, error) {
+func parseM3UFile(filePath string, m3uIndex int) ([]database.StreamInfo, error) {
 	fmt.Printf("Parsing: %s\n", filePath)
-	var streams []StreamInfo
+	var streams []database.StreamInfo
 
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -113,13 +112,13 @@ func parseM3UFile(filePath string, m3uIndex int) ([]StreamInfo, error) {
 
 	scanner := bufio.NewScanner(file)
 
-	var currentStream StreamInfo
+	var currentStream database.StreamInfo
 
 	for scanner.Scan() {
 		line := scanner.Text()
 
 		if strings.HasPrefix(line, "#EXTINF:") {
-			currentStream = StreamInfo{}
+			currentStream = database.StreamInfo{}
 
 			// Define a regular expression to capture key-value pairs
 			regex := regexp.MustCompile(`(\S+?)="([^"]*?)"`)
