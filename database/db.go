@@ -11,13 +11,12 @@ import (
 
 var db *sql.DB
 
-func InitializeSQLite() {
+func InitializeSQLite() error {
 	filename := filepath.Join(".", "data", "database.sqlite")
 	var err error
 	db, err = sql.Open("sqlite3", filename)
 	if err != nil {
-		fmt.Printf("error opening SQLite database: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error opening SQLite database: %v\n", err)
 	}
 
 	// Create table if not exists
@@ -31,8 +30,7 @@ func InitializeSQLite() {
 		)
 	`)
 	if err != nil {
-		fmt.Printf("error creating table: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error creating table: %v\n", err)
 	}
 
 	_, err = db.Exec(`
@@ -45,8 +43,7 @@ func InitializeSQLite() {
 		)
 	`)
 	if err != nil {
-		fmt.Printf("error creating table: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error creating table: %v\n", err)
 	}
 }
 

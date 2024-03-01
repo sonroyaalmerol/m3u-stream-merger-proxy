@@ -15,7 +15,10 @@ import (
 // GetStreams retrieves and merges stream information from multiple M3U files.
 func GetStreams(skipClearing bool) error {
 	// Initialize database
-	database.InitializeSQLite()
+	err := database.InitializeSQLite()
+	if err != nil {
+		return fmt.Errorf("InitializeSQLite error: %v", err)
+	}
 
 	if !skipClearing {
 		// init
