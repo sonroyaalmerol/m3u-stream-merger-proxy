@@ -20,10 +20,11 @@ func InitializeSQLite() error {
 		return fmt.Errorf("error creating data folder: %v\n", err)
 	}
 
-    _, err = os.Create(filename)
+    file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
 		return fmt.Errorf("error creating database file: %v\n", err)
 	}
+	file.Close()
 
 	db, err = sql.Open("sqlite3", filename)
 	if err != nil {
