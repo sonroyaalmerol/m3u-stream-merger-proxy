@@ -22,28 +22,28 @@ func init() {
 
 	// Create table if not exists
 	_, err = db.Exec(`
-    CREATE TABLE IF NOT EXISTS streams (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT UNIQUE,
-      tvg_id TEXT,
-      logo_url TEXT,
-      group_name TEXT
-    )
-  `)
+		CREATE TABLE IF NOT EXISTS streams (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			title TEXT UNIQUE,
+			tvg_id TEXT,
+			logo_url TEXT,
+			group_name TEXT
+		)
+	`)
 	if err != nil {
 		fmt.Printf("error creating table: %v\n", err)
 		os.Exit(1)
 	}
 
-  _, err = db.Exec(`
-    CREATE TABLE IF NOT EXISTS stream_urls (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      stream_id INTEGER,
-      content TEXT,
-      m3u_index INTEGER,
-      FOREIGN KEY(stream_id) REFERENCES streams(id)
-    )
-  `)
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS stream_urls (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			stream_id INTEGER,
+			content TEXT,
+			m3u_index INTEGER,
+			FOREIGN KEY(stream_id) REFERENCES streams(id)
+		)
+	`)
 	if err != nil {
 		fmt.Printf("error creating table: %v\n", err)
 		os.Exit(1)

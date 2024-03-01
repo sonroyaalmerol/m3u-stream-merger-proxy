@@ -12,6 +12,9 @@ import (
 
 // GetStreams retrieves and merges stream information from multiple M3U files.
 func GetStreams(skipClearing bool) error {
+	// Initialize database
+	init()
+
 	if !skipClearing {
 		// init
 		log.Println("Loading from database...")
