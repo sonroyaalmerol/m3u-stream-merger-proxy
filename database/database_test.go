@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 )
 
-func TestInitializeSQLite(t *testing.T) {
-	sqliteDBPath := filepath.Join(".", "data", "database.sqlite")
+func TestSaveAndLoadFromSQLite(t *testing.T) {
+    sqliteDBPath := filepath.Join(".", "data", "database.sqlite")
 
     // Test InitializeSQLite and check if the database file exists
     err := InitializeSQLite()
@@ -15,9 +15,7 @@ func TestInitializeSQLite(t *testing.T) {
         t.Errorf("InitializeSQLite returned error: %v", err)
     }
     defer os.Remove(sqliteDBPath) // Cleanup the database file after the test
-}
 
-func TestSaveAndLoadFromSQLite(t *testing.T) {
     // Test LoadFromSQLite with existing data in the database
     expected := []StreamInfo{{
         Title: "stream1",
@@ -38,7 +36,7 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
             M3UIndex: 2,
         }},
     }}
-    err := SaveToSQLite(expected) // Insert test data into the database
+    err = SaveToSQLite(expected) // Insert test data into the database
     if err != nil {
         t.Errorf("SaveToSQLite returned error: %v", err)
     }
