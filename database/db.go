@@ -20,7 +20,7 @@ func InitializeSQLite() error {
 		return fmt.Errorf("error creating data folder: %v\n", err)
 	}
 
-    err = os.Create(filename)
+    _, err = os.Create(filename)
 	if err != nil {
 		return fmt.Errorf("error creating database file: %v\n", err)
 	}
