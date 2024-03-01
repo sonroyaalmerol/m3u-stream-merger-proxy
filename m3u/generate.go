@@ -9,6 +9,10 @@ import (
 	"net/http"
 )
 
+func generateStreamURL(baseUrl string, title string) string {
+	return fmt.Sprintf("%s/%s.mp4\n", baseUrl, utils.GetStreamUID(title))
+}
+
 func GenerateM3UContent(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain") // Set the Content-Type header to M3U
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -34,7 +38,7 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Write stream URL
-		_, err = fmt.Fprintf(w, "%s/%s.mp4\n", baseUrl, utils.GetStreamUID(stream.Title))
+		_, err = fmt.Fprintf(w, "%s", generateStreamURL(baseUrl, stream.Title))
 		if err != nil {
 			continue
 		}
