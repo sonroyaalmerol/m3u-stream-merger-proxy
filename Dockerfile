@@ -14,7 +14,9 @@ RUN go mod download
 COPY . .
 
 # Build the Go app
-RUN go build -o main .
+ENV CGO_ENABLED=1
+RUN apk add --no-cache gcc musl-dev
+RUN go build -ldflags='-s -w -extldflags "-static"' -o main .
 
 # Run tests
 RUN go test ./...
