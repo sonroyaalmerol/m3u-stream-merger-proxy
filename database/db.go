@@ -3,7 +3,6 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -45,6 +44,8 @@ func InitializeSQLite() error {
 	if err != nil {
 		return fmt.Errorf("error creating table: %v\n", err)
 	}
+
+	return nil
 }
 
 func SaveToSQLite(streams []StreamInfo) error {
