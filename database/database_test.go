@@ -23,8 +23,8 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
         Group: "test",
         URLs: []StreamURL{{
             Content: "testing",
-            M3UIndex: 1
-        }}
+            M3UIndex: 1,
+        }},
     }, {
         Title: "stream2"
         TvgID: "test2",
@@ -32,8 +32,8 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
         Group: "test2",
         URLs: []StreamURL{{
             Content: "testing2",
-            M3UIndex: 2
-        }}
+            M3UIndex: 2,
+        }},
     }}
     err = SaveToSQLite(expected) // Insert test data into the database
     if err != nil {
