@@ -1,4 +1,4 @@
-package m3u
+package database
 
 type StreamInfo struct {
 	Title   string

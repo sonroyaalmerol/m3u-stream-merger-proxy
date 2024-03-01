@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"m3u-stream-merger/utils"
+	"m3u-stream-merger/database"
 	"net/http"
 )
 
@@ -40,12 +41,12 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func FindStreamByName(streamName string) (*StreamInfo, error) {
+func FindStreamByName(streamName string) (*database.StreamInfo, error) {
 	for _, s := range Streams {
 		if s.Title == streamName {
 			return &s, nil
 		}
 	}
 
-	return &StreamInfo{}, errors.New("stream not found")
+	return &database.StreamInfo{}, errors.New("stream not found")
 }

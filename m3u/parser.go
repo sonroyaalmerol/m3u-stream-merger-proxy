@@ -8,22 +8,30 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"m3u-stream-merger/database"
 )
 
 // GetStreams retrieves and merges stream information from multiple M3U files.
 func GetStreams(skipClearing bool) error {
+	// Initialize database
+	err := database.InitializeSQLite()
+	if err != nil {
+		return fmt.Errorf("InitializeSQLite error: %v", err)
+	}
+
 	if !skipClearing {
 		// init
-		log.Println("Loading from JSON...")
-		fromJson, err := loadFromJSON()
+		log.Println("Loading from database...")
+		fromDB, err := database.LoadFromSQLite()
 		if err == nil {
-			Streams = fromJson
+			Streams = fromDB 
 
 			return nil
 		}
 	}
 
-	err := loadM3UFiles(skipClearing)
+	err = loadM3UFiles(skipClearing)
 	if err != nil {
 		return fmt.Errorf("loadM3UFiles error: %v", err)
 	}
@@ -60,20 +68,20 @@ func GetStreams(skipClearing bool) error {
 
 	Streams = NewStreams
 
-	fmt.Print("Saving to JSON...\n")
-	_ = saveToJSON(Streams)
+	fmt.Print("Saving to database...\n")
+	_ = database.SaveToSQLite(Streams)
 
 	return nil
 }
 
-// mergeStreamInfo merges two slices of StreamInfo based on Title.
-func mergeStreamInfo(existing, new []StreamInfo) []StreamInfo {
+// mergeStreamInfo merges two slices of database.StreamInfo based on Title.
+func mergeStreamInfo(existing, new []database.StreamInfo) []database.StreamInfo {
 	var wg sync.WaitGroup
 	var mutex sync.Mutex
 
 	for _, stream := range new {
 		wg.Add(1)
-		go func(s StreamInfo) {
+		go func(s database.StreamInfo) {
 			defer wg.Done()
 			mutex.Lock()
 			defer mutex.Unlock()
@@ -95,9 +103,9 @@ func mergeStreamInfo(existing, new []StreamInfo) []StreamInfo {
 	return existing
 }
 
-func parseM3UFile(filePath string, m3uIndex int) ([]StreamInfo, error) {
+func parseM3UFile(filePath string, m3uIndex int) ([]database.StreamInfo, error) {
 	fmt.Printf("Parsing: %s\n", filePath)
-	var streams []StreamInfo
+	var streams []database.StreamInfo
 
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -107,13 +115,13 @@ func parseM3UFile(filePath string, m3uIndex int) ([]StreamInfo, error) {
 
 	scanner := bufio.NewScanner(file)
 
-	var currentStream StreamInfo
+	var currentStream database.StreamInfo
 
 	for scanner.Scan() {
 		line := scanner.Text()
 
 		if strings.HasPrefix(line, "#EXTINF:") {
-			currentStream = StreamInfo{}
+			currentStream = database.StreamInfo{}
 
 			// Define a regular expression to capture key-value pairs
 			regex := regexp.MustCompile(`(\S+?)="([^"]*?)"`)
@@ -144,7 +152,7 @@ func parseM3UFile(filePath string, m3uIndex int) ([]StreamInfo, error) {
 			}
 		} else if strings.HasPrefix(line, "http") {
 			// Extract URL
-			currentStream.URLs = []StreamURL{
+			currentStream.URLs = []database.StreamURL{
 				{
 					Content:  line,
 					M3UIndex: m3uIndex,
