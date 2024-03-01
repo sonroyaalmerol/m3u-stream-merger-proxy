@@ -3,9 +3,12 @@ package database
 import (
     "testing"
     "os"
+	"path/filepath"
 )
 
 func TestInitializeSQLite(t *testing.T) {
+	sqliteDBPath := filepath.Join(".", "data", "database.sqlite")
+
     // Test InitializeSQLite and check if the database file exists
     err := InitializeSQLite()
     if err != nil {
