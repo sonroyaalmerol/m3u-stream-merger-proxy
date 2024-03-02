@@ -9,9 +9,9 @@ If your IPTV provider issues multiple M3U links for each connection, but you pre
 ## How It Works
 
 1. **Initialization and M3U Playlist Consolidation:**
-   - On startup, the service loads M3U playlists from the specified URLs (M3U_URL_1, M3U_URL_2, M3U_URL_3, etc.). This usually takes a while, depending on the size of the original M3U files as it goes through each entry. The parsing process will be done in the background.
+   - On startup, the service loads M3U playlists from the specified URLs (M3U_URL_1, M3U_URL_2, M3U_URL_3, etc.). This usually takes a while, depending on the size of the original M3U files as it goes through each entry. The parsing process will be done in the background. As soon as a stream gets parsed, it will automatically show up in `/playlist.m3u`.
    - It consolidates the playlists by merging different streams based on their stream name.
-   - The consolidated data will be saved in a JSON file in the data folder which will serve as its "database."
+   - The consolidated data will be saved in a database within the data folder.
    - For each unique stream name, the service aggregates the corresponding stream URLs into a consolidated M3U playlist.
 
 2. **HTTP Endpoints:**
@@ -28,6 +28,7 @@ If your IPTV provider issues multiple M3U links for each connection, but you pre
 4. **Periodic Updates:**
    - To ensure up-to-date stream information, the service periodically refreshes the M3U playlists at a specified interval (default is 24 hours).
    - This ensures that new streams or changes in the source M3U playlists are reflected in the consolidated playlist.
+   - Updates are done in the background and will ensure 100% uptime.
 
 5. **Error Handling:**
    - If all stream URLs fail to provide a valid MP4 stream, the service logs the error and responds with an appropriate error message to the client.
