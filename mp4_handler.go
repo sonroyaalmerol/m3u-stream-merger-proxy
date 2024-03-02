@@ -57,6 +57,8 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 	// Iterate through the streams and select one based on concurrency and availability
 	var selectedUrl *database.StreamURL
+
+	// Concurrency check mode
 	for _, url := range stream.URLs {
 		if checkConcurrency(ctx, url.Content, url.MaxConcurrency) {
 			continue // Skip this stream if concurrency limit reached
@@ -70,22 +72,35 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		}
 
 		// Log the error
-		log.Printf("Error fetching MP4 stream: %s\n", err.Error())
+		log.Printf("Error fetching MP4 stream (concurrency check mode): %s\n", err.Error())
 	}
 
 	if selectedUrl == nil {
-		// Log the error
-		log.Println("Error fetching MP4 stream. Exhausted all streams.")
-		// Check if the connection is still open before writing to the response
-		select {
-		case <-r.Context().Done():
-			// Connection closed, handle accordingly
-			log.Println("Client disconnected")
-			return
-		default:
-			// Connection still open, proceed with writing to the response
-			http.Error(w, "Error fetching MP4 stream. Exhausted all streams.", http.StatusInternalServerError)
-			return
+		// Connection check mode
+		for _, url := range stream.URLs {
+			resp, err = http.Get(url.Content)
+			if err == nil {
+				updateConcurrency(ctx, url.Content, true)
+				break
+			}
+			// Log the error
+			log.Printf("Error fetching MP4 stream (connection check mode): %s\n", err.Error())
+		}
+
+		if resp == nil {
+			// Log the error
+			log.Println("Error fetching MP4 stream. Exhausted all streams.")
+			// Check if the connection is still open before writing to the response
+			select {
+			case <-r.Context().Done():
+				// Connection closed, handle accordingly
+				log.Println("Client disconnected")
+				return
+			default:
+				// Connection still open, proceed with writing to the response
+				http.Error(w, "Error fetching MP4 stream. Exhausted all streams.", http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 
