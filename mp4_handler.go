@@ -55,6 +55,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Iterate through the streams and select one based on concurrency and availability
+	var selectedUrl *database.StreamURL
 	for _, url := range stream.URLs {
 		if checkConcurrency(ctx, url.Content, url.MaxConcurrency) {
 			continue // Skip this stream if concurrency limit reached
@@ -62,7 +63,8 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 
 		resp, err = http.Get(url.Content)
 		if err == nil {
-			updateConcurrency(ctx, url.Content)
+			selectedUrl = &url
+			updateConcurrency(ctx, url.Content, true)
 			break
 		}
 
@@ -70,7 +72,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error fetching MP4 stream: %s\n", err.Error())
 	}
 
-	if resp == nil {
+	if selectedUrl == nil {
 		// Log the error
 		log.Println("Error fetching MP4 stream. Exhausted all streams.")
 		// Check if the connection is still open before writing to the response
@@ -94,6 +96,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 	case <-r.Context().Done():
 		// Connection closed, handle accordingly
 		log.Println("Client disconnected after fetching MP4 stream")
+		updateConcurrency(ctx, selectedUrl.Content, false)
 		return
 	default:
 		// Connection still open, proceed with writing to the response
@@ -102,6 +105,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 			// Log the error
 			if errors.Is(err, syscall.EPIPE) {
 				log.Println("Client disconnected after fetching MP4 stream")
+				updateConcurrency(ctx, selectedUrl.Content, false)
 			} else {
 				log.Printf("Error copying MP4 stream to response: %s\n", err.Error())
 			}
@@ -124,9 +128,14 @@ func checkConcurrency(ctx context.Context, url string, maxConcurrency int) bool 
 	return count >= maxConcurrency
 }
 
-func updateConcurrency(ctx context.Context, url string) {
+func updateConcurrency(ctx context.Context, url string, incr bool) {
 	redisClient := database.InitializeRedis()
-	err := redisClient.Incr(ctx, url).Err()
+	var err error
+	if incr {
+		err = redisClient.Incr(ctx, url).Err()
+	} else {
+		err = redisClient.Decr(ctx, url).Err()
+	}
 	if err != nil {
 		log.Printf("Error updating concurrency: %s\n", err.Error())
 	}
