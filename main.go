@@ -59,13 +59,6 @@ func updateSources(ctx context.Context) {
 				log.Fatalf("Error initializing next SQLite database: %v", err)
 			}
 
-			if db == nil {
-				db, err = database.InitializeSQLite("current_streams")
-				if err != nil {
-					log.Fatalf("Error initializing current SQLite database: %v", err)
-				}
-			}
-
 			log.Println("Background process: Checking M3U_URLs...")
 			var wg sync.WaitGroup
 			index := 1
@@ -131,6 +124,11 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	db, err := database.InitializeSQLite("current_streams")
+	if err != nil {
+		log.Fatalf("Error initializing current SQLite database: %v", err)
+	}
+
 	redisClient := database.InitializeRedis()
 	if err := redisClient.Ping(context.Background()).Err(); err != nil {
 		log.Fatalf("Failed to connect to Redis: %s\n", err)
@@ -150,7 +148,7 @@ func main() {
 	log.Println("Server is running on port 8080...")
 	log.Println("Playlist Endpoint is running (`/playlist.m3u`)")
 	log.Println("Stream Endpoint is running (`/stream/{streamID}.mp4`)")
-	err := http.ListenAndServe(":8080", nil)
+	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
 		log.Fatalf("HTTP server error: %v", err)
 	}
