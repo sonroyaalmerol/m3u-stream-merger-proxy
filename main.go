@@ -16,9 +16,7 @@ import (
 
 var db *sql.DB
 
-func swapDb(nextDb *sql.DB) error {
-	nextDb.Close()
-
+func swapDb() error {
 	err := database.DeleteSQLite(db, "current_streams")
 	if err != nil {
 		return fmt.Errorf("Error deleting current_streams: %v\n", err)
@@ -91,7 +89,7 @@ func updateSources(ctx context.Context) {
 			}
 			wg.Wait()
 
-			err = swapDb(nextDb)
+			err = swapDb()
 			if err != nil {
 				log.Fatalf("swapDb: %v", err)
 			}
