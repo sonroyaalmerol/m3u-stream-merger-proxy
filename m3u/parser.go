@@ -43,10 +43,17 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		extInfLine := ""
 
 		if strings.HasPrefix(line, "#EXTINF:") {
 			currentStream = database.StreamInfo{}
-			currentStream.Title = strings.TrimSpace(strings.SplitN(line, ",", 2)[1])
+
+			lineCommaSplit := strings.SplitN(line, ",", 2)
+			extInfLine = line
+
+			if len(lineCommaSplit) > 1 {
+				currentStream.Title = strings.TrimSpace(lineCommaSplit[1])
+			}
 
 			// Define a regular expression to capture key-value pairs
 			regex := regexp.MustCompile(`(\S+?)="([^"]*?)"`)
@@ -61,6 +68,10 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 				switch key {
 				case "tvg-id":
 					currentStream.TvgID = value
+				case "tvg-name":
+					if len(strings.TrimSpace(currentStream.Title)) == 0 {
+						currentStream.Title = value
+					}
 				case "group-title":
 					currentStream.Group = value
 				case "tvg-logo":
@@ -74,6 +85,10 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 				currentStream.LogoURL = parts[1]
 			}
 		} else if strings.HasPrefix(line, "http") {
+			if len(strings.TrimSpace(currentStream.Title)) == 0 {
+				log.Printf("Error capturing title, line will be skipped: %s\n", extInfLine)
+			}
+
 			existingStream, err := database.GetStreamByTitle(db, currentStream.Title)
 			if err != nil {
 				return fmt.Errorf("GetStreamByTitle error (title: %s): %v", currentStream.Title, err)
