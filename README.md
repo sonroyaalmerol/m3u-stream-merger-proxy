@@ -1,45 +1,43 @@
-# M3U Stream Merger Proxy
+# 📡 M3U Stream Merger Proxy
 
-This service provides a simple HTTP proxy server for merging and streaming MP4 content from multiple M3U playlists. It acts as a proxy, consolidating streams from different M3U sources, effectively serving as a load balancer. The service is dockerized for easy deployment, and it periodically updates its M3U playlists to ensure the latest streams are available.
+Streamline your IPTV experience by consolidating multiple M3U playlists into a single source with the M3U Stream Merger Proxy. This service acts as a modern HTTP proxy server, effortlessly merging and streaming MP4 content from various M3U sources. Dockerized for seamless deployment, it ensures the latest streams are always available.
 
-## Use Case: Consolidating Multiple IPTV Connections
+## Simplify Your IPTV Setup
 
-If your IPTV provider issues multiple M3U links for each connection, but you prefer to consolidate them into a single URL for convenience, the M3U Stream Merger Proxy can help. Follow the steps below to simplify your IPTV setup:
+If you're tired of managing multiple IPTV connections with separate M3U links, this proxy is the solution you need. Follow the steps below to simplify your IPTV setup:
 
 ## How It Works
 
 1. **Initialization and M3U Playlist Consolidation:**
-   - On startup, the service loads M3U playlists from the specified URLs (M3U_URL_1, M3U_URL_2, M3U_URL_3, etc.). This usually takes a while, depending on the size of the original M3U files as it goes through each entry. The parsing process will be done in the background. As soon as a stream gets parsed, it will automatically show up in `/playlist.m3u`.
-   - It consolidates the playlists by merging different streams based on their stream name.
-   - The consolidated data will be saved in a database within the data folder.
-   - For each unique stream name, the service aggregates the corresponding stream URLs into a consolidated M3U playlist.
+   - On startup, the service loads M3U playlists from specified URLs, consolidating streams into `/playlist.m3u`.
+   - The consolidation process merges streams based on their names and saves them in a database.
+   - Each unique stream name aggregates corresponding URLs into the consolidated playlist.
 
 2. **HTTP Endpoints:**
    - **Playlist Endpoint (`/playlist.m3u`):**
-     - Accessing this endpoint returns the merged M3U playlist containing streams consolidated from different sources.
+     - Access the merged M3U playlist containing streams from different sources.
 
    - **Stream Endpoint (`/stream/{streamID}.mp4`):**
-     - When a client requests an MP4 stream for a specific stream ID, the service fetches the corresponding stream URL from the consolidated M3U playlist.
+     - Request MP4 streams for specific stream IDs.
 
 3. **Load Balancing:**
-   - The service employs a simple load-balancing strategy by cycling through the available stream URLs for a particular stream ID.
-   - It attempts to fetch the MP4 stream from each URL until a successful connection is established or all URLs are exhausted.
+   - The service employs load balancing by cycling through available stream URLs.
+   - Users can set max concurrency per stream URLs for optimized performance.
 
 4. **Periodic Updates:**
-   - To ensure up-to-date stream information, the service periodically refreshes the M3U playlists at a specified interval (default is 24 hours).
-   - This ensures that new streams or changes in the source M3U playlists are reflected in the consolidated playlist.
-   - Updates are done in the background and will ensure 100% uptime.
+   - Refreshes M3U playlists at specified intervals to ensure up-to-date stream information.
+   - Updates run in the background with no downtime.
 
 5. **Error Handling:**
-   - If all stream URLs fail to provide a valid MP4 stream, the service logs the error and responds with an appropriate error message to the client.
-   - It handles client disconnections during the streaming process and avoids unnecessary resource usage.
+   - Logs errors if all stream URLs fail to provide valid MP4 streams.
+   - Handles client disconnections during streaming to conserve resources.
 
 6. **Proxy Functionality:**
-   - The M3U Stream Merger Proxy acts as a proxy server, abstracting the complexity of managing multiple M3U sources from clients.
-   - Clients can interact with a single endpoint (`/stream/{streamID}.mp4`) while benefiting from the aggregated streams behind the scenes.
+   - Abstracts complexity for clients, allowing interaction with a single endpoint.
+   - Aggregates streams behind the scenes for a seamless user experience.
 
 7. **Customization:**
-   - Users can customize the service by modifying the M3U URLs, update interval, and other configuration options in the `.env` file.
+   - Modify M3U URLs, update intervals, and other configurations in the `.env` file.
 
 ### Prerequisites
 
@@ -47,7 +45,7 @@ If your IPTV provider issues multiple M3U links for each connection, but you pre
 
 ### Docker Compose
 
-Use the provided `docker-compose.yml` file to deploy the M3U Stream Merger Proxy:
+Deploy with ease using the provided `docker-compose.yml`:
 
 ```yaml
 version: '3'
@@ -68,30 +66,31 @@ services:
 
 1. Create a `.env` file with the M3U URLs as mentioned above.
 
-2. Run the following command:
+2. Run:
 
    ```bash
    docker-compose up -d
    ```
 
-This will start the M3U Stream Merger Proxy, and you can access it at `http://localhost:8080`.
+Access the proxy at `http://localhost:8080`.
 
 ### Configuration
 
-- **M3U_URL_1, M3U_URL_2, M3U_URL_X**: Set the M3U URLs as environment variables in the `.env` file.
+- **M3U_URL_1, M3U_URL_2, M3U_URL_X**: Set M3U URLs as environment variables.
 
-- **USER_AGENT**: Set the User-Agent of all HTTP requests. Default is `IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)`.
+- **M3U_MAX_CONCURRENCY_1, M3U_MAX_CONCURRENCY_2, M3U_MAX_CONCURRENCY_X**: Set max concurrency.
 
-- **UPDATE_INTERVAL**: (Optional) Set the update interval in hours. Default is 24 hours.
+- **USER_AGENT**: Set the User-Agent of HTTP requests.
+
+- **UPDATE_INTERVAL**: Set the update interval in hours.
 
 ### Endpoints
 
 - `/playlist.m3u`: Get the merged M3U playlist.
 
-- `/stream/{streamID}.mp4`: Stream the MP4 content for the specified stream ID.
+- `/stream/{streamID}.mp4`: Stream MP4 content for specified stream IDs.
 
 ### Data Persistence
 
-The service uses a volume (`./data`) to persist M3U files. You can customize this volume path in the `docker-compose.yml` file if needed.
+Utilizes a volume (`./data`) for M3U file persistence. Customize the volume path in `docker-compose.yml` if needed.
 
-Feel free to explore and modify the service according to your requirements! The M3U Stream Merger Proxy essentially acts as a proxy and load balancer between the provided M3U sources.
