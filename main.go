@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"m3u-stream-merger/database"
 	"m3u-stream-merger/m3u"
 	"m3u-stream-merger/utils"
 	"net/http"
@@ -33,7 +34,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stream, err := m3u.FindStreamByName(streamName)
+	stream, err := database.GetStreamByTitle(streamName)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -119,22 +120,15 @@ func updateSource(ctx context.Context) {
 			}
 
 			// Reload M3U files
-			err = m3u.GetStreams(true)
-			if err != nil {
-				fmt.Printf("Error updating M3U: %v\n", err)
-			}
+			// err = m3u.GetStreams(true)
+			// if err != nil {
+			// 	fmt.Printf("Error updating M3U: %v\n", err)
+			// }
 		}
 	}
 }
 
 func main() {
-	// Initial load of M3U files
-	err := m3u.GetStreams(false)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
-	}
-
 	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
