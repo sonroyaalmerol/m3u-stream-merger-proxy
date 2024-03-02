@@ -16,9 +16,7 @@ import (
 
 var db *sql.DB
 
-func swapDb(nextDb *sql.DB) error {
-	nextDb.Close()
-
+func swapDb() error {
 	err := database.DeleteSQLite(db, "current_streams")
 	if err != nil {
 		return fmt.Errorf("Error deleting current_streams: %v\n", err)
@@ -82,16 +80,16 @@ func updateSources(ctx context.Context) {
 				log.Printf("Background process: Fetching M3U_URL_%d...\n", index)
 				wg.Add(1)
 				// Start the goroutine for periodic updates
-				go func() {
+				go func(nextDb *sql.DB, m3uUrl string, index int, maxConcurrency int) {
 					defer wg.Done()
 					updateSource(nextDb, m3uUrl, index, maxConcurrency)
-				}()
+				}(nextDb, m3uUrl, index, maxConcurrency)
 
 				index++
 			}
 			wg.Wait()
 
-			err = swapDb(nextDb)
+			err = swapDb()
 			if err != nil {
 				log.Fatalf("swapDb: %v", err)
 			}
