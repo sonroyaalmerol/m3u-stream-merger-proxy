@@ -36,8 +36,8 @@ func parseM3UFile(filePath string, m3uIndex int) (error) {
 			matches := regex.FindAllStringSubmatch(line, -1)
 
 			for _, match := range matches {
-				key := match[1]
-				value := match[2]
+				key := strings.TrimSpace(match[1])
+				value := strings.TrimSpace(match[2])
 
 				switch key {
 				case "tvg-id":
@@ -64,10 +64,12 @@ func parseM3UFile(filePath string, m3uIndex int) (error) {
 					M3UIndex: m3uIndex,
 				},
 			}
-
-      err = database.InsertStream(currentStream)
-      if err != nil {
-		    return fmt.Errorf("InsertStream error: %v", err)
+      
+      if currentStream.Title != "" {
+        err = database.InsertStream(currentStream)
+        if err != nil {
+          return fmt.Errorf("InsertStream error: %v", err)
+        }
       }
 		}
 	}

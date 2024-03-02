@@ -113,7 +113,6 @@ http://example.com/channel3
 	expectedStreams := []database.StreamInfo{
 		{URLs: []database.StreamURL{{Content: "http://example.com/channel1", M3UIndex: 0}}, TvgID: "channel1", Title: "Channel 1", Group: "Group 1", LogoURL: "logo1.jpg"},
 		{URLs: []database.StreamURL{{Content: "http://example.com/channel2", M3UIndex: 0}}, TvgID: "channel2", Title: "Channel 2", Group: "Group 2", LogoURL: "logo2.jpg"},
-		{URLs: []database.StreamURL{{Content: "http://example.com/channel3", M3UIndex: 0}}, LogoURL: "http://example.com/logo3.jpg"},
 	}
 
 	// Retrieve streams from the database
