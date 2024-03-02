@@ -41,7 +41,7 @@ func updateSource(nextDb *sql.DB, m3uUrl string, index int, maxConcurrency int) 
 	log.Printf("Background process: Updating M3U #%d from %s\n", index, m3uUrl)
 	err := m3u.ParseM3UFromURL(nextDb, m3uUrl, index, maxConcurrency)
 	if err != nil {
-		log.Printf("Error updating M3U: %v\n", err)
+		log.Printf("Background process: Error updating M3U: %v\n", err)
 	} else {
 		log.Printf("Background process: Updated M3U #%d from %s\n", index, m3uUrl)
 	}
