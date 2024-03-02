@@ -79,6 +79,8 @@ This will start the M3U Stream Merger Proxy, and you can access it at `http://lo
 
 - **M3U_URL_1, M3U_URL_2, M3U_URL_X**: Set the M3U URLs as environment variables in the `.env` file.
 
+- **USER_AGENT**: Set the User-Agent of all HTTP requests. Default is `IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)`.
+
 - **UPDATE_INTERVAL**: (Optional) Set the update interval in hours. Default is 24 hours.
 
 ### Endpoints

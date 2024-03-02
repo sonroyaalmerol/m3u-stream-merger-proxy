@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 
@@ -12,7 +13,10 @@ import (
 
 func ParseM3UFromURL(m3uURL string, m3uIndex int) (error) {
 	// Set the custom User-Agent header
-	userAgent := "IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)"
+	userAgent, userAgentExists := os.LookupEnv("USER_AGENT")
+  if !userAgentExists {
+	  userAgent = "IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)"
+  }
 
 	// Create a new HTTP client with a custom User-Agent header
 	client := &http.Client{
