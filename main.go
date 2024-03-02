@@ -16,13 +16,13 @@ func updateSource(ctx context.Context, m3uUrl string, index int) {
 		case <-ctx.Done():
 			return
 		default:
-      fmt.Printf("Updating M3U #%s from %d\n", m3uUrl, index)
+      fmt.Printf("Background process: Updating M3U #%s from %d\n", m3uUrl, index)
       err := m3u.ParseM3UFromURL(m3uUrl, index)
       if err != nil {
 			  fmt.Printf("Error updating M3U: %v\n", err)
       }
 
-      fmt.Printf("Updated M3U #%s from %d\n", m3uUrl, index)
+      fmt.Printf("Background process: Updated M3U #%s from %d\n", m3uUrl, index)
 
 			updateIntervalInHour, exists := os.LookupEnv("UPDATE_INTERVAL")
 			if !exists {
@@ -63,5 +63,7 @@ func main() {
 
 	// Start the server
 	fmt.Println("Server is running on port 8080...")
+  fmt.Println("Playlist Endpoint is running (`/playlist.m3u`)")
+  fmt.Println("Stream Endpoint is running (`/stream/{streamID}.mp4`)")
 	http.ListenAndServe(":8080", nil)
 }
