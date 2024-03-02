@@ -87,6 +87,7 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 		} else if strings.HasPrefix(line, "http") {
 			if len(strings.TrimSpace(currentStream.Title)) == 0 {
 				log.Printf("Error capturing title, line will be skipped: %s\n", extInfLine)
+				continue
 			}
 
 			existingStream, err := database.GetStreamByTitle(db, currentStream.Title)
