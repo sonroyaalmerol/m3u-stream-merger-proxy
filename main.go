@@ -17,19 +17,46 @@ import (
 var db *sql.DB
 
 func swapDb() error {
-	err := database.DeleteSQLite(db, "current_streams")
+	// Generate a unique temporary name
+	tempName := fmt.Sprintf("temp_%d", time.Now().UnixNano())
+
+	// Rename the current database to a temporary name
+	err := database.RenameSQLite("current_streams", tempName)
 	if err != nil {
-		return fmt.Errorf("Error deleting current_streams: %v\n", err)
+		return fmt.Errorf("Error renaming current_streams to temp: %v\n", err)
 	}
 
+	// Rename the next database to current
 	err = database.RenameSQLite("next_streams", "current_streams")
 	if err != nil {
-		return fmt.Errorf("Error renaming to current_streams: %v\n", err)
+		// If renaming fails, revert the previous renaming to maintain consistency
+		revertErr := database.RenameSQLite(tempName, "current_streams")
+		if revertErr != nil {
+			return fmt.Errorf("Error renaming back to current_streams: %v\n", revertErr)
+		}
+		return fmt.Errorf("Error renaming next_streams to current_streams: %v\n", err)
 	}
 
+	// Initialize the new current database
 	db, err = database.InitializeSQLite("current_streams")
 	if err != nil {
-		return fmt.Errorf("Error reinitializing to current_streams: %v\n", err)
+		// If initialization fails, revert both renamings
+		revertErr := database.RenameSQLite(tempName, "current_streams")
+		if revertErr != nil {
+			return fmt.Errorf("Error renaming back to current_streams: %v\n", revertErr)
+		}
+		revertErr = database.RenameSQLite("current_streams", "next_streams")
+		if revertErr != nil {
+			return fmt.Errorf("Error renaming back to next_streams: %v\n", revertErr)
+		}
+		return fmt.Errorf("Error initializing current_streams: %v\n", err)
+	}
+
+	// Delete the temporary database
+	err = database.DeleteSQLite(db, tempName)
+	if err != nil {
+		// Log the error but do not return as this is not a critical error
+		fmt.Printf("Error deleting temp database: %v\n", err)
 	}
 
 	return nil
