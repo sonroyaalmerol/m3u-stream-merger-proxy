@@ -1,18 +1,25 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/utils"
 	"net/http"
+	"strconv"
 	"strings"
-	"sync"
 	"syscall"
+
+	"github.com/redis/go-redis/v9"
 )
 
 func mp4Handler(w http.ResponseWriter, r *http.Request) {
+	// Create a context with cancellation capability
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
 	// Log the incoming request
 	log.Printf("Received request from %s for URL: %s\n", r.RemoteAddr, r.URL.Path)
 
@@ -41,51 +48,26 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	var resp *http.Response
-	var mutex sync.Mutex
 	defer func() {
-		mutex.Lock()
 		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
 		}
-		mutex.Unlock()
 	}()
 
-	// Concurrently handle each stream URL
-	var wg sync.WaitGroup
+	// Iterate through the streams and select one based on concurrency and availability
 	for _, url := range stream.URLs {
-		wg.Add(1)
-		go func(url database.StreamURL) {
-			defer wg.Done()
+		if checkConcurrency(ctx, url.Content, url.MaxConcurrency) {
+			continue // Skip this stream if concurrency limit reached
+		}
 
-			// Ensure that the maximum concurrency is respected
-			semaphore := make(chan struct{}, url.MaxConcurrency)
-			semaphore <- struct{}{}
+		resp, err = http.Get(url.Content)
+		if err == nil {
+			updateConcurrency(ctx, url.Content)
+			break
+		}
 
-			mutex.Lock()
-			defer mutex.Unlock()
-
-			// If there's already a successful response, return immediately
-			if resp != nil {
-				return
-			}
-
-			// Wait for permission from the semaphore before making the request
-			<-semaphore
-			defer func() {
-				semaphore <- struct{}{}
-			}()
-
-			// Make the request
-			response, err := http.Get(url.Content)
-			if err != nil {
-				// Log the error
-				log.Printf("Error fetching MP4 stream: %s\n", err.Error())
-				return
-			}
-
-			// Set the response if successful
-			resp = response
-		}(url)
+		// Log the error
+		log.Printf("Error fetching MP4 stream: %s\n", err.Error())
 	}
 
 	if resp == nil {
@@ -125,5 +107,27 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+	}
+}
+
+func checkConcurrency(ctx context.Context, url string, maxConcurrency int) bool {
+	redisClient := database.InitializeRedis()
+	val, err := redisClient.Get(ctx, url).Result()
+	if err == redis.Nil {
+		return false // Key does not exist
+	} else if err != nil {
+		log.Printf("Error checking concurrency: %s\n", err.Error())
+		return false // Error occurred, treat as concurrency not reached
+	}
+
+	count, _ := strconv.Atoi(val)
+	return count >= maxConcurrency
+}
+
+func updateConcurrency(ctx context.Context, url string) {
+	redisClient := database.InitializeRedis()
+	err := redisClient.Incr(ctx, url).Err()
+	if err != nil {
+		log.Printf("Error updating concurrency: %s\n", err.Error())
 	}
 }
