@@ -88,7 +88,7 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 					return fmt.Errorf("InsertStream error (title: %s): %v", currentStream.Title, err)
 				}
 			} else {
-				log.Printf("Using existing database entry: %s", currentStream.Title)
+				log.Printf("Using existing database entry: %s", existingStream.Title)
 				dbId = existingStream.DbId
 			}
 
