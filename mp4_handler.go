@@ -80,6 +80,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		for _, url := range stream.URLs {
 			resp, err = http.Get(url.Content)
 			if err == nil {
+				selectedUrl = &url
 				updateConcurrency(ctx, url.Content, true)
 				break
 			}
