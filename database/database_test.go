@@ -1,20 +1,16 @@
 package database
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 )
 
 func TestSaveAndLoadFromSQLite(t *testing.T) {
-	sqliteDBPath := filepath.Join(".", "data", "database.sqlite")
-
 	// Test InitializeSQLite and check if the database file exists
-	err := InitializeSQLite()
+	db, err := InitializeSQLite("test")
 	if err != nil {
 		t.Errorf("InitializeSQLite returned error: %v", err)
 	}
-	defer os.Remove(sqliteDBPath) // Cleanup the database file after the test
+	defer DeleteSQLite(db, "test")
 
 	// Test LoadFromSQLite with existing data in the database
 	expected := []StreamInfo{{
@@ -36,12 +32,13 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 			M3UIndex: 2,
 		}},
 	}}
-	err = SaveToSQLite(expected) // Insert test data into the database
+
+	err = SaveToSQLite(db, expected) // Insert test data into the database
 	if err != nil {
 		t.Errorf("SaveToSQLite returned error: %v", err)
 	}
 
-	result, err := GetStreams()
+	result, err := GetStreams(db)
 	if err != nil {
 		t.Errorf("GetStreams returned error: %v", err)
 	}
@@ -56,12 +53,12 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 		}
 	}
 
-	err = DeleteStreamByTitle(expected[1].Title)
+	err = DeleteStreamByTitle(db, expected[1].Title)
 	if err != nil {
 		t.Errorf("DeleteStreamByTitle returned error: %v", err)
 	}
 
-	result, err = GetStreams()
+	result, err = GetStreams(db)
 	if err != nil {
 		t.Errorf("GetStreams returned error: %v", err)
 	}

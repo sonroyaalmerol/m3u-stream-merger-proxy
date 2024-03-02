@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"m3u-stream-merger/database"
@@ -21,16 +19,14 @@ func TestGenerateM3UContent(t *testing.T) {
 		URLs:    []database.StreamURL{{Content: "http://example.com/stream"}},
 	}
 
-	sqliteDBPath := filepath.Join(".", "data", "database.sqlite")
-
 	// Test InitializeSQLite and check if the database file exists
-	err := database.InitializeSQLite()
+	db, err := database.InitializeSQLite("test")
 	if err != nil {
 		t.Errorf("InitializeSQLite returned error: %v", err)
 	}
-	defer os.Remove(sqliteDBPath) // Cleanup the database file after the test
+	defer database.DeleteSQLite(db, "test")
 
-	_, err = database.InsertStream(stream)
+	_, err = database.InsertStream(db, stream)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,14 +87,12 @@ http://example.com/fox
 	}))
 	defer mockServer.Close()
 
-	sqliteDBPath := filepath.Join(".", "data", "database.sqlite")
-
 	// Test InitializeSQLite and check if the database file exists
-	err := database.InitializeSQLite()
+	db, err := database.InitializeSQLite("test")
 	if err != nil {
 		t.Errorf("InitializeSQLite returned error: %v", err)
 	}
-	defer os.Remove(sqliteDBPath) // Cleanup the database file after the test
+	defer database.DeleteSQLite(db, "test")
 
 	// Test the parseM3UFromURL function with the mock server URL
 	err = ParseM3UFromURL(mockServer.URL, 0, 1)
@@ -130,7 +124,7 @@ http://example.com/fox
 		}},
 	}
 
-	storedStreams, err := database.GetStreams()
+	storedStreams, err := database.GetStreams(db)
 	if err != nil {
 		t.Fatalf("Error retrieving streams from database: %v", err)
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"log"
@@ -15,7 +16,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func mp4Handler(w http.ResponseWriter, r *http.Request) {
+func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	// Create a context with cancellation capability
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -36,7 +37,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stream, err := database.GetStreamByTitle(streamName)
+	stream, err := database.GetStreamByTitle(db, streamName)
 	if err != nil {
 		http.NotFound(w, r)
 		return

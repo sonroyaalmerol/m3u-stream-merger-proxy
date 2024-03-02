@@ -2,6 +2,7 @@ package m3u
 
 import (
 	"bufio"
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,7 +13,7 @@ import (
 	"m3u-stream-merger/database"
 )
 
-func ParseM3UFromURL(m3uURL string, m3uIndex int, maxConcurrency int) error {
+func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int) error {
 	// Set the custom User-Agent header
 	userAgent, userAgentExists := os.LookupEnv("USER_AGENT")
 	if !userAgentExists {
@@ -74,14 +75,14 @@ func ParseM3UFromURL(m3uURL string, m3uIndex int, maxConcurrency int) error {
 				currentStream.LogoURL = parts[1]
 			}
 		} else if strings.HasPrefix(line, "http") {
-			existingStream, err := database.GetStreamByTitle(currentStream.Title)
+			existingStream, err := database.GetStreamByTitle(db, currentStream.Title)
 			if err != nil {
 				return fmt.Errorf("GetStreamByTitle error (title: %s): %v", currentStream.Title, err)
 			}
 
 			var dbId int64
 			if existingStream.Title != currentStream.Title {
-				dbId, err = database.InsertStream(currentStream)
+				dbId, err = database.InsertStream(db, currentStream)
 				if err != nil {
 					return fmt.Errorf("InsertStream error (title: %s): %v", currentStream.Title, err)
 				}
@@ -89,7 +90,7 @@ func ParseM3UFromURL(m3uURL string, m3uIndex int, maxConcurrency int) error {
 				dbId = existingStream.DbId
 			}
 
-			_, err = database.InsertStreamUrl(dbId, database.StreamURL{
+			_, err = database.InsertStreamUrl(db, dbId, database.StreamURL{
 				Content:        line,
 				M3UIndex:       m3uIndex,
 				MaxConcurrency: maxConcurrency,

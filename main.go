@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"m3u-stream-merger/database"
@@ -12,6 +13,8 @@ import (
 	"time"
 )
 
+var db *sql.DB
+
 func updateSource(ctx context.Context, m3uUrl string, index int, maxConcurrency int) {
 	for {
 		select {
@@ -19,7 +22,7 @@ func updateSource(ctx context.Context, m3uUrl string, index int, maxConcurrency 
 			return
 		default:
 			log.Printf("Background process: Updating M3U #%d from %s\n", index, m3uUrl)
-			err := m3u.ParseM3UFromURL(m3uUrl, index, maxConcurrency)
+			err := m3u.ParseM3UFromURL(db, m3uUrl, index, maxConcurrency)
 			if err != nil {
 				log.Printf("Error updating M3U: %v\n", err)
 			} else {
@@ -56,7 +59,7 @@ func main() {
 		log.Fatalf("Failed to connect to Redis: %s\n", err)
 	}
 
-	err := database.InitializeSQLite()
+	db, err := database.InitializeSQLite("current_streams")
 	if err != nil {
 		log.Fatalf("Error initializing SQLite database: %v", err)
 	}
@@ -86,7 +89,9 @@ func main() {
 
 	// HTTP handlers
 	http.HandleFunc("/playlist.m3u", m3u.GenerateM3UContent)
-	http.HandleFunc("/stream/", mp4Handler)
+	http.HandleFunc("/stream/", func(w http.ResponseWriter, r *http.Request) {
+		mp4Handler(w, r, db)
+	})
 
 	// Start the server
 	log.Println("Server is running on port 8080...")
