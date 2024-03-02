@@ -181,6 +181,66 @@ func InsertStreamUrl(id int64, url StreamURL) (i int64, err error) {
 	return insertedId, err
 }
 
+func DeleteStreamByTitle(title string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("error beginning transaction: %v", err)
+	}
+	defer func() {
+		if err != nil {
+			err = tx.Rollback()
+		}
+	}()
+
+	stmt, err := tx.Prepare("DELETE FROM streams WHERE title = ?")
+	if err != nil {
+		return fmt.Errorf("error preparing statement: %v", err)
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(title)
+	if err != nil {
+		return fmt.Errorf("error deleting stream: %v", err)
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return fmt.Errorf("error committing transaction: %v", err)
+	}
+
+	return nil
+}
+
+func DeleteStreamURL(streamURLID int64) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("error beginning transaction: %v", err)
+	}
+	defer func() {
+		if err != nil {
+			err = tx.Rollback()
+		}
+	}()
+
+	stmt, err := tx.Prepare("DELETE FROM stream_urls WHERE id = ?")
+	if err != nil {
+		return fmt.Errorf("error preparing statement: %v", err)
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(streamURLID)
+	if err != nil {
+		return fmt.Errorf("error deleting stream URL: %v", err)
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return fmt.Errorf("error committing transaction: %v", err)
+	}
+
+	return nil
+}
+
 func GetStreamByTitle(title string) (s StreamInfo, err error) {
 	rows, err := db.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams WHERE title = ?", title)
 	if err != nil {

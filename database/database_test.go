@@ -1,6 +1,7 @@
 package database
 
 import (
+	"m3u-stream-merger/database"
 	"os"
 	"path/filepath"
 	"testing"
@@ -43,10 +44,53 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 
 	result, err := GetStreams()
 	if err != nil {
-		t.Errorf("LoadFromSQLite returned error: %v", err)
+		t.Errorf("GetStreams returned error: %v", err)
 	}
 
 	if len(result) != len(expected) {
-		t.Errorf("LoadFromSQLite returned %+v, expected %+v", result, expected)
+		t.Errorf("GetStreams returned %+v, expected %+v", result, expected)
 	}
+
+	for i, expectedStream := range expected {
+		if !streamInfoEqual(result[i], expectedStream) {
+			t.Errorf("GetStreams returned %+v, expected %+v", result[i], expectedStream)
+		}
+	}
+
+	err = DeleteStreamByTitle(expected[1].Title)
+	if err != nil {
+		t.Errorf("DeleteStreamByTitle returned error: %v", err)
+	}
+
+	result, err = GetStreams()
+	if err != nil {
+		t.Errorf("GetStreams returned error: %v", err)
+	}
+
+	expected = expected[:1]
+
+	if len(result) != len(expected) {
+		t.Errorf("GetStreams returned %+v, expected %+v", result, expected)
+	}
+
+	for i, expectedStream := range expected {
+		if !streamInfoEqual(result[i], expectedStream) {
+			t.Errorf("GetStreams returned %+v, expected %+v", result[i], expectedStream)
+		}
+	}
+}
+
+// streamInfoEqual checks if two StreamInfo objects are equal.
+func streamInfoEqual(a, b database.StreamInfo) bool {
+	if a.TvgID != b.TvgID || a.Title != b.Title || a.Group != b.Group || a.LogoURL != b.LogoURL || len(a.URLs) != len(b.URLs) {
+		return false
+	}
+
+	for i, url := range a.URLs {
+		if url.Content != b.URLs[i].Content || url.M3UIndex != b.URLs[i].M3UIndex {
+			return false
+		}
+	}
+
+	return true
 }

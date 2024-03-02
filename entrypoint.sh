@@ -14,7 +14,7 @@ stop_services() {
 trap stop_services TERM
 
 # Start Redis server
-redis-server --daemonize yes --loglevel warning
+redis-server --daemonize yes &> /dev/null &
 
 # Wait until Redis is ready
 while ! redis-cli ping &>/dev/null; do
