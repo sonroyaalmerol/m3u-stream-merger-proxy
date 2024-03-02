@@ -68,7 +68,7 @@ func parseM3UFile(filePath string, m3uIndex int) (error) {
       if currentStream.Title != "" {
         err = database.InsertStream(currentStream)
         if err != nil {
-          return fmt.Errorf("InsertStream error: %v", err)
+          return fmt.Errorf("InsertStream error (title: %s): %v", currentStream.Title, err)
         }
       }
 		}
