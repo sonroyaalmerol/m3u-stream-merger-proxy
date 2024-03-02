@@ -1,6 +1,7 @@
 package database
 
 type StreamInfo struct {
+  DbId  int64
 	Title   string
 	TvgID   string
 	LogoURL string
@@ -9,6 +10,7 @@ type StreamInfo struct {
 }
 
 type StreamURL struct {
+  DbId  int64
 	Content  string
 	M3UIndex int
 }

@@ -57,19 +57,27 @@ func parseM3UFile(filePath string, m3uIndex int) (error) {
 				currentStream.LogoURL = parts[1]
 			}
 		} else if strings.HasPrefix(line, "http") {
-			// Extract URL
-			currentStream.URLs = []database.StreamURL{
-				{
-					Content:  line,
-					M3UIndex: m3uIndex,
-				},
-			}
-      
-      if currentStream.Title != "" {
-        err = database.InsertStream(currentStream)
+      existingStream, err := database.GetStreamByTitle(currentStream.Title) 
+      if err != nil {
+        return fmt.Errorf("GetStreamByTitle error (title: %s): %v", currentStream.Title, err)
+      }
+
+      var dbId int64
+      if existingStream.Title != currentStream.Title {
+        dbId, err = database.InsertStream(currentStream)
         if err != nil {
           return fmt.Errorf("InsertStream error (title: %s): %v", currentStream.Title, err)
         }
+      } else {
+        dbId = existingStream.DbId
+      }
+
+      _, err = database.InsertStreamUrl(dbId, database.StreamURL{
+        Content:  line,
+        M3UIndex: m3uIndex,
+      }) 
+      if err != nil {
+        return fmt.Errorf("InsertStreamUrl error (title: %s): %v", currentStream.Title, err)
       }
 		}
 	}

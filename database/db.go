@@ -107,48 +107,64 @@ func SaveToSQLite(streams []StreamInfo) error {
 	return nil
 }
 
-func InsertStream(s StreamInfo) error {
+func InsertStream(s StreamInfo) (int64, error) {
 	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("error beginning transaction: %v", err)
+		return -1, fmt.Errorf("error beginning transaction: %v", err)
 	}
 	defer tx.Rollback()
 
 	stmt, err := tx.Prepare("INSERT INTO streams(title, tvg_id, logo_url, group_name) VALUES(?, ?, ?, ?)")
 	if err != nil {
-		return fmt.Errorf("error preparing statement: %v", err)
+		return -1, fmt.Errorf("error preparing statement: %v", err)
 	}
 	defer stmt.Close()
 
   res, err := stmt.Exec(s.Title, s.TvgID, s.LogoURL, s.Group)
   if err != nil {
-    return fmt.Errorf("error inserting stream: %v", err)
+    return -1, fmt.Errorf("error inserting stream: %v", err)
   }
 
   streamID, err := res.LastInsertId()
   if err != nil {
-    return fmt.Errorf("error getting last inserted ID: %v", err)
-  }
-
-  urlStmt, err := tx.Prepare("INSERT INTO stream_urls(stream_id, content, m3u_index) VALUES(?, ?, ?)")
-  if err != nil {
-    return fmt.Errorf("error preparing statement: %v", err)
-  }
-  defer urlStmt.Close()
-
-  for _, u := range s.URLs {
-    _, err := urlStmt.Exec(streamID, u.Content, u.M3UIndex)
-    if err != nil {
-      return fmt.Errorf("error inserting stream URL: %v", err)
-    }
+    return -1, fmt.Errorf("error getting last inserted ID: %v", err)
   }
 
 	err = tx.Commit()
 	if err != nil {
-		return fmt.Errorf("error committing transaction: %v", err)
+		return -1, fmt.Errorf("error committing transaction: %v", err)
+	}
+	return streamID, nil
+}
+
+func InsertStreamUrl(id int64, url StreamURL) (int64, error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return -1, fmt.Errorf("error beginning transaction: %v", err)
+	}
+	defer tx.Rollback()
+  urlStmt, err := tx.Prepare("INSERT INTO stream_urls(stream_id, content, m3u_index) VALUES(?, ?, ?)")
+  if err != nil {
+    return -1, fmt.Errorf("error preparing statement: %v", err)
+  }
+  defer urlStmt.Close()
+
+  res, err := urlStmt.Exec(id, url.Content, url.M3UIndex)
+  if err != nil {
+    return -1, fmt.Errorf("error inserting stream URL: %v", err)
+  }
+
+  insertedId, err := res.LastInsertId()
+  if err != nil {
+    return -1, fmt.Errorf("error getting last inserted ID: %v", err)
+  }
+
+	err = tx.Commit()
+	if err != nil {
+		return -1, fmt.Errorf("error committing transaction: %v", err)
 	}
 
-	return nil
+  return insertedId, nil 
 }
 
 func GetStreamByTitle(title string) (s StreamInfo, err error) {
@@ -158,13 +174,12 @@ func GetStreamByTitle(title string) (s StreamInfo, err error) {
 	}
 	defer rows.Close()
 
-  var streamId int
-  err = rows.Scan(&streamId, &s.Title, &s.TvgID, &s.LogoURL, &s.Group)
+  err = rows.Scan(&s.DbId, &s.Title, &s.TvgID, &s.LogoURL, &s.Group)
   if err != nil {
     return s, fmt.Errorf("error scanning stream: %v", err)
   }
 
-  urlRows, err := db.Query("SELECT content, m3u_index FROM stream_urls WHERE stream_id = ?", streamId)
+  urlRows, err := db.Query("SELECT content, m3u_index FROM stream_urls WHERE stream_id = ?", s.DbId)
   if err != nil {
     return s, fmt.Errorf("error querying stream URLs: %v", err)
   }
@@ -201,13 +216,12 @@ func GetStreams() ([]StreamInfo, error) {
 	var streams []StreamInfo
 	for rows.Next() {
 		var s StreamInfo
-    	var streamId int
-		err := rows.Scan(&streamId, &s.Title, &s.TvgID, &s.LogoURL, &s.Group)
+		err := rows.Scan(&s.DbId, &s.Title, &s.TvgID, &s.LogoURL, &s.Group)
 		if err != nil {
 			return nil, fmt.Errorf("error scanning stream: %v", err)
 		}
 
-		urlRows, err := db.Query("SELECT content, m3u_index FROM stream_urls WHERE stream_id = ?", streamId)
+		urlRows, err := db.Query("SELECT content, m3u_index FROM stream_urls WHERE stream_id = ?", s.DbId)
 		if err != nil {
 			return nil, fmt.Errorf("error querying stream URLs: %v", err)
 		}

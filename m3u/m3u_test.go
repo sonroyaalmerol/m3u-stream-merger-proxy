@@ -30,7 +30,7 @@ func TestGenerateM3UContent(t *testing.T) {
   }
   defer os.Remove(sqliteDBPath) // Cleanup the database file after the test
 
-  err = database.InsertStream(stream)
+  _, err = database.InsertStream(stream)
   if err != nil {
     t.Fatal(err)
   }
