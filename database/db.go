@@ -61,12 +61,14 @@ func InitializeSQLite() error {
 	return nil
 }
 
-func SaveToSQLite(streams []StreamInfo) error {
+func SaveToSQLite(streams []StreamInfo) (err error) {
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("error beginning transaction: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		err = tx.Rollback()
+	}()
 
 	stmt, err := tx.Prepare("INSERT INTO streams(title, tvg_id, logo_url, group_name) VALUES(?, ?, ?, ?)")
 	if err != nil {
@@ -104,15 +106,17 @@ func SaveToSQLite(streams []StreamInfo) error {
 		return fmt.Errorf("error committing transaction: %v", err)
 	}
 
-	return nil
+	return
 }
 
-func InsertStream(s StreamInfo) (int64, error) {
+func InsertStream(s StreamInfo) (i int64, err error) {
 	tx, err := db.Begin()
 	if err != nil {
 		return -1, fmt.Errorf("error beginning transaction: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		err = tx.Rollback()
+	}()
 
 	stmt, err := tx.Prepare("INSERT INTO streams(title, tvg_id, logo_url, group_name) VALUES(?, ?, ?, ?)")
 	if err != nil {
@@ -134,15 +138,18 @@ func InsertStream(s StreamInfo) (int64, error) {
 	if err != nil {
 		return -1, fmt.Errorf("error committing transaction: %v", err)
 	}
-	return streamID, nil
+	return streamID, err
 }
 
-func InsertStreamUrl(id int64, url StreamURL) (int64, error) {
+func InsertStreamUrl(id int64, url StreamURL) (i int64, err error) {
 	tx, err := db.Begin()
 	if err != nil {
 		return -1, fmt.Errorf("error beginning transaction: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		err = tx.Rollback()
+	}()
+
 	urlStmt, err := tx.Prepare("INSERT INTO stream_urls(stream_id, content, m3u_index) VALUES(?, ?, ?)")
 	if err != nil {
 		return -1, fmt.Errorf("error preparing statement: %v", err)
@@ -164,7 +171,7 @@ func InsertStreamUrl(id int64, url StreamURL) (int64, error) {
 		return -1, fmt.Errorf("error committing transaction: %v", err)
 	}
 
-	return insertedId, nil
+	return insertedId, err
 }
 
 func GetStreamByTitle(title string) (s StreamInfo, err error) {

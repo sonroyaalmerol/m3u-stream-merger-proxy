@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"m3u-stream-merger/m3u"
 	"net/http"
 	"os"
@@ -33,7 +34,12 @@ func updateSource(ctx context.Context, m3uUrl string, index int) {
 			if err != nil {
 				time.Sleep(24 * time.Hour)
 			} else {
-				time.Sleep(time.Duration(hourInt) * time.Hour) // Adjust the update interval as needed
+				select {
+				case <-time.After(time.Duration(hourInt) * time.Hour):
+					// Continue loop after sleep
+				case <-ctx.Done():
+					return // Exit loop if context is cancelled
+				}
 			}
 		}
 	}
@@ -65,5 +71,8 @@ func main() {
 	fmt.Println("Server is running on port 8080...")
 	fmt.Println("Playlist Endpoint is running (`/playlist.m3u`)")
 	fmt.Println("Stream Endpoint is running (`/stream/{streamID}.mp4`)")
-	http.ListenAndServe(":8080", nil)
+	err := http.ListenAndServe(":8080", nil)
+	if err != nil {
+		log.Fatalf("HTTP server error: %v", err)
+	}
 }
