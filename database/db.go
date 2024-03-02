@@ -228,7 +228,7 @@ func GetStreams() ([]StreamInfo, error) {
 			return nil, fmt.Errorf("error scanning stream: %v", err)
 		}
 
-		urlRows, err := db.Query("SELECT content, m3u_index FROM stream_urls WHERE stream_id = ?", s.DbId)
+		urlRows, err := db.Query("SELECT id, content, m3u_index FROM stream_urls WHERE stream_id = ?", s.DbId)
 		if err != nil {
 			return nil, fmt.Errorf("error querying stream URLs: %v", err)
 		}
@@ -237,7 +237,7 @@ func GetStreams() ([]StreamInfo, error) {
 		var urls []StreamURL
 		for urlRows.Next() {
 			var u StreamURL
-			err := urlRows.Scan(&u.Content, &u.M3UIndex)
+			err := urlRows.Scan(&u.DbId, &u.Content, &u.M3UIndex)
 			if err != nil {
 				return nil, fmt.Errorf("error scanning stream URL: %v", err)
 			}

@@ -131,7 +131,14 @@ http://example.com/channel3
       a := storedStreams[i]
       b := expected
 			t.Errorf("Stream at index %d does not match expected content", i)
-      t.Fatalf("%s ?= %s, %s ?= %s, %s ?= %s, %s ?= %s, %d ?= %d", a.TvgID, b.TvgID, a.Title, b.Title, a.Group, b.Group, a.LogoURL, b.LogoURL, len(a.URLs), len(b.URLs))
+      t.Errorf("%s ?= %s, %s ?= %s, %s ?= %s, %s ?= %s, %d ?= %d", a.TvgID, b.TvgID, a.Title, b.Title, a.Group, b.Group, a.LogoURL, b.LogoURL, len(a.URLs), len(b.URLs))
+      for _, url := range a.URLs {
+        t.Errorf("a: %s, %d", url.Content, url.M3UIndex)
+      }
+      for _, url := range b.URLs {
+        t.Errorf("b: %s, %d", url.Content, url.M3UIndex)
+      }
+      t.FailNow()
 		}
 	}
 }
