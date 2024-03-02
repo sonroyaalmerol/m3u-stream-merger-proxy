@@ -46,6 +46,7 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 
 		if strings.HasPrefix(line, "#EXTINF:") {
 			currentStream = database.StreamInfo{}
+			currentStream.Title = strings.TrimSpace(strings.SplitN(line, ",", 2)[1])
 
 			// Define a regular expression to capture key-value pairs
 			regex := regexp.MustCompile(`(\S+?)="([^"]*?)"`)
@@ -60,8 +61,6 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 				switch key {
 				case "tvg-id":
 					currentStream.TvgID = value
-				case "tvg-name":
-					currentStream.Title = value
 				case "group-title":
 					currentStream.Group = value
 				case "tvg-logo":
@@ -82,14 +81,17 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 
 			var dbId int64
 			if existingStream.Title != currentStream.Title {
+				log.Printf("Creating new database entry: %s", currentStream.Title)
 				dbId, err = database.InsertStream(db, currentStream)
 				if err != nil {
 					return fmt.Errorf("InsertStream error (title: %s): %v", currentStream.Title, err)
 				}
 			} else {
+				log.Printf("Using existing database entry: %s", existingStream.Title)
 				dbId = existingStream.DbId
 			}
 
+			log.Printf("Adding MP4 url entry to %s: %s", currentStream.Title, line)
 			_, err = database.InsertStreamUrl(db, dbId, database.StreamURL{
 				Content:        line,
 				M3UIndex:       m3uIndex,

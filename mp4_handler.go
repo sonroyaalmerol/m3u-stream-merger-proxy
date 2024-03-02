@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"m3u-stream-merger/database"
@@ -16,10 +17,49 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+func loadBalancer(ctx context.Context, stream database.StreamInfo) (resp *http.Response, selectedUrl *database.StreamURL, err error) {
+	// Concurrency check mode
+	for _, url := range stream.URLs {
+		if checkConcurrency(ctx, url.Content, url.MaxConcurrency) {
+			continue // Skip this stream if concurrency limit reached
+		}
+
+		resp, err = http.Get(url.Content)
+		if err == nil {
+			selectedUrl = &url
+			break
+		}
+
+		// Log the error
+		log.Printf("Error fetching MP4 stream (concurrency check mode): %s\n", err.Error())
+	}
+
+	if selectedUrl == nil {
+		// Connection check mode
+		for _, url := range stream.URLs {
+			resp, err = http.Get(url.Content)
+			if err == nil {
+				selectedUrl = &url
+				break
+			} else {
+				// Log the error
+				return nil, nil, fmt.Errorf("Error fetching MP4 stream (connection check mode): %s\n", err.Error())
+			}
+		}
+
+		if resp == nil {
+			// Log the error
+			return nil, nil, fmt.Errorf("Error fetching MP4 stream. Exhausted all streams.")
+		}
+
+		return resp, selectedUrl, nil
+	}
+
+	return resp, selectedUrl, nil
+}
+
 func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	// Create a context with cancellation capability
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
+	ctx := r.Context()
 
 	// Log the incoming request
 	log.Printf("Received request from %s for URL: %s\n", r.RemoteAddr, r.URL.Path)
@@ -58,59 +98,19 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	// Iterate through the streams and select one based on concurrency and availability
 	var selectedUrl *database.StreamURL
 
-	// Concurrency check mode
-	for _, url := range stream.URLs {
-		if checkConcurrency(ctx, url.Content, url.MaxConcurrency) {
-			continue // Skip this stream if concurrency limit reached
-		}
-
-		resp, err = http.Get(url.Content)
-		if err == nil {
-			selectedUrl = &url
-			updateConcurrency(ctx, url.Content, true)
-			break
-		}
-
-		// Log the error
-		log.Printf("Error fetching MP4 stream (concurrency check mode): %s\n", err.Error())
+	resp, selectedUrl, err = loadBalancer(ctx, stream)
+	if err != nil {
+		http.Error(w, "Error fetching MP4 stream. Exhausted all streams.", http.StatusInternalServerError)
+		return
 	}
-
-	if selectedUrl == nil {
-		// Connection check mode
-		for _, url := range stream.URLs {
-			resp, err = http.Get(url.Content)
-			if err == nil {
-				selectedUrl = &url
-				updateConcurrency(ctx, url.Content, true)
-				break
-			}
-			// Log the error
-			log.Printf("Error fetching MP4 stream (connection check mode): %s\n", err.Error())
-		}
-
-		if resp == nil {
-			// Log the error
-			log.Println("Error fetching MP4 stream. Exhausted all streams.")
-			// Check if the connection is still open before writing to the response
-			select {
-			case <-r.Context().Done():
-				// Connection closed, handle accordingly
-				log.Println("Client disconnected")
-				return
-			default:
-				// Connection still open, proceed with writing to the response
-				http.Error(w, "Error fetching MP4 stream. Exhausted all streams.", http.StatusInternalServerError)
-				return
-			}
-		}
-	}
+	updateConcurrency(ctx, selectedUrl.Content, true)
 
 	// Log the successful response
 	log.Printf("Sent MP4 stream to %s\n", r.RemoteAddr)
 
 	// Check if the connection is still open before copying the MP4 stream to the response
 	select {
-	case <-r.Context().Done():
+	case <-ctx.Done():
 		// Connection closed, handle accordingly
 		log.Println("Client disconnected after fetching MP4 stream")
 		updateConcurrency(ctx, selectedUrl.Content, false)

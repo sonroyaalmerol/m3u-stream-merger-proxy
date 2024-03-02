@@ -3,13 +3,27 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"sync"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
+var mutex sync.Mutex
+
 func InitializeSQLite(name string) (db *sql.DB, err error) {
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	if db != nil {
+		err := db.Close()
+		if err == nil {
+			log.Printf("Database session has already been closed: %v\n", err)
+		}
+	}
+
 	foldername := filepath.Join(".", "data")
 	filename := filepath.Join(foldername, fmt.Sprintf("%s.db", name))
 
@@ -61,7 +75,10 @@ func InitializeSQLite(name string) (db *sql.DB, err error) {
 }
 
 // DeleteSQLite deletes the SQLite database file.
-func DeleteSQLite(db *sql.DB, name string) error {
+func DeleteSQLite(name string) error {
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	foldername := filepath.Join(".", "data")
 	filename := filepath.Join(foldername, fmt.Sprintf("%s.db", name))
 
@@ -74,6 +91,9 @@ func DeleteSQLite(db *sql.DB, name string) error {
 }
 
 func RenameSQLite(prevName string, nextName string) error {
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	foldername := filepath.Join(".", "data")
 	prevFileName := filepath.Join(foldername, fmt.Sprintf("%s.db", prevName))
 	nextFileName := filepath.Join(foldername, fmt.Sprintf("%s.db", nextName))
@@ -84,6 +104,9 @@ func RenameSQLite(prevName string, nextName string) error {
 }
 
 func SaveToSQLite(db *sql.DB, streams []StreamInfo) (err error) {
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("error beginning transaction: %v", err)
@@ -134,6 +157,9 @@ func SaveToSQLite(db *sql.DB, streams []StreamInfo) (err error) {
 }
 
 func InsertStream(db *sql.DB, s StreamInfo) (i int64, err error) {
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	tx, err := db.Begin()
 	if err != nil {
 		return -1, fmt.Errorf("error beginning transaction: %v", err)
@@ -168,6 +194,9 @@ func InsertStream(db *sql.DB, s StreamInfo) (i int64, err error) {
 }
 
 func InsertStreamUrl(db *sql.DB, id int64, url StreamURL) (i int64, err error) {
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	tx, err := db.Begin()
 	if err != nil {
 		return -1, fmt.Errorf("error beginning transaction: %v", err)
@@ -203,6 +232,9 @@ func InsertStreamUrl(db *sql.DB, id int64, url StreamURL) (i int64, err error) {
 }
 
 func DeleteStreamByTitle(db *sql.DB, title string) error {
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("error beginning transaction: %v", err)
@@ -233,6 +265,9 @@ func DeleteStreamByTitle(db *sql.DB, title string) error {
 }
 
 func DeleteStreamURL(db *sql.DB, streamURLID int64) error {
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("error beginning transaction: %v", err)
@@ -263,6 +298,9 @@ func DeleteStreamURL(db *sql.DB, streamURLID int64) error {
 }
 
 func GetStreamByTitle(db *sql.DB, title string) (s StreamInfo, err error) {
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	rows, err := db.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams WHERE title = ?", title)
 	if err != nil {
 		return s, fmt.Errorf("error querying streams: %v", err)
@@ -308,6 +346,9 @@ func GetStreamByTitle(db *sql.DB, title string) (s StreamInfo, err error) {
 }
 
 func GetStreams(db *sql.DB) ([]StreamInfo, error) {
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	rows, err := db.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams")
 	if err != nil {
 		return nil, fmt.Errorf("error querying streams: %v", err)

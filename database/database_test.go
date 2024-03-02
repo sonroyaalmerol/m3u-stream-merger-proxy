@@ -74,7 +74,7 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 		}
 	}
 
-	err = DeleteSQLite(db, "test")
+	err = DeleteSQLite("test")
 	if err != nil {
 		t.Errorf("DeleteSQLite returned error: %v", err)
 	}
