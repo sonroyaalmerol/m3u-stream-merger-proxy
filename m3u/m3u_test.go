@@ -80,7 +80,7 @@ func TestParseM3UFromURL(t *testing.T) {
 http://example.com/bbc1
 #EXTINF:-1 tvg-id="bbc2" tvg-name="BBC Two" group-title="UK",BBC Two
 http://example.com/bbc2
-#EXTINF:-1 tvg-id="cnn" tvg-name="CNN International" group-title="News",CNN
+#EXTINF:-1 tvg-id="cnn" tvg-name="CNN International" group-title="News",CNN International
 http://example.com/cnn
 #EXTVLCOPT:logo=http://example.com/bbc_logo.png
 #EXTINF:-1 tvg-id="fox" tvg-name="FOX" group-title="Entertainment",FOX
