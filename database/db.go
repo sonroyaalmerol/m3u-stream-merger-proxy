@@ -210,9 +210,8 @@ func GetStreamByTitle(title string) (s StreamInfo, err error) {
 		if err := rows.Err(); err != nil {
 			return s, fmt.Errorf("error iterating over rows: %v", err)
 		}
-
-		return s, nil
 	}
+
 	if err := rows.Err(); err != nil {
 		return s, fmt.Errorf("error iterating over rows: %v", err)
 	}
