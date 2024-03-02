@@ -78,6 +78,16 @@ func DeleteSQLite(db *sql.DB, name string) error {
 	return nil
 }
 
+func RenameSQLite(prevName string, nextName string) error {
+	foldername := filepath.Join(".", "data")
+	prevFileName := filepath.Join(foldername, fmt.Sprintf("%s.db", prevName))
+	nextFileName := filepath.Join(foldername, fmt.Sprintf("%s.db", nextName))
+
+	err := os.Rename(prevFileName, nextFileName)
+
+	return err
+}
+
 func SaveToSQLite(db *sql.DB, streams []StreamInfo) (err error) {
 	tx, err := db.Begin()
 	if err != nil {

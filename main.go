@@ -10,23 +10,94 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 )
 
 var db *sql.DB
 
-func updateSource(ctx context.Context, m3uUrl string, index int, maxConcurrency int) {
+func swapDb(nextDb *sql.DB) error {
+	nextDb.Close()
+
+	err := database.DeleteSQLite(db, "current_streams")
+	if err != nil {
+		return fmt.Errorf("Error deleting current_streams: %v\n", err)
+	}
+
+	err = database.RenameSQLite("next_streams", "current_streams")
+	if err != nil {
+		return fmt.Errorf("Error renaming to current_streams: %v\n", err)
+	}
+
+	db, err = database.InitializeSQLite("current_streams")
+	if err != nil {
+		return fmt.Errorf("Error reinitializing to current_streams: %v\n", err)
+	}
+
+	return nil
+}
+
+func updateSource(nextDb *sql.DB, m3uUrl string, index int, maxConcurrency int) {
+	log.Printf("Background process: Updating M3U #%d from %s\n", index, m3uUrl)
+	err := m3u.ParseM3UFromURL(nextDb, m3uUrl, index, maxConcurrency)
+	if err != nil {
+		log.Printf("Error updating M3U: %v\n", err)
+	} else {
+		log.Printf("Background process: Updated M3U #%d from %s\n", index, m3uUrl)
+	}
+}
+
+func updateSources(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			log.Printf("Background process: Updating M3U #%d from %s\n", index, m3uUrl)
-			err := m3u.ParseM3UFromURL(db, m3uUrl, index, maxConcurrency)
+			var err error
+			nextDb, err := database.InitializeSQLite("next_streams")
 			if err != nil {
-				log.Printf("Error updating M3U: %v\n", err)
-			} else {
-				log.Printf("Background process: Updated M3U #%d from %s\n", index, m3uUrl)
+				log.Fatalf("Error initializing next SQLite database: %v", err)
+			}
+
+			if db == nil {
+				db, err = database.InitializeSQLite("current_streams")
+				if err != nil {
+					log.Fatalf("Error initializing current SQLite database: %v", err)
+				}
+			}
+
+			var wg sync.WaitGroup
+			index := 1
+			for {
+				maxConcurrency := 1
+				m3uUrl, m3uExists := os.LookupEnv(fmt.Sprintf("M3U_URL_%d", index))
+				rawMaxConcurrency, maxConcurrencyExists := os.LookupEnv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", index))
+				if !m3uExists {
+					break
+				}
+
+				if maxConcurrencyExists {
+					var err error
+					maxConcurrency, err = strconv.Atoi(rawMaxConcurrency)
+					if err != nil {
+						maxConcurrency = 1
+					}
+				}
+
+				wg.Add(1)
+				// Start the goroutine for periodic updates
+				go func() {
+					defer wg.Done()
+					updateSource(nextDb, m3uUrl, index, maxConcurrency)
+				}()
+
+				index++
+			}
+			wg.Wait()
+
+			err = swapDb(nextDb)
+			if err != nil {
+				log.Fatalf("swapDb: %v", err)
 			}
 
 			updateIntervalInHour, exists := os.LookupEnv("UPDATE_INTERVAL")
@@ -59,33 +130,7 @@ func main() {
 		log.Fatalf("Failed to connect to Redis: %s\n", err)
 	}
 
-	db, err := database.InitializeSQLite("current_streams")
-	if err != nil {
-		log.Fatalf("Error initializing SQLite database: %v", err)
-	}
-
-	index := 1
-	for {
-		maxConcurrency := 1
-		m3uUrl, m3uExists := os.LookupEnv(fmt.Sprintf("M3U_URL_%d", index))
-		rawMaxConcurrency, maxConcurrencyExists := os.LookupEnv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", index))
-		if !m3uExists {
-			break
-		}
-
-		if maxConcurrencyExists {
-			var err error
-			maxConcurrency, err = strconv.Atoi(rawMaxConcurrency)
-			if err != nil {
-				maxConcurrency = 1
-			}
-		}
-
-		// Start the goroutine for periodic updates
-		go updateSource(ctx, m3uUrl, index, maxConcurrency)
-
-		index++
-	}
+	go updateSources(ctx)
 
 	// HTTP handlers
 	http.HandleFunc("/playlist.m3u", func(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +144,7 @@ func main() {
 	log.Println("Server is running on port 8080...")
 	log.Println("Playlist Endpoint is running (`/playlist.m3u`)")
 	log.Println("Stream Endpoint is running (`/stream/{streamID}.mp4`)")
-	err = http.ListenAndServe(":8080", nil)
+	err := http.ListenAndServe(":8080", nil)
 	if err != nil {
 		log.Fatalf("HTTP server error: %v", err)
 	}
