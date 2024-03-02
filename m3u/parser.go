@@ -46,7 +46,7 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 
 		if strings.HasPrefix(line, "#EXTINF:") {
 			currentStream = database.StreamInfo{}
-			currentStream.Title = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "#EXTINF:-1"), ","))
+			currentStream.Title = strings.TrimSpace(strings.SplitN(line, ",", 2)[1])
 
 			// Define a regular expression to capture key-value pairs
 			regex := regexp.MustCompile(`(\S+?)="([^"]*?)"`)
