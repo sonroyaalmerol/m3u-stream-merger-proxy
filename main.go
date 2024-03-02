@@ -18,12 +18,12 @@ func updateSource(ctx context.Context, m3uUrl string, index int, maxConcurrency 
 		case <-ctx.Done():
 			return
 		default:
-			fmt.Printf("Background process: Updating M3U #%s from %d\n", m3uUrl, index)
+			fmt.Printf("Background process: Updating M3U #%d from %s\n", index, m3uUrl)
 			err := m3u.ParseM3UFromURL(m3uUrl, index, maxConcurrency)
 			if err != nil {
 				fmt.Printf("Error updating M3U: %v\n", err)
 			} else {
-				fmt.Printf("Background process: Updated M3U #%s from %d\n", m3uUrl, index)
+				fmt.Printf("Background process: Updated M3U #%d from %s\n", index, m3uUrl)
 			}
 
 			updateIntervalInHour, exists := os.LookupEnv("UPDATE_INTERVAL")
