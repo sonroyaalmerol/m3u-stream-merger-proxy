@@ -10,7 +10,8 @@ type StreamInfo struct {
 }
 
 type StreamURL struct {
-	DbId     int64
-	Content  string
-	M3UIndex int
+	DbId           int64
+	Content        string
+	M3UIndex       int
+	MaxConcurrency int
 }

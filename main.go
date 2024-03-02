@@ -11,14 +11,14 @@ import (
 	"time"
 )
 
-func updateSource(ctx context.Context, m3uUrl string, index int) {
+func updateSource(ctx context.Context, m3uUrl string, index int, maxConcurrency int) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 			fmt.Printf("Background process: Updating M3U #%s from %d\n", m3uUrl, index)
-			err := m3u.ParseM3UFromURL(m3uUrl, index)
+			err := m3u.ParseM3UFromURL(m3uUrl, index, maxConcurrency)
 			if err != nil {
 				fmt.Printf("Error updating M3U: %v\n", err)
 			} else {
@@ -52,13 +52,22 @@ func main() {
 
 	index := 1
 	for {
+		maxConcurrency := 1
 		m3uUrl, m3uExists := os.LookupEnv(fmt.Sprintf("M3U_URL_%d", index))
+		rawMaxConcurrency, maxConcurrencyExists := os.LookupEnv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", index))
 		if !m3uExists {
 			break
 		}
 
+		if maxConcurrencyExists {
+			maxConcurrency, err := strconv.Atoi(rawMaxConcurrency)
+			if err != nil {
+				maxConcurrency = 1
+			}
+		}
+
 		// Start the goroutine for periodic updates
-		go updateSource(ctx, m3uUrl, index)
+		go updateSource(ctx, m3uUrl, index, maxConcurrency)
 
 		index++
 	}

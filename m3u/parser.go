@@ -11,7 +11,7 @@ import (
 	"m3u-stream-merger/database"
 )
 
-func ParseM3UFromURL(m3uURL string, m3uIndex int) error {
+func ParseM3UFromURL(m3uURL string, m3uIndex int, maxConcurrency int) error {
 	// Set the custom User-Agent header
 	userAgent, userAgentExists := os.LookupEnv("USER_AGENT")
 	if !userAgentExists {
@@ -89,8 +89,9 @@ func ParseM3UFromURL(m3uURL string, m3uIndex int) error {
 			}
 
 			_, err = database.InsertStreamUrl(dbId, database.StreamURL{
-				Content:  line,
-				M3UIndex: m3uIndex,
+				Content:        line,
+				M3UIndex:       m3uIndex,
+				MaxConcurrency: maxConcurrency,
 			})
 			if err != nil {
 				return fmt.Errorf("InsertStreamUrl error (title: %s): %v", currentStream.Title, err)
