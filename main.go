@@ -66,6 +66,7 @@ func updateSources(ctx context.Context) {
 				}
 			}
 
+			log.Println("Background process: Checking M3U_URLs...")
 			var wg sync.WaitGroup
 			index := 1
 			for {
@@ -76,6 +77,7 @@ func updateSources(ctx context.Context) {
 					break
 				}
 
+				log.Printf("Background process: Checking M3U_MAX_CONCURRENCY_%d...\n", index)
 				if maxConcurrencyExists {
 					var err error
 					maxConcurrency, err = strconv.Atoi(rawMaxConcurrency)
@@ -84,6 +86,7 @@ func updateSources(ctx context.Context) {
 					}
 				}
 
+				log.Printf("Background process: Fetching M3U_URL_%d...\n", index)
 				wg.Add(1)
 				// Start the goroutine for periodic updates
 				go func() {
@@ -99,6 +102,7 @@ func updateSources(ctx context.Context) {
 			if err != nil {
 				log.Fatalf("swapDb: %v", err)
 			}
+			log.Println("Background process: Updated M3U database.")
 
 			updateIntervalInHour, exists := os.LookupEnv("UPDATE_INTERVAL")
 			if !exists {
@@ -107,8 +111,10 @@ func updateSources(ctx context.Context) {
 
 			hourInt, err := strconv.Atoi(updateIntervalInHour)
 			if err != nil {
+				log.Println("Background process: Sleeping for 24 hours...")
 				time.Sleep(24 * time.Hour)
 			} else {
+				log.Printf("Background process: Sleeping for %d hours...\n", hourInt)
 				select {
 				case <-time.After(time.Duration(hourInt) * time.Hour):
 					// Continue loop after sleep
