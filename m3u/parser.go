@@ -11,12 +11,12 @@ import (
 	"m3u-stream-merger/database"
 )
 
-func ParseM3UFromURL(m3uURL string, m3uIndex int) (error) {
+func ParseM3UFromURL(m3uURL string, m3uIndex int) error {
 	// Set the custom User-Agent header
 	userAgent, userAgentExists := os.LookupEnv("USER_AGENT")
-  if !userAgentExists {
-	  userAgent = "IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)"
-  }
+	if !userAgentExists {
+		userAgent = "IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)"
+	}
 
 	// Create a new HTTP client with a custom User-Agent header
 	client := &http.Client{
@@ -29,7 +29,7 @@ func ParseM3UFromURL(m3uURL string, m3uIndex int) (error) {
 
 	fmt.Printf("Parsing M3U from URL: %s\n", m3uURL)
 
-  resp, err := client.Get(m3uURL)
+	resp, err := client.Get(m3uURL)
 	if err != nil {
 		return fmt.Errorf("HTTP GET error: %v", err)
 	}
@@ -70,34 +70,34 @@ func ParseM3UFromURL(m3uURL string, m3uIndex int) (error) {
 			// Extract logo URL from #EXTVLCOPT line
 			parts := strings.SplitN(line, "=", 2)
 			if len(parts) == 2 {
-        currentStream.TvgID = ""
-        currentStream.Title = ""
-        currentStream.Group = ""
+				currentStream.TvgID = ""
+				currentStream.Title = ""
+				currentStream.Group = ""
 				currentStream.LogoURL = parts[1]
 			}
 		} else if strings.HasPrefix(line, "http") {
-      existingStream, err := database.GetStreamByTitle(currentStream.Title) 
-      if err != nil {
-        return fmt.Errorf("GetStreamByTitle error (title: %s): %v", currentStream.Title, err)
-      }
+			existingStream, err := database.GetStreamByTitle(currentStream.Title)
+			if err != nil {
+				return fmt.Errorf("GetStreamByTitle error (title: %s): %v", currentStream.Title, err)
+			}
 
-      var dbId int64
-      if existingStream.Title != currentStream.Title {
-        dbId, err = database.InsertStream(currentStream)
-        if err != nil {
-          return fmt.Errorf("InsertStream error (title: %s): %v", currentStream.Title, err)
-        }
-      } else {
-        dbId = existingStream.DbId
-      }
+			var dbId int64
+			if existingStream.Title != currentStream.Title {
+				dbId, err = database.InsertStream(currentStream)
+				if err != nil {
+					return fmt.Errorf("InsertStream error (title: %s): %v", currentStream.Title, err)
+				}
+			} else {
+				dbId = existingStream.DbId
+			}
 
-      _, err = database.InsertStreamUrl(dbId, database.StreamURL{
-        Content:  line,
-        M3UIndex: m3uIndex,
-      }) 
-      if err != nil {
-        return fmt.Errorf("InsertStreamUrl error (title: %s): %v", currentStream.Title, err)
-      }
+			_, err = database.InsertStreamUrl(dbId, database.StreamURL{
+				Content:  line,
+				M3UIndex: m3uIndex,
+			})
+			if err != nil {
+				return fmt.Errorf("InsertStreamUrl error (title: %s): %v", currentStream.Title, err)
+			}
 		}
 	}
 

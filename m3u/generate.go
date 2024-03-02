@@ -3,8 +3,8 @@ package m3u
 import (
 	"fmt"
 	"log"
-	"m3u-stream-merger/utils"
 	"m3u-stream-merger/database"
+	"m3u-stream-merger/utils"
 	"net/http"
 )
 
@@ -13,7 +13,7 @@ func generateStreamURL(baseUrl string, title string) string {
 }
 
 func GenerateM3UContent(w http.ResponseWriter, r *http.Request) {
-  streams, err := database.GetStreams()
+	streams, err := database.GetStreams()
 	if err != nil {
 		log.Println(fmt.Errorf("GetStreams error: %v", err))
 	}

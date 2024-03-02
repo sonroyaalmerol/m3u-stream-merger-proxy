@@ -16,13 +16,13 @@ func updateSource(ctx context.Context, m3uUrl string, index int) {
 		case <-ctx.Done():
 			return
 		default:
-      fmt.Printf("Background process: Updating M3U #%s from %d\n", m3uUrl, index)
-      err := m3u.ParseM3UFromURL(m3uUrl, index)
-      if err != nil {
-			  fmt.Printf("Error updating M3U: %v\n", err)
-      }
+			fmt.Printf("Background process: Updating M3U #%s from %d\n", m3uUrl, index)
+			err := m3u.ParseM3UFromURL(m3uUrl, index)
+			if err != nil {
+				fmt.Printf("Error updating M3U: %v\n", err)
+			}
 
-      fmt.Printf("Background process: Updated M3U #%s from %d\n", m3uUrl, index)
+			fmt.Printf("Background process: Updated M3U #%s from %d\n", m3uUrl, index)
 
 			updateIntervalInHour, exists := os.LookupEnv("UPDATE_INTERVAL")
 			if !exists {
@@ -31,7 +31,7 @@ func updateSource(ctx context.Context, m3uUrl string, index int) {
 
 			hourInt, err := strconv.Atoi(updateIntervalInHour)
 			if err != nil {
-			time.Sleep(24 * time.Hour)
+				time.Sleep(24 * time.Hour)
 			} else {
 				time.Sleep(time.Duration(hourInt) * time.Hour) // Adjust the update interval as needed
 			}
@@ -51,8 +51,8 @@ func main() {
 			break
 		}
 
-    // Start the goroutine for periodic updates
-    go updateSource(ctx, m3uUrl, index)
+		// Start the goroutine for periodic updates
+		go updateSource(ctx, m3uUrl, index)
 
 		index++
 	}
@@ -63,7 +63,7 @@ func main() {
 
 	// Start the server
 	fmt.Println("Server is running on port 8080...")
-  fmt.Println("Playlist Endpoint is running (`/playlist.m3u`)")
-  fmt.Println("Stream Endpoint is running (`/stream/{streamID}.mp4`)")
+	fmt.Println("Playlist Endpoint is running (`/playlist.m3u`)")
+	fmt.Println("Stream Endpoint is running (`/stream/{streamID}.mp4`)")
 	http.ListenAndServe(":8080", nil)
 }

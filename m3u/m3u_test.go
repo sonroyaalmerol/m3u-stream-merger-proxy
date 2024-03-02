@@ -14,26 +14,26 @@ import (
 func TestGenerateM3UContent(t *testing.T) {
 	// Define a sample stream for testing
 	stream := database.StreamInfo{
-		TvgID:    "1",
-		Title:    "TestStream",
-		LogoURL:  "http://example.com/logo.png",
-		Group:    "TestGroup",
-		URLs:     []database.StreamURL{{Content: "http://example.com/stream"}},
+		TvgID:   "1",
+		Title:   "TestStream",
+		LogoURL: "http://example.com/logo.png",
+		Group:   "TestGroup",
+		URLs:    []database.StreamURL{{Content: "http://example.com/stream"}},
 	}
 
-  sqliteDBPath := filepath.Join(".", "data", "database.sqlite")
+	sqliteDBPath := filepath.Join(".", "data", "database.sqlite")
 
-  // Test InitializeSQLite and check if the database file exists
-  err := database.InitializeSQLite()
-  if err != nil {
-      t.Errorf("InitializeSQLite returned error: %v", err)
-  }
-  defer os.Remove(sqliteDBPath) // Cleanup the database file after the test
+	// Test InitializeSQLite and check if the database file exists
+	err := database.InitializeSQLite()
+	if err != nil {
+		t.Errorf("InitializeSQLite returned error: %v", err)
+	}
+	defer os.Remove(sqliteDBPath) // Cleanup the database file after the test
 
-  _, err = database.InsertStream(stream)
-  if err != nil {
-    t.Fatal(err)
-  }
+	_, err = database.InsertStream(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Create a new HTTP request
 	req, err := http.NewRequest("GET", "/generate", nil)
@@ -91,14 +91,14 @@ http://example.com/fox
 	}))
 	defer mockServer.Close()
 
-  sqliteDBPath := filepath.Join(".", "data", "database.sqlite")
+	sqliteDBPath := filepath.Join(".", "data", "database.sqlite")
 
-  // Test InitializeSQLite and check if the database file exists
-  err := database.InitializeSQLite()
-  if err != nil {
-      t.Errorf("InitializeSQLite returned error: %v", err)
-  }
-  defer os.Remove(sqliteDBPath) // Cleanup the database file after the test
+	// Test InitializeSQLite and check if the database file exists
+	err := database.InitializeSQLite()
+	if err != nil {
+		t.Errorf("InitializeSQLite returned error: %v", err)
+	}
+	defer os.Remove(sqliteDBPath) // Cleanup the database file after the test
 
 	// Test the parseM3UFromURL function with the mock server URL
 	err = ParseM3UFromURL(mockServer.URL, 0)
@@ -106,28 +106,28 @@ http://example.com/fox
 		t.Errorf("Error parsing M3U from URL: %v", err)
 	}
 
-  // Verify expected values
+	// Verify expected values
 	expectedStreams := []database.StreamInfo{
 		{Title: "BBC One", TvgID: "bbc1", Group: "UK", URLs: []database.StreamURL{
-      {
-        Content: "http://example.com/bbc1",  
-      },
-    }},
+			{
+				Content: "http://example.com/bbc1",
+			},
+		}},
 		{Title: "BBC Two", TvgID: "bbc2", Group: "UK", URLs: []database.StreamURL{
-      {
-        Content: "http://example.com/bbc2",  
-      },
-    }},
+			{
+				Content: "http://example.com/bbc2",
+			},
+		}},
 		{Title: "CNN International", TvgID: "cnn", Group: "News", URLs: []database.StreamURL{
-      {
-        Content: "http://example.com/cnn",  
-      },
-    }},
+			{
+				Content: "http://example.com/cnn",
+			},
+		}},
 		{Title: "FOX", TvgID: "fox", Group: "Entertainment", URLs: []database.StreamURL{
-      {
-        Content: "http://example.com/fox",  
-      },
-    }},
+			{
+				Content: "http://example.com/fox",
+			},
+		}},
 	}
 
 	storedStreams, err := database.GetStreams()
@@ -142,17 +142,17 @@ http://example.com/fox
 
 	for i, expected := range expectedStreams {
 		if !streamInfoEqual(storedStreams[i], expected) {
-      a := storedStreams[i]
-      b := expected
+			a := storedStreams[i]
+			b := expected
 			t.Errorf("Stream at index %d does not match expected content", i)
-      t.Errorf("%s ?= %s, %s ?= %s, %s ?= %s, %s ?= %s, %d ?= %d", a.TvgID, b.TvgID, a.Title, b.Title, a.Group, b.Group, a.LogoURL, b.LogoURL, len(a.URLs), len(b.URLs))
-      for _, url := range a.URLs {
-        t.Errorf("a: %s, %d", url.Content, url.M3UIndex)
-      }
-      for _, url := range b.URLs {
-        t.Errorf("b: %s, %d", url.Content, url.M3UIndex)
-      }
-      t.FailNow()
+			t.Errorf("%s ?= %s, %s ?= %s, %s ?= %s, %s ?= %s, %d ?= %d", a.TvgID, b.TvgID, a.Title, b.Title, a.Group, b.Group, a.LogoURL, b.LogoURL, len(a.URLs), len(b.URLs))
+			for _, url := range a.URLs {
+				t.Errorf("a: %s, %d", url.Content, url.M3UIndex)
+			}
+			for _, url := range b.URLs {
+				t.Errorf("b: %s, %d", url.Content, url.M3UIndex)
+			}
+			t.FailNow()
 		}
 	}
 }
