@@ -1,7 +1,9 @@
 #!/bin/sh
 
+sysctl -w vm.overcommit_memory=1
+
 # Start Redis server
-redis-server --daemonize yes
+redis-server --daemonize yes --loglevel warning
 
 # Wait until Redis is ready
 while ! redis-cli ping &>/dev/null; do
