@@ -10,7 +10,6 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 	if err != nil {
 		t.Errorf("InitializeSQLite returned error: %v", err)
 	}
-	defer DeleteSQLite(db, "test")
 
 	// Test LoadFromSQLite with existing data in the database
 	expected := []StreamInfo{{
@@ -73,6 +72,11 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 		if !streamInfoEqual(result[i], expectedStream) {
 			t.Errorf("GetStreams returned %+v, expected %+v", result[i], expectedStream)
 		}
+	}
+
+	err = DeleteSQLite(db, "test")
+	if err != nil {
+		t.Errorf("DeleteSQLite returned error: %v", err)
 	}
 }
 

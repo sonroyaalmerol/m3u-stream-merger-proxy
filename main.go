@@ -88,7 +88,9 @@ func main() {
 	}
 
 	// HTTP handlers
-	http.HandleFunc("/playlist.m3u", m3u.GenerateM3UContent)
+	http.HandleFunc("/playlist.m3u", func(w http.ResponseWriter, r *http.Request) {
+		m3u.GenerateM3UContent(w, r, db)
+	})
 	http.HandleFunc("/stream/", func(w http.ResponseWriter, r *http.Request) {
 		mp4Handler(w, r, db)
 	})
