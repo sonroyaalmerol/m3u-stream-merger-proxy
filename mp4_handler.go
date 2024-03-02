@@ -18,7 +18,7 @@ import (
 
 func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	// Create a context with cancellation capability
-	redisCtx, cancel := context.WithCancel(r.Context())
+	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
 	// Log the incoming request
@@ -60,14 +60,14 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 	// Concurrency check mode
 	for _, url := range stream.URLs {
-		if checkConcurrency(redisCtx, url.Content, url.MaxConcurrency) {
+		if checkConcurrency(ctx, url.Content, url.MaxConcurrency) {
 			continue // Skip this stream if concurrency limit reached
 		}
 
 		resp, err = http.Get(url.Content)
 		if err == nil {
 			selectedUrl = &url
-			updateConcurrency(redisCtx, url.Content, true)
+			updateConcurrency(ctx, url.Content, true)
 			break
 		}
 
@@ -80,7 +80,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		for _, url := range stream.URLs {
 			resp, err = http.Get(url.Content)
 			if err == nil {
-				updateConcurrency(redisCtx, url.Content, true)
+				updateConcurrency(ctx, url.Content, true)
 				break
 			}
 			// Log the error
@@ -92,7 +92,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			log.Println("Error fetching MP4 stream. Exhausted all streams.")
 			// Check if the connection is still open before writing to the response
 			select {
-			case <-r.Context().Done():
+			case <-ctx.Done():
 				// Connection closed, handle accordingly
 				log.Println("Client disconnected")
 				return
@@ -107,19 +107,12 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	// Log the successful response
 	log.Printf("Sent MP4 stream to %s\n", r.RemoteAddr)
 
-	// Listen for client disconnect
-	go func() {
-		<-r.Context().Done()
-		log.Println("Client disconnected")
-		updateConcurrency(redisCtx, selectedUrl.Content, false)
-	}()
-
 	// Check if the connection is still open before copying the MP4 stream to the response
 	select {
-	case <-r.Context().Done():
+	case <-ctx.Done():
 		// Connection closed, handle accordingly
 		log.Println("Client disconnected after fetching MP4 stream")
-		updateConcurrency(redisCtx, selectedUrl.Content, false)
+		updateConcurrency(ctx, selectedUrl.Content, false)
 		return
 	default:
 		// Connection still open, proceed with writing to the response
@@ -128,7 +121,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			// Log the error
 			if errors.Is(err, syscall.EPIPE) {
 				log.Println("Client disconnected after fetching MP4 stream")
-				updateConcurrency(redisCtx, selectedUrl.Content, false)
+				updateConcurrency(ctx, selectedUrl.Content, false)
 			} else {
 				log.Printf("Error copying MP4 stream to response: %s\n", err.Error())
 			}
