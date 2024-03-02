@@ -43,9 +43,10 @@ func loadBalancer(ctx context.Context, stream database.StreamInfo) (selectedUrl 
 			if err == nil {
 				selectedUrl = &url
 				break
+			} else {
+				// Log the error
+				return nil, fmt.Errorf("Error fetching MP4 stream (connection check mode): %s\n", err.Error())
 			}
-			// Log the error
-			return nil, fmt.Errorf("Error fetching MP4 stream (connection check mode): %s\n", err.Error())
 		}
 
 		if resp == nil {
