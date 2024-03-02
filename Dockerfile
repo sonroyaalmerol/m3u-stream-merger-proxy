@@ -26,7 +26,7 @@ RUN go test ./...
 ####################
 
 # Start a new stage from scratch
-FROM alpine
+FROM alpine:3.19.1
 
 # Install Redis
 # hadolint ignore=DL3018
