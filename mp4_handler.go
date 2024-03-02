@@ -8,6 +8,7 @@ import (
 	"m3u-stream-merger/utils"
 	"net/http"
 	"strings"
+	"sync"
 	"syscall"
 )
 
@@ -40,19 +41,51 @@ func mp4Handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	var resp *http.Response
+	var mutex sync.Mutex
 	defer func() {
+		mutex.Lock()
 		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
 		}
+		mutex.Unlock()
 	}()
 
+	// Concurrently handle each stream URL
+	var wg sync.WaitGroup
 	for _, url := range stream.URLs {
-		resp, err = http.Get(url.Content)
-		if err == nil {
-			break
-		}
-		// Log the error
-		log.Printf("Error fetching MP4 stream: %s\n", err.Error())
+		wg.Add(1)
+		go func(url database.StreamURL) {
+			defer wg.Done()
+
+			// Ensure that the maximum concurrency is respected
+			semaphore := make(chan struct{}, url.MaxConcurrency)
+			semaphore <- struct{}{}
+
+			mutex.Lock()
+			defer mutex.Unlock()
+
+			// If there's already a successful response, return immediately
+			if resp != nil {
+				return
+			}
+
+			// Wait for permission from the semaphore before making the request
+			<-semaphore
+			defer func() {
+				semaphore <- struct{}{}
+			}()
+
+			// Make the request
+			response, err := http.Get(url.Content)
+			if err != nil {
+				// Log the error
+				log.Printf("Error fetching MP4 stream: %s\n", err.Error())
+				return
+			}
+
+			// Set the response if successful
+			resp = response
+		}(url)
 	}
 
 	if resp == nil {
