@@ -2,28 +2,100 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
+	"m3u-stream-merger/database"
 	"m3u-stream-merger/m3u"
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 )
 
-func updateSource(ctx context.Context, m3uUrl string, index int) {
+var db *sql.DB
+
+func swapDb(nextDb *sql.DB) error {
+	nextDb.Close()
+
+	err := database.DeleteSQLite(db, "current_streams")
+	if err != nil {
+		return fmt.Errorf("Error deleting current_streams: %v\n", err)
+	}
+
+	err = database.RenameSQLite("next_streams", "current_streams")
+	if err != nil {
+		return fmt.Errorf("Error renaming to current_streams: %v\n", err)
+	}
+
+	db, err = database.InitializeSQLite("current_streams")
+	if err != nil {
+		return fmt.Errorf("Error reinitializing to current_streams: %v\n", err)
+	}
+
+	return nil
+}
+
+func updateSource(nextDb *sql.DB, m3uUrl string, index int, maxConcurrency int) {
+	log.Printf("Background process: Updating M3U #%d from %s\n", index, m3uUrl)
+	err := m3u.ParseM3UFromURL(nextDb, m3uUrl, index, maxConcurrency)
+	if err != nil {
+		log.Printf("Background process: Error updating M3U: %v\n", err)
+	} else {
+		log.Printf("Background process: Updated M3U #%d from %s\n", index, m3uUrl)
+	}
+}
+
+func updateSources(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			fmt.Printf("Background process: Updating M3U #%s from %d\n", m3uUrl, index)
-			err := m3u.ParseM3UFromURL(m3uUrl, index)
+			var err error
+			nextDb, err := database.InitializeSQLite("next_streams")
 			if err != nil {
-				fmt.Printf("Error updating M3U: %v\n", err)
-			} else {
-				fmt.Printf("Background process: Updated M3U #%s from %d\n", m3uUrl, index)
+				log.Fatalf("Error initializing next SQLite database: %v", err)
 			}
+
+			log.Println("Background process: Checking M3U_URLs...")
+			var wg sync.WaitGroup
+			index := 1
+			for {
+				maxConcurrency := 1
+				m3uUrl, m3uExists := os.LookupEnv(fmt.Sprintf("M3U_URL_%d", index))
+				rawMaxConcurrency, maxConcurrencyExists := os.LookupEnv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", index))
+				if !m3uExists {
+					break
+				}
+
+				log.Printf("Background process: Checking M3U_MAX_CONCURRENCY_%d...\n", index)
+				if maxConcurrencyExists {
+					var err error
+					maxConcurrency, err = strconv.Atoi(rawMaxConcurrency)
+					if err != nil {
+						maxConcurrency = 1
+					}
+				}
+
+				log.Printf("Background process: Fetching M3U_URL_%d...\n", index)
+				wg.Add(1)
+				// Start the goroutine for periodic updates
+				go func() {
+					defer wg.Done()
+					updateSource(nextDb, m3uUrl, index, maxConcurrency)
+				}()
+
+				index++
+			}
+			wg.Wait()
+
+			err = swapDb(nextDb)
+			if err != nil {
+				log.Fatalf("swapDb: %v", err)
+			}
+			log.Println("Background process: Updated M3U database.")
 
 			updateIntervalInHour, exists := os.LookupEnv("UPDATE_INTERVAL")
 			if !exists {
@@ -32,8 +104,10 @@ func updateSource(ctx context.Context, m3uUrl string, index int) {
 
 			hourInt, err := strconv.Atoi(updateIntervalInHour)
 			if err != nil {
+				log.Println("Background process: Sleeping for 24 hours...")
 				time.Sleep(24 * time.Hour)
 			} else {
+				log.Printf("Background process: Sleeping for %d hours...\n", hourInt)
 				select {
 				case <-time.After(time.Duration(hourInt) * time.Hour):
 					// Continue loop after sleep
@@ -50,28 +124,31 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	index := 1
-	for {
-		m3uUrl, m3uExists := os.LookupEnv(fmt.Sprintf("M3U_URL_%d", index))
-		if !m3uExists {
-			break
-		}
-
-		// Start the goroutine for periodic updates
-		go updateSource(ctx, m3uUrl, index)
-
-		index++
+	db, err := database.InitializeSQLite("current_streams")
+	if err != nil {
+		log.Fatalf("Error initializing current SQLite database: %v", err)
 	}
 
+	redisClient := database.InitializeRedis()
+	if err := redisClient.Ping(context.Background()).Err(); err != nil {
+		log.Fatalf("Failed to connect to Redis: %s\n", err)
+	}
+
+	go updateSources(ctx)
+
 	// HTTP handlers
-	http.HandleFunc("/playlist.m3u", m3u.GenerateM3UContent)
-	http.HandleFunc("/stream/", mp4Handler)
+	http.HandleFunc("/playlist.m3u", func(w http.ResponseWriter, r *http.Request) {
+		m3u.GenerateM3UContent(w, r, db)
+	})
+	http.HandleFunc("/stream/", func(w http.ResponseWriter, r *http.Request) {
+		mp4Handler(w, r, db)
+	})
 
 	// Start the server
-	fmt.Println("Server is running on port 8080...")
-	fmt.Println("Playlist Endpoint is running (`/playlist.m3u`)")
-	fmt.Println("Stream Endpoint is running (`/stream/{streamID}.mp4`)")
-	err := http.ListenAndServe(":8080", nil)
+	log.Println("Server is running on port 8080...")
+	log.Println("Playlist Endpoint is running (`/playlist.m3u`)")
+	log.Println("Stream Endpoint is running (`/stream/{streamID}.mp4`)")
+	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
 		log.Fatalf("HTTP server error: %v", err)
 	}

@@ -9,26 +9,24 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-var db *sql.DB
-
-func InitializeSQLite() error {
+func InitializeSQLite(name string) (db *sql.DB, err error) {
 	foldername := filepath.Join(".", "data")
-	filename := filepath.Join(foldername, "database.sqlite")
+	filename := filepath.Join(foldername, fmt.Sprintf("%s.db", name))
 
-	err := os.MkdirAll(foldername, 0755)
+	err = os.MkdirAll(foldername, 0755)
 	if err != nil {
-		return fmt.Errorf("error creating data folder: %v\n", err)
+		return nil, fmt.Errorf("error creating data folder: %v\n", err)
 	}
 
 	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
-		return fmt.Errorf("error creating database file: %v\n", err)
+		return nil, fmt.Errorf("error creating database file: %v\n", err)
 	}
 	file.Close()
 
 	db, err = sql.Open("sqlite3", filename)
 	if err != nil {
-		return fmt.Errorf("error opening SQLite database: %v\n", err)
+		return nil, fmt.Errorf("error opening SQLite database: %v\n", err)
 	}
 
 	// Create table if not exists
@@ -42,7 +40,7 @@ func InitializeSQLite() error {
 		)
 	`)
 	if err != nil {
-		return fmt.Errorf("error creating table: %v\n", err)
+		return nil, fmt.Errorf("error creating table: %v\n", err)
 	}
 
 	_, err = db.Exec(`
@@ -51,17 +49,46 @@ func InitializeSQLite() error {
 			stream_id INTEGER,
 			content TEXT,
 			m3u_index INTEGER,
+			max_concurrency INTEGER DEFAULT 1,
 			FOREIGN KEY(stream_id) REFERENCES streams(id)
 		)
 	`)
 	if err != nil {
-		return fmt.Errorf("error creating table: %v\n", err)
+		return nil, fmt.Errorf("error creating table: %v\n", err)
+	}
+
+	return
+}
+
+// DeleteSQLite deletes the SQLite database file.
+func DeleteSQLite(db *sql.DB, name string) error {
+	err := db.Close()
+	if err != nil {
+		return fmt.Errorf("error closing database: %v\n", err)
+	}
+
+	foldername := filepath.Join(".", "data")
+	filename := filepath.Join(foldername, fmt.Sprintf("%s.db", name))
+
+	err = os.Remove(filename)
+	if err != nil {
+		return fmt.Errorf("error deleting database file: %v\n", err)
 	}
 
 	return nil
 }
 
-func SaveToSQLite(streams []StreamInfo) (err error) {
+func RenameSQLite(prevName string, nextName string) error {
+	foldername := filepath.Join(".", "data")
+	prevFileName := filepath.Join(foldername, fmt.Sprintf("%s.db", prevName))
+	nextFileName := filepath.Join(foldername, fmt.Sprintf("%s.db", nextName))
+
+	err := os.Rename(prevFileName, nextFileName)
+
+	return err
+}
+
+func SaveToSQLite(db *sql.DB, streams []StreamInfo) (err error) {
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("error beginning transaction: %v", err)
@@ -111,7 +138,7 @@ func SaveToSQLite(streams []StreamInfo) (err error) {
 	return
 }
 
-func InsertStream(s StreamInfo) (i int64, err error) {
+func InsertStream(db *sql.DB, s StreamInfo) (i int64, err error) {
 	tx, err := db.Begin()
 	if err != nil {
 		return -1, fmt.Errorf("error beginning transaction: %v", err)
@@ -145,7 +172,7 @@ func InsertStream(s StreamInfo) (i int64, err error) {
 	return streamID, err
 }
 
-func InsertStreamUrl(id int64, url StreamURL) (i int64, err error) {
+func InsertStreamUrl(db *sql.DB, id int64, url StreamURL) (i int64, err error) {
 	tx, err := db.Begin()
 	if err != nil {
 		return -1, fmt.Errorf("error beginning transaction: %v", err)
@@ -156,13 +183,13 @@ func InsertStreamUrl(id int64, url StreamURL) (i int64, err error) {
 		}
 	}()
 
-	urlStmt, err := tx.Prepare("INSERT INTO stream_urls(stream_id, content, m3u_index) VALUES(?, ?, ?)")
+	urlStmt, err := tx.Prepare("INSERT INTO stream_urls(stream_id, content, m3u_index, max_concurrency) VALUES(?, ?, ?, ?)")
 	if err != nil {
 		return -1, fmt.Errorf("error preparing statement: %v", err)
 	}
 	defer urlStmt.Close()
 
-	res, err := urlStmt.Exec(id, url.Content, url.M3UIndex)
+	res, err := urlStmt.Exec(id, url.Content, url.M3UIndex, url.MaxConcurrency)
 	if err != nil {
 		return -1, fmt.Errorf("error inserting stream URL: %v", err)
 	}
@@ -180,7 +207,67 @@ func InsertStreamUrl(id int64, url StreamURL) (i int64, err error) {
 	return insertedId, err
 }
 
-func GetStreamByTitle(title string) (s StreamInfo, err error) {
+func DeleteStreamByTitle(db *sql.DB, title string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("error beginning transaction: %v", err)
+	}
+	defer func() {
+		if err != nil {
+			err = tx.Rollback()
+		}
+	}()
+
+	stmt, err := tx.Prepare("DELETE FROM streams WHERE title = ?")
+	if err != nil {
+		return fmt.Errorf("error preparing statement: %v", err)
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(title)
+	if err != nil {
+		return fmt.Errorf("error deleting stream: %v", err)
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return fmt.Errorf("error committing transaction: %v", err)
+	}
+
+	return nil
+}
+
+func DeleteStreamURL(db *sql.DB, streamURLID int64) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("error beginning transaction: %v", err)
+	}
+	defer func() {
+		if err != nil {
+			err = tx.Rollback()
+		}
+	}()
+
+	stmt, err := tx.Prepare("DELETE FROM stream_urls WHERE id = ?")
+	if err != nil {
+		return fmt.Errorf("error preparing statement: %v", err)
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(streamURLID)
+	if err != nil {
+		return fmt.Errorf("error deleting stream URL: %v", err)
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return fmt.Errorf("error committing transaction: %v", err)
+	}
+
+	return nil
+}
+
+func GetStreamByTitle(db *sql.DB, title string) (s StreamInfo, err error) {
 	rows, err := db.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams WHERE title = ?", title)
 	if err != nil {
 		return s, fmt.Errorf("error querying streams: %v", err)
@@ -193,7 +280,7 @@ func GetStreamByTitle(title string) (s StreamInfo, err error) {
 			return s, fmt.Errorf("error scanning stream: %v", err)
 		}
 
-		urlRows, err := db.Query("SELECT content, m3u_index FROM stream_urls WHERE stream_id = ?", s.DbId)
+		urlRows, err := db.Query("SELECT id, content, m3u_index, max_concurrency FROM stream_urls WHERE stream_id = ?", s.DbId)
 		if err != nil {
 			return s, fmt.Errorf("error querying stream URLs: %v", err)
 		}
@@ -202,7 +289,7 @@ func GetStreamByTitle(title string) (s StreamInfo, err error) {
 		var urls []StreamURL
 		for urlRows.Next() {
 			var u StreamURL
-			err := urlRows.Scan(&u.Content, &u.M3UIndex)
+			err := urlRows.Scan(&u.DbId, &u.Content, &u.M3UIndex, &u.MaxConcurrency)
 			if err != nil {
 				return s, fmt.Errorf("error scanning stream URL: %v", err)
 			}
@@ -225,7 +312,7 @@ func GetStreamByTitle(title string) (s StreamInfo, err error) {
 	return s, nil
 }
 
-func GetStreams() ([]StreamInfo, error) {
+func GetStreams(db *sql.DB) ([]StreamInfo, error) {
 	rows, err := db.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams")
 	if err != nil {
 		return nil, fmt.Errorf("error querying streams: %v", err)
@@ -240,7 +327,7 @@ func GetStreams() ([]StreamInfo, error) {
 			return nil, fmt.Errorf("error scanning stream: %v", err)
 		}
 
-		urlRows, err := db.Query("SELECT id, content, m3u_index FROM stream_urls WHERE stream_id = ?", s.DbId)
+		urlRows, err := db.Query("SELECT id, content, m3u_index, max_concurrency FROM stream_urls WHERE stream_id = ?", s.DbId)
 		if err != nil {
 			return nil, fmt.Errorf("error querying stream URLs: %v", err)
 		}
@@ -249,7 +336,7 @@ func GetStreams() ([]StreamInfo, error) {
 		var urls []StreamURL
 		for urlRows.Next() {
 			var u StreamURL
-			err := urlRows.Scan(&u.DbId, &u.Content, &u.M3UIndex)
+			err := urlRows.Scan(&u.DbId, &u.Content, &u.M3UIndex, &u.MaxConcurrency)
 			if err != nil {
 				return nil, fmt.Errorf("error scanning stream URL: %v", err)
 			}

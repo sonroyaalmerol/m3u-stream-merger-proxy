@@ -25,14 +25,24 @@ RUN go test ./...
 
 ####################
 
-FROM scratch
+# Start a new stage from scratch
+FROM alpine:3.19.1
 
-WORKDIR /
+# Install Redis
+# hadolint ignore=DL3018
+RUN apk --no-cache add redis
 
+# Copy the built Go binary from the previous stage
 COPY --from=build /app/main /gomain
 
+# Expose ports for Go application and Redis
 EXPOSE 8080
 
-ENTRYPOINT ["/gomain"]
+# Copy the entrypoint script
+COPY entrypoint.sh /
 
+# Set execute permission on the entrypoint script
+RUN chmod +x /entrypoint.sh
 
+# Run the entrypoint script
+CMD ["/entrypoint.sh"]
