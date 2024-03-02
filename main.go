@@ -60,7 +60,8 @@ func main() {
 		}
 
 		if maxConcurrencyExists {
-			maxConcurrency, err := strconv.Atoi(rawMaxConcurrency)
+			var err error
+			maxConcurrency, err = strconv.Atoi(rawMaxConcurrency)
 			if err != nil {
 				maxConcurrency = 1
 			}
