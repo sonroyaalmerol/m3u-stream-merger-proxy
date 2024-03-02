@@ -21,6 +21,7 @@ func loadBalancer(ctx context.Context, stream database.StreamInfo) (resp *http.R
 	// Concurrency check mode
 	for _, url := range stream.URLs {
 		if checkConcurrency(ctx, url.Content, url.MaxConcurrency) {
+			log.Printf("Concurrency limit reached (%d): %s", url.MaxConcurrency, url.Content)
 			continue // Skip this stream if concurrency limit reached
 		}
 
@@ -43,7 +44,7 @@ func loadBalancer(ctx context.Context, stream database.StreamInfo) (resp *http.R
 				break
 			} else {
 				// Log the error
-				return nil, nil, fmt.Errorf("Error fetching MP4 stream (connection check mode): %s\n", err.Error())
+				log.Printf("Error fetching MP4 stream (connection check mode): %s\n", err.Error())
 			}
 		}
 
@@ -103,6 +104,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		http.Error(w, "Error fetching MP4 stream. Exhausted all streams.", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Proxying %s to %s\n", r.RemoteAddr, selectedUrl.Content)
 	updateConcurrency(ctx, selectedUrl.Content, true)
 
 	// Log the successful response
