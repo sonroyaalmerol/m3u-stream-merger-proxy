@@ -17,9 +17,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func loadBalancer(ctx context.Context, stream database.StreamInfo) (selectedUrl *database.StreamURL, err error) {
-	var resp *http.Response
-
+func loadBalancer(ctx context.Context, stream database.StreamInfo) (resp *http.Response, selectedUrl *database.StreamURL, err error) {
 	// Concurrency check mode
 	for _, url := range stream.URLs {
 		if checkConcurrency(ctx, url.Content, url.MaxConcurrency) {
@@ -45,19 +43,19 @@ func loadBalancer(ctx context.Context, stream database.StreamInfo) (selectedUrl 
 				break
 			} else {
 				// Log the error
-				return nil, fmt.Errorf("Error fetching MP4 stream (connection check mode): %s\n", err.Error())
+				return nil, nil, fmt.Errorf("Error fetching MP4 stream (connection check mode): %s\n", err.Error())
 			}
 		}
 
 		if resp == nil {
 			// Log the error
-			return nil, fmt.Errorf("Error fetching MP4 stream. Exhausted all streams.")
+			return nil, nil, fmt.Errorf("Error fetching MP4 stream. Exhausted all streams.")
 		}
 
-		return selectedUrl, nil
+		return resp, selectedUrl, nil
 	}
 
-	return selectedUrl, nil
+	return resp, selectedUrl, nil
 }
 
 func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
@@ -102,7 +100,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	// Iterate through the streams and select one based on concurrency and availability
 	var selectedUrl *database.StreamURL
 
-	selectedUrl, err = loadBalancer(ctx, stream)
+	resp, selectedUrl, err = loadBalancer(ctx, stream)
 	if err != nil {
 		http.Error(w, "Error fetching MP4 stream. Exhausted all streams.", http.StatusInternalServerError)
 		return
