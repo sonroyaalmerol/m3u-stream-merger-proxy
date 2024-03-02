@@ -71,8 +71,26 @@ func TestGenerateM3UContent(t *testing.T) {
 	}
 }
 
-// TestParseM3UFile tests the parseM3UFile function.
-func TestParseM3UFile(t *testing.T) {
+func TestParseM3UFromURL(t *testing.T) {
+	testM3UContent := `
+#EXTM3U
+#EXTINF:-1 tvg-id="bbc1" tvg-name="BBC One" group-title="UK",BBC One
+http://example.com/bbc1
+#EXTINF:-1 tvg-id="bbc2" tvg-name="BBC Two" group-title="UK",BBC Two
+http://example.com/bbc2
+#EXTINF:-1 tvg-id="cnn" tvg-name="CNN International" group-title="News",CNN
+http://example.com/cnn
+#EXTVLCOPT:logo=http://example.com/bbc_logo.png
+#EXTINF:-1 tvg-id="fox" tvg-name="FOX" group-title="Entertainment",FOX
+http://example.com/fox
+`
+	// Create a mock HTTP server
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		fmt.Fprintln(w, testM3UContent)
+	}))
+	defer mockServer.Close()
+
   sqliteDBPath := filepath.Join(".", "data", "database.sqlite")
 
   // Test InitializeSQLite and check if the database file exists
@@ -82,40 +100,36 @@ func TestParseM3UFile(t *testing.T) {
   }
   defer os.Remove(sqliteDBPath) // Cleanup the database file after the test
 
-	// Create a temporary test file
-	tempFile, err := os.CreateTemp("", "test.m3u")
+	// Test the parseM3UFromURL function with the mock server URL
+	err = parseM3UFromURL(mockServer.URL, 0)
 	if err != nil {
-		t.Fatalf("Failed to create temporary file: %v", err)
-	}
-	defer os.Remove(tempFile.Name()) // Clean up
-
-	// Write test data to the temporary file
-	testData := []byte(`
-#EXTINF:-1 tvg-id="channel1" tvg-name="Channel 1" group-title="Group 1" tvg-logo="logo1.jpg",Channel 1
-http://example.com/channel1
-#EXTINF:-1 tvg-id="channel2" tvg-name="Channel 2" group-title="Group 2" tvg-logo="logo2.jpg",Channel 2
-http://example.com/channel2
-#EXTVLCOPT:logo=http://example.com/logo3.jpg
-http://example.com/channel3
-	`)
-	if _, err := tempFile.Write(testData); err != nil {
-		t.Fatalf("Failed to write to temporary file: %v", err)
-	}
-	tempFile.Close() // Close the file before parsing
-
-	// Call the function with the temporary file
-	err = parseM3UFile(tempFile.Name(), 0)
-	if err != nil {
-		t.Fatalf("Error parsing M3U file: %v", err)
+		t.Errorf("Error parsing M3U from URL: %v", err)
 	}
 
-  // Check the expected content in the database
+  // Verify expected values
 	expectedStreams := []database.StreamInfo{
-		{URLs: []database.StreamURL{{Content: "http://example.com/channel1", M3UIndex: 0}}, TvgID: "channel1", Title: "Channel 1", Group: "Group 1", LogoURL: "logo1.jpg"},
-		{URLs: []database.StreamURL{{Content: "http://example.com/channel2", M3UIndex: 0}}, TvgID: "channel2", Title: "Channel 2", Group: "Group 2", LogoURL: "logo2.jpg"},
+		{Title: "BBC One", TvgID: "bbc1", Group: "UK", URLs: []database.StreamURL{
+      {
+        Content: "http://example.com/bbc1",  
+      },
+    }},
+		{Title: "BBC Two", TvgID: "bbc2", Group: "UK", URLs: []database.StreamURL{
+      {
+        Content: "http://example.com/bbc2",  
+      },
+    }},
+		{Title: "CNN International", TvgID: "cnn", Group: "News", URLs: []database.StreamURL{
+      {
+        Content: "http://example.com/cnn",  
+      },
+    }},
+		{Title: "FOX", TvgID: "fox", Group: "Entertainment", URLs: []database.StreamURL{
+      {
+        Content: "http://example.com/fox",  
+      },
+    }},
 	}
 
-	// Retrieve streams from the database
 	storedStreams, err := database.GetStreams()
 	if err != nil {
 		t.Fatalf("Error retrieving streams from database: %v", err)
@@ -142,7 +156,6 @@ http://example.com/channel3
 		}
 	}
 }
-
 
 // streamInfoEqual checks if two StreamInfo objects are equal.
 func streamInfoEqual(a, b database.StreamInfo) bool {

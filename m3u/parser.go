@@ -3,23 +3,23 @@ package m3u
 import (
 	"bufio"
 	"fmt"
-	"os"
+	"net/http"
 	"regexp"
 	"strings"
 
 	"m3u-stream-merger/database"
 )
 
-func parseM3UFile(filePath string, m3uIndex int) (error) {
-	fmt.Printf("Parsing: %s\n", filePath)
+func parseM3UFile(m3uURL string, m3uIndex int) (error) {
+	fmt.Printf("Parsing M3U from URL: %s\n", m3uURL)
 
-	file, err := os.Open(filePath)
+  resp, err := http.Get(m3uURL)
 	if err != nil {
-		return fmt.Errorf("Open error: %v", err)
+		return fmt.Errorf("HTTP GET error: %v", err)
 	}
-	defer file.Close()
+	defer resp.Body.Close()
 
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(resp.Body)
 
 	var currentStream database.StreamInfo
 
