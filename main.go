@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"m3u-stream-merger/database"
 	"m3u-stream-merger/m3u"
 	"net/http"
 	"os"
@@ -49,6 +50,11 @@ func main() {
 	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	redisClient := database.InitializeRedis()
+	if err := redisClient.Ping(context.Background()).Err(); err != nil {
+		log.Fatalf("Failed to connect to Redis: %s\n", err)
+	}
 
 	index := 1
 	for {
