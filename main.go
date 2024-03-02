@@ -80,10 +80,10 @@ func updateSources(ctx context.Context) {
 				log.Printf("Background process: Fetching M3U_URL_%d...\n", index)
 				wg.Add(1)
 				// Start the goroutine for periodic updates
-				go func() {
+				go func(nextDb *sql.DB, m3uUrl string, index int, maxConcurrency int) {
 					defer wg.Done()
 					updateSource(nextDb, m3uUrl, index, maxConcurrency)
-				}()
+				}(nextDb, m3uUrl, index, maxConcurrency)
 
 				index++
 			}
