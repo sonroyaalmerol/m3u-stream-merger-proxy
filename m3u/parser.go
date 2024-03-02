@@ -3,6 +3,7 @@ package m3u
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"regexp"
@@ -27,7 +28,7 @@ func ParseM3UFromURL(m3uURL string, m3uIndex int, maxConcurrency int) error {
 		},
 	}
 
-	fmt.Printf("Parsing M3U from URL: %s\n", m3uURL)
+	log.Printf("Parsing M3U from URL: %s\n", m3uURL)
 
 	resp, err := client.Get(m3uURL)
 	if err != nil {

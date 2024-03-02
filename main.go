@@ -18,12 +18,12 @@ func updateSource(ctx context.Context, m3uUrl string, index int, maxConcurrency 
 		case <-ctx.Done():
 			return
 		default:
-			fmt.Printf("Background process: Updating M3U #%d from %s\n", index, m3uUrl)
+			log.Printf("Background process: Updating M3U #%d from %s\n", index, m3uUrl)
 			err := m3u.ParseM3UFromURL(m3uUrl, index, maxConcurrency)
 			if err != nil {
-				fmt.Printf("Error updating M3U: %v\n", err)
+				log.Printf("Error updating M3U: %v\n", err)
 			} else {
-				fmt.Printf("Background process: Updated M3U #%d from %s\n", index, m3uUrl)
+				log.Printf("Background process: Updated M3U #%d from %s\n", index, m3uUrl)
 			}
 
 			updateIntervalInHour, exists := os.LookupEnv("UPDATE_INTERVAL")
@@ -59,8 +59,8 @@ func main() {
 	err := database.InitializeSQLite()
 	if err != nil {
 		log.Fatalf("Error initializing SQLite database: %v", err)
-
 	}
+
 	index := 1
 	for {
 		maxConcurrency := 1
@@ -89,9 +89,9 @@ func main() {
 	http.HandleFunc("/stream/", mp4Handler)
 
 	// Start the server
-	fmt.Println("Server is running on port 8080...")
-	fmt.Println("Playlist Endpoint is running (`/playlist.m3u`)")
-	fmt.Println("Stream Endpoint is running (`/stream/{streamID}.mp4`)")
+	log.Println("Server is running on port 8080...")
+	log.Println("Playlist Endpoint is running (`/playlist.m3u`)")
+	log.Println("Stream Endpoint is running (`/stream/{streamID}.mp4`)")
 	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
 		log.Fatalf("HTTP server error: %v", err)
