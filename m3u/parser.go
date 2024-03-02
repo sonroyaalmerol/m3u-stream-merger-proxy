@@ -46,6 +46,7 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 
 		if strings.HasPrefix(line, "#EXTINF:") {
 			currentStream = database.StreamInfo{}
+			currentStream.Title = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "#EXTINF:-1"), ","))
 
 			// Define a regular expression to capture key-value pairs
 			regex := regexp.MustCompile(`(\S+?)="([^"]*?)"`)
@@ -60,17 +61,10 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 				switch key {
 				case "tvg-id":
 					currentStream.TvgID = value
-				case "tvg-name":
-					currentStream.Title = value
 				case "group-title":
 					currentStream.Group = value
 				case "tvg-logo":
 					currentStream.LogoURL = value
-				}
-
-				// If tvg-name is empty, use the stream title as a fallback
-				if key == "tvg-name" && value == "" {
-					currentStream.Title = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "#EXTINF:-1"), ","))
 				}
 			}
 		} else if strings.HasPrefix(line, "#EXTVLCOPT:") {
