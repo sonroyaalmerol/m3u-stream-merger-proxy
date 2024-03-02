@@ -70,9 +70,6 @@ func ParseM3UFromURL(m3uURL string, m3uIndex int) error {
 			// Extract logo URL from #EXTVLCOPT line
 			parts := strings.SplitN(line, "=", 2)
 			if len(parts) == 2 {
-				currentStream.TvgID = ""
-				currentStream.Title = ""
-				currentStream.Group = ""
 				currentStream.LogoURL = parts[1]
 			}
 		} else if strings.HasPrefix(line, "http") {
