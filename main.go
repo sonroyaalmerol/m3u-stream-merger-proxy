@@ -53,7 +53,7 @@ func swapDb() error {
 	}
 
 	// Delete the temporary database
-	err = database.DeleteSQLite(db, tempName)
+	err = database.DeleteSQLite(tempName)
 	if err != nil {
 		// Log the error but do not return as this is not a critical error
 		fmt.Printf("Error deleting temp database: %v\n", err)

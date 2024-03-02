@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -15,6 +16,13 @@ var mutex sync.Mutex
 func InitializeSQLite(name string) (db *sql.DB, err error) {
 	mutex.Lock()
 	defer mutex.Unlock()
+
+	if db != nil {
+		err := db.Close()
+		if err == nil {
+			log.Printf("Database session has already been closed: %v\n", err)
+		}
+	}
 
 	foldername := filepath.Join(".", "data")
 	filename := filepath.Join(foldername, fmt.Sprintf("%s.db", name))
@@ -67,7 +75,7 @@ func InitializeSQLite(name string) (db *sql.DB, err error) {
 }
 
 // DeleteSQLite deletes the SQLite database file.
-func DeleteSQLite(db *sql.DB, name string) error {
+func DeleteSQLite(name string) error {
 	mutex.Lock()
 	defer mutex.Unlock()
 
