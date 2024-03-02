@@ -146,7 +146,7 @@ func checkConcurrency(ctx context.Context, m3uIndex int) bool {
 	}
 
 	redisClient := database.InitializeRedis()
-	val, err := redisClient.Get(ctx, strconv.Itoa(m3uIndex)).Result()
+	val, err := redisClient.Get(ctx, fmt.Sprintf("m3u_%d", m3uIndex)).Result()
 	if err == redis.Nil {
 		return false // Key does not exist
 	} else if err != nil {
@@ -154,7 +154,12 @@ func checkConcurrency(ctx context.Context, m3uIndex int) bool {
 		return false // Error occurred, treat as concurrency not reached
 	}
 
-	count, _ := strconv.Atoi(val)
+	count, err := strconv.Atoi(val)
+	if err != nil {
+		count = 0
+	}
+
+	log.Printf("Current concurrent connections for M3U_%d: %d", m3uIndex, count)
 	return count >= maxConcurrency
 }
 
@@ -162,9 +167,9 @@ func updateConcurrency(ctx context.Context, m3uIndex int, incr bool) {
 	redisClient := database.InitializeRedis()
 	var err error
 	if incr {
-		err = redisClient.Incr(ctx, strconv.Itoa(m3uIndex)).Err()
+		err = redisClient.Incr(ctx, fmt.Sprintf("m3u_%d", m3uIndex)).Err()
 	} else {
-		err = redisClient.Decr(ctx, strconv.Itoa(m3uIndex)).Err()
+		err = redisClient.Decr(ctx, fmt.Sprintf("m3u_%d", m3uIndex)).Err()
 	}
 	if err != nil {
 		log.Printf("Error updating concurrency: %s\n", err.Error())
