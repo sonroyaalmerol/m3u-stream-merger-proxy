@@ -10,10 +10,22 @@ import (
 	"m3u-stream-merger/database"
 )
 
-func parseM3UFromURL(m3uURL string, m3uIndex int) (error) {
+func ParseM3UFromURL(m3uURL string, m3uIndex int) (error) {
+	// Set the custom User-Agent header
+	userAgent := "IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)"
+
+	// Create a new HTTP client with a custom User-Agent header
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Follow redirects while preserving the custom User-Agent header
+			req.Header.Set("User-Agent", userAgent)
+			return nil
+		},
+	}
+
 	fmt.Printf("Parsing M3U from URL: %s\n", m3uURL)
 
-  resp, err := http.Get(m3uURL)
+  resp, err := client.Get(m3uURL)
 	if err != nil {
 		return fmt.Errorf("HTTP GET error: %v", err)
 	}

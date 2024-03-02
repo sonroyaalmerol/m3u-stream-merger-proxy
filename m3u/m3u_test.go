@@ -101,7 +101,7 @@ http://example.com/fox
   defer os.Remove(sqliteDBPath) // Cleanup the database file after the test
 
 	// Test the parseM3UFromURL function with the mock server URL
-	err = parseM3UFromURL(mockServer.URL, 0)
+	err = ParseM3UFromURL(mockServer.URL, 0)
 	if err != nil {
 		t.Errorf("Error parsing M3U from URL: %v", err)
 	}

@@ -38,6 +38,20 @@ func updateSource(ctx context.Context) {
 }
 
 func main() {
+	index := 1
+	for {
+		m3uUrl, m3uExists := os.LookupEnv(fmt.Sprintf("M3U_URL_%d", index))
+		if !m3uExists {
+			break
+		}
+
+    err := m3u.ParseM3UFromURL(m3uUrl, index)
+    if err != nil {
+      
+    }
+
+		index++
+	}
 	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
