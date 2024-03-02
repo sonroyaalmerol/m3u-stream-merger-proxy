@@ -1,7 +1,6 @@
 package database
 
 import (
-	"m3u-stream-merger/database"
 	"os"
 	"path/filepath"
 	"testing"
@@ -81,7 +80,7 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 }
 
 // streamInfoEqual checks if two StreamInfo objects are equal.
-func streamInfoEqual(a, b database.StreamInfo) bool {
+func streamInfoEqual(a, b StreamInfo) bool {
 	if a.TvgID != b.TvgID || a.Title != b.Title || a.Group != b.Group || a.LogoURL != b.LogoURL || len(a.URLs) != len(b.URLs) {
 		return false
 	}
