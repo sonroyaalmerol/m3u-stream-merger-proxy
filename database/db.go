@@ -62,15 +62,10 @@ func InitializeSQLite(name string) (db *sql.DB, err error) {
 
 // DeleteSQLite deletes the SQLite database file.
 func DeleteSQLite(db *sql.DB, name string) error {
-	err := db.Close()
-	if err != nil {
-		return fmt.Errorf("error closing database: %v\n", err)
-	}
-
 	foldername := filepath.Join(".", "data")
 	filename := filepath.Join(foldername, fmt.Sprintf("%s.db", name))
 
-	err = os.Remove(filename)
+	err := os.Remove(filename)
 	if err != nil {
 		return fmt.Errorf("error deleting database file: %v\n", err)
 	}
