@@ -9,7 +9,7 @@ If your IPTV provider issues multiple M3U links for each connection, but you pre
 ## How It Works
 
 1. **Initialization and M3U Playlist Consolidation:**
-   - On startup, the service loads M3U playlists from the specified URLs (M3U_URL_1, M3U_URL_2, M3U_URL_3, etc.). This usually takes a while, depending on the size of the original M3U files as it goes through each entry.
+   - On startup, the service loads M3U playlists from the specified URLs (M3U_URL_1, M3U_URL_2, M3U_URL_3, etc.). This usually takes a while, depending on the size of the original M3U files as it goes through each entry. The parsing process will be done in the background.
    - It consolidates the playlists by merging different streams based on their stream name.
    - The consolidated data will be saved in a JSON file in the data folder which will serve as its "database."
    - For each unique stream name, the service aggregates the corresponding stream URLs into a consolidated M3U playlist.
@@ -78,6 +78,8 @@ This will start the M3U Stream Merger Proxy, and you can access it at `http://lo
 ### Configuration
 
 - **M3U_URL_1, M3U_URL_2, M3U_URL_X**: Set the M3U URLs as environment variables in the `.env` file.
+
+- **USER_AGENT**: Set the User-Agent of all HTTP requests. Default is `IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)`.
 
 - **UPDATE_INTERVAL**: (Optional) Set the update interval in hours. Default is 24 hours.
 

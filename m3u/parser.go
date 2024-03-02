@@ -3,117 +3,39 @@ package m3u
 import (
 	"bufio"
 	"fmt"
-	"log"
+	"net/http"
 	"os"
 	"regexp"
 	"strings"
-	"sync"
 
 	"m3u-stream-merger/database"
 )
 
-// GetStreams retrieves and merges stream information from multiple M3U files.
-func GetStreams(skipClearing bool) error {
-	// Initialize database
-	err := database.InitializeSQLite()
-	if err != nil {
-		return fmt.Errorf("InitializeSQLite error: %v", err)
+func ParseM3UFromURL(m3uURL string, m3uIndex int) error {
+	// Set the custom User-Agent header
+	userAgent, userAgentExists := os.LookupEnv("USER_AGENT")
+	if !userAgentExists {
+		userAgent = "IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)"
 	}
 
-	if !skipClearing {
-		// init
-		log.Println("Loading from database...")
-		fromDB, err := database.LoadFromSQLite()
-		if err == nil {
-			Streams = fromDB 
-
+	// Create a new HTTP client with a custom User-Agent header
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Follow redirects while preserving the custom User-Agent header
+			req.Header.Set("User-Agent", userAgent)
 			return nil
-		}
+		},
 	}
 
-	err = loadM3UFiles(skipClearing)
+	fmt.Printf("Parsing M3U from URL: %s\n", m3uURL)
+
+	resp, err := client.Get(m3uURL)
 	if err != nil {
-		return fmt.Errorf("loadM3UFiles error: %v", err)
+		return fmt.Errorf("HTTP GET error: %v", err)
 	}
+	defer resp.Body.Close()
 
-	var wg sync.WaitGroup
-	var mutex sync.Mutex
-
-	for index, path := range m3uFilePaths {
-		wg.Add(1)
-		go func(filePath string, m3uIndex int) {
-			defer wg.Done()
-
-			streamInfo, err := parseM3UFile(filePath, m3uIndex)
-			if err != nil {
-				// Handle error appropriately, e.g., log it
-				log.Println(fmt.Errorf("parseM3UFile error: %v", err))
-				return
-			}
-
-			mutex.Lock()
-			defer mutex.Unlock()
-
-			// Check if the NewStreams slice is empty, if so, assign the NewStreams directly
-			if len(NewStreams) == 0 {
-				NewStreams = streamInfo
-			} else {
-				fmt.Printf("Merging: %s... This will probably take a while...\n", filePath)
-				NewStreams = mergeStreamInfo(NewStreams, streamInfo)
-			}
-		}(path, index)
-	}
-
-	wg.Wait()
-
-	Streams = NewStreams
-
-	fmt.Print("Saving to database...\n")
-	_ = database.SaveToSQLite(Streams)
-
-	return nil
-}
-
-// mergeStreamInfo merges two slices of database.StreamInfo based on Title.
-func mergeStreamInfo(existing, new []database.StreamInfo) []database.StreamInfo {
-	var wg sync.WaitGroup
-	var mutex sync.Mutex
-
-	for _, stream := range new {
-		wg.Add(1)
-		go func(s database.StreamInfo) {
-			defer wg.Done()
-			mutex.Lock()
-			defer mutex.Unlock()
-			found := false
-			for i, existingStream := range existing {
-				if s.Title == existingStream.Title {
-					existing[i].URLs = append(existing[i].URLs, s.URLs...)
-					found = true
-					break
-				}
-			}
-			if !found {
-				existing = append(existing, s)
-			}
-		}(stream)
-	}
-
-	wg.Wait()
-	return existing
-}
-
-func parseM3UFile(filePath string, m3uIndex int) ([]database.StreamInfo, error) {
-	fmt.Printf("Parsing: %s\n", filePath)
-	var streams []database.StreamInfo
-
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("Open error: %v", err)
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(resp.Body)
 
 	var currentStream database.StreamInfo
 
@@ -130,8 +52,8 @@ func parseM3UFile(filePath string, m3uIndex int) ([]database.StreamInfo, error) 
 			matches := regex.FindAllStringSubmatch(line, -1)
 
 			for _, match := range matches {
-				key := match[1]
-				value := match[2]
+				key := strings.TrimSpace(match[1])
+				value := strings.TrimSpace(match[2])
 
 				switch key {
 				case "tvg-id":
@@ -151,20 +73,34 @@ func parseM3UFile(filePath string, m3uIndex int) ([]database.StreamInfo, error) 
 				currentStream.LogoURL = parts[1]
 			}
 		} else if strings.HasPrefix(line, "http") {
-			// Extract URL
-			currentStream.URLs = []database.StreamURL{
-				{
-					Content:  line,
-					M3UIndex: m3uIndex,
-				},
+			existingStream, err := database.GetStreamByTitle(currentStream.Title)
+			if err != nil {
+				return fmt.Errorf("GetStreamByTitle error (title: %s): %v", currentStream.Title, err)
 			}
-			streams = append(streams, currentStream)
+
+			var dbId int64
+			if existingStream.Title != currentStream.Title {
+				dbId, err = database.InsertStream(currentStream)
+				if err != nil {
+					return fmt.Errorf("InsertStream error (title: %s): %v", currentStream.Title, err)
+				}
+			} else {
+				dbId = existingStream.DbId
+			}
+
+			_, err = database.InsertStreamUrl(dbId, database.StreamURL{
+				Content:  line,
+				M3UIndex: m3uIndex,
+			})
+			if err != nil {
+				return fmt.Errorf("InsertStreamUrl error (title: %s): %v", currentStream.Title, err)
+			}
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scanner error: %v", err)
+		return fmt.Errorf("scanner error: %v", err)
 	}
 
-	return streams, nil
+	return nil
 }

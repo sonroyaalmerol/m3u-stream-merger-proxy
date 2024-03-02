@@ -1,142 +1,67 @@
 package main
 
 import (
-	"errors"
+	"context"
 	"fmt"
-	"io"
 	"log"
 	"m3u-stream-merger/m3u"
-	"m3u-stream-merger/utils"
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
-	"syscall"
 	"time"
 )
 
-func mp4Handler(w http.ResponseWriter, r *http.Request) {
-	// Log the incoming request
-	log.Printf("Received request from %s for URL: %s\n", r.RemoteAddr, r.URL.Path)
-
-	// Extract the m3u ID from the URL path
-	m3uID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/stream/"), ".mp4")
-	if m3uID == "" {
-		http.NotFound(w, r)
-		return
-	}
-
-	streamName := utils.GetStreamName(m3uID)
-	if streamName == "" {
-		http.NotFound(w, r)
-		return
-	}
-
-	stream, err := m3u.FindStreamByName(streamName)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-
-	// You can modify the response header as needed
-	w.Header().Set("Content-Type", "video/mp4")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-
-	var resp *http.Response
-	defer func() {
-		if resp != nil && resp.Body != nil {
-			resp.Body.Close()
-		}
-	}()
-
-	for _, url := range stream.URLs {
-		resp, err = http.Get(url.Content)
-		if err == nil {
-			break
-		}
-		// Log the error
-		log.Printf("Error fetching MP4 stream: %s\n", err.Error())
-	}
-
-	if resp == nil {
-		// Log the error
-		log.Println("Error fetching MP4 stream. Exhausted all streams.")
-		// Check if the connection is still open before writing to the response
+func updateSource(ctx context.Context, m3uUrl string, index int) {
+	for {
 		select {
-		case <-r.Context().Done():
-			// Connection closed, handle accordingly
-			log.Println("Client disconnected")
+		case <-ctx.Done():
 			return
 		default:
-			// Connection still open, proceed with writing to the response
-			http.Error(w, "Error fetching MP4 stream. Exhausted all streams.", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	// Log the successful response
-	log.Printf("Sent MP4 stream to %s\n", r.RemoteAddr)
-
-	// Check if the connection is still open before copying the MP4 stream to the response
-	select {
-	case <-r.Context().Done():
-		// Connection closed, handle accordingly
-		log.Println("Client disconnected after fetching MP4 stream")
-		return
-	default:
-		// Connection still open, proceed with writing to the response
-		_, err := io.Copy(w, resp.Body)
-		if err != nil {
-			// Log the error
-			if errors.Is(err, syscall.EPIPE) {
-				log.Println("Client disconnected after fetching MP4 stream")
+			fmt.Printf("Background process: Updating M3U #%s from %d\n", m3uUrl, index)
+			err := m3u.ParseM3UFromURL(m3uUrl, index)
+			if err != nil {
+				fmt.Printf("Error updating M3U: %v\n", err)
 			} else {
-				log.Printf("Error copying MP4 stream to response: %s\n", err.Error())
+				fmt.Printf("Background process: Updated M3U #%s from %d\n", m3uUrl, index)
 			}
-			return
-		}
-	}
 
-	// Explicitly check if the connection is still open after a short delay
-	select {
-	case <-r.Context().Done():
-		log.Printf("Connection still open after copying MP4 stream. The client may have disconnected.")
-	}
-}
+			updateIntervalInHour, exists := os.LookupEnv("UPDATE_INTERVAL")
+			if !exists {
+				updateIntervalInHour = "24"
+			}
 
-func updateSource() {
-	for {
-		updateIntervalInHour, exists := os.LookupEnv("UPDATE_INTERVAL")
-		if !exists {
-			updateIntervalInHour = "24"
-		}
-
-		hourInt, err := strconv.Atoi(updateIntervalInHour)
-		if err != nil {
-			time.Sleep(24 * time.Hour)
-		} else {
-			time.Sleep(time.Duration(hourInt) * time.Hour) // Adjust the update interval as needed
-		}
-
-		// Reload M3U files
-		err = m3u.GetStreams(true)
-		if err != nil {
-			fmt.Printf("Error updating M3U: %v\n", err)
+			hourInt, err := strconv.Atoi(updateIntervalInHour)
+			if err != nil {
+				time.Sleep(24 * time.Hour)
+			} else {
+				select {
+				case <-time.After(time.Duration(hourInt) * time.Hour):
+					// Continue loop after sleep
+				case <-ctx.Done():
+					return // Exit loop if context is cancelled
+				}
+			}
 		}
 	}
 }
 
 func main() {
-	// Initial load of M3U files
-	err := m3u.GetStreams(false)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
-	}
+	// Context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// Start the goroutine for periodic updates
-	go updateSource()
+	index := 1
+	for {
+		m3uUrl, m3uExists := os.LookupEnv(fmt.Sprintf("M3U_URL_%d", index))
+		if !m3uExists {
+			break
+		}
+
+		// Start the goroutine for periodic updates
+		go updateSource(ctx, m3uUrl, index)
+
+		index++
+	}
 
 	// HTTP handlers
 	http.HandleFunc("/playlist.m3u", m3u.GenerateM3UContent)
@@ -144,5 +69,10 @@ func main() {
 
 	// Start the server
 	fmt.Println("Server is running on port 8080...")
-	http.ListenAndServe(":8080", nil)
+	fmt.Println("Playlist Endpoint is running (`/playlist.m3u`)")
+	fmt.Println("Stream Endpoint is running (`/stream/{streamID}.mp4`)")
+	err := http.ListenAndServe(":8080", nil)
+	if err != nil {
+		log.Fatalf("HTTP server error: %v", err)
+	}
 }
