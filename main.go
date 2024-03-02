@@ -56,6 +56,11 @@ func main() {
 		log.Fatalf("Failed to connect to Redis: %s\n", err)
 	}
 
+	err := database.InitializeSQLite()
+	if err != nil {
+		log.Fatalf("Error initializing SQLite database: %v", err)
+
+	}
 	index := 1
 	for {
 		maxConcurrency := 1
@@ -87,7 +92,7 @@ func main() {
 	fmt.Println("Server is running on port 8080...")
 	fmt.Println("Playlist Endpoint is running (`/playlist.m3u`)")
 	fmt.Println("Stream Endpoint is running (`/stream/{streamID}.mp4`)")
-	err := http.ListenAndServe(":8080", nil)
+	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
 		log.Fatalf("HTTP server error: %v", err)
 	}
