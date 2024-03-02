@@ -13,6 +13,9 @@ import (
 var mutex sync.Mutex
 
 func InitializeSQLite(name string) (db *sql.DB, err error) {
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	foldername := filepath.Join(".", "data")
 	filename := filepath.Join(foldername, fmt.Sprintf("%s.db", name))
 
@@ -65,6 +68,9 @@ func InitializeSQLite(name string) (db *sql.DB, err error) {
 
 // DeleteSQLite deletes the SQLite database file.
 func DeleteSQLite(db *sql.DB, name string) error {
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	foldername := filepath.Join(".", "data")
 	filename := filepath.Join(foldername, fmt.Sprintf("%s.db", name))
 
@@ -77,6 +83,9 @@ func DeleteSQLite(db *sql.DB, name string) error {
 }
 
 func RenameSQLite(prevName string, nextName string) error {
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	foldername := filepath.Join(".", "data")
 	prevFileName := filepath.Join(foldername, fmt.Sprintf("%s.db", prevName))
 	nextFileName := filepath.Join(foldername, fmt.Sprintf("%s.db", nextName))
