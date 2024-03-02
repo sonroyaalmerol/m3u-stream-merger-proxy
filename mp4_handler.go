@@ -59,9 +59,7 @@ func loadBalancer(ctx context.Context, stream database.StreamInfo) (resp *http.R
 }
 
 func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	// Create a context with cancellation capability
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
+	ctx := r.Context()
 
 	// Log the incoming request
 	log.Printf("Received request from %s for URL: %s\n", r.RemoteAddr, r.URL.Path)
