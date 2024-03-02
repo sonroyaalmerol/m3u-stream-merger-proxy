@@ -67,7 +67,7 @@ func TestGenerateM3UContent(t *testing.T) {
 			rr.Body.String(), expectedContent)
 	}
 
-	err = database.DeleteSQLite(db, "test")
+	err = database.DeleteSQLite("test")
 	if err != nil {
 		t.Errorf("DeleteSQLite returned error: %v", err)
 	}
@@ -155,7 +155,7 @@ http://example.com/fox
 		}
 	}
 
-	err = database.DeleteSQLite(db, "test")
+	err = database.DeleteSQLite("test")
 	if err != nil {
 		t.Errorf("DeleteSQLite returned error: %v", err)
 	}

@@ -149,7 +149,8 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	db, err := database.InitializeSQLite("current_streams")
+	var err error
+	db, err = database.InitializeSQLite("current_streams")
 	if err != nil {
 		log.Fatalf("Error initializing current SQLite database: %v", err)
 	}
