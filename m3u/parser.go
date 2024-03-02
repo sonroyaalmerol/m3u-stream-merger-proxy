@@ -10,7 +10,7 @@ import (
 	"m3u-stream-merger/database"
 )
 
-func parseM3UFile(m3uURL string, m3uIndex int) (error) {
+func parseM3UFromURL(m3uURL string, m3uIndex int) (error) {
 	fmt.Printf("Parsing M3U from URL: %s\n", m3uURL)
 
   resp, err := http.Get(m3uURL)
