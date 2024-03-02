@@ -21,9 +21,9 @@ func updateSource(ctx context.Context, m3uUrl string, index int) {
 			err := m3u.ParseM3UFromURL(m3uUrl, index)
 			if err != nil {
 				fmt.Printf("Error updating M3U: %v\n", err)
+			} else {
+				fmt.Printf("Background process: Updated M3U #%s from %d\n", m3uUrl, index)
 			}
-
-			fmt.Printf("Background process: Updated M3U #%s from %d\n", m3uUrl, index)
 
 			updateIntervalInHour, exists := os.LookupEnv("UPDATE_INTERVAL")
 			if !exists {

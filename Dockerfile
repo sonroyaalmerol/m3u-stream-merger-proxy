@@ -16,7 +16,7 @@ COPY . .
 # Build the Go app
 ENV CGO_ENABLED=1
 
-# hadolint disable=DL3018
+# hadolint ignore=DL3018
 RUN apk add --no-cache gcc musl-dev \
   && go build -ldflags='-s -w -extldflags "-static"' -o main .
 
