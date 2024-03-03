@@ -149,11 +149,19 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 					log.Printf("Adding MP4 url entry to %s: %s\n", currentStream.Title, line)
 				}
 
-				_, err = database.InsertStreamUrl(db, dbId, database.StreamURL{
-					Content:        line,
-					M3UIndex:       m3uIndex,
-					MaxConcurrency: maxConcurrency,
-				})
+				existingUrl, err := database.GetStreamUrlByUrlAndIndex(db, line, m3uIndex)
+				if err != nil {
+					return fmt.Errorf("GetStreamUrlByUrlAndIndex error (url: %s): %v", line, err)
+				}
+
+				if existingUrl.Content != line || existingUrl.M3UIndex != m3uIndex {
+					_, err = database.InsertStreamUrl(db, dbId, database.StreamURL{
+						Content:        line,
+						M3UIndex:       m3uIndex,
+						MaxConcurrency: maxConcurrency,
+					})
+				}
+
 				if err != nil {
 					return fmt.Errorf("InsertStreamUrl error (title: %s): %v", currentStream.Title, err)
 				}

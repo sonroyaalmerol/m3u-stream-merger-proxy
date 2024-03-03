@@ -345,6 +345,30 @@ func GetStreamByTitle(db *sql.DB, title string) (s StreamInfo, err error) {
 	return s, nil
 }
 
+func GetStreamUrlByUrlAndIndex(db *sql.DB, url string, m3u_index int) (s StreamURL, err error) {
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	rows, err := db.Query("SELECT id, content, m3u_index, max_concurrency FROM stream_urls WHERE content = ? AND m3u_index = ?", url, m3u_index)
+	if err != nil {
+		return s, fmt.Errorf("error querying streams: %v", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		err = rows.Scan(&s.DbId, &s.Content, &s.M3UIndex, &s.MaxConcurrency)
+		if err != nil {
+			return s, fmt.Errorf("error scanning stream: %v", err)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return s, fmt.Errorf("error iterating over rows: %v", err)
+	}
+
+	return s, nil
+}
+
 func GetStreams(db *sql.DB) ([]StreamInfo, error) {
 	mutex.Lock()
 	defer mutex.Unlock()
