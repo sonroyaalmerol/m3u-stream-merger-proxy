@@ -47,16 +47,12 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 
 		if strings.HasPrefix(line, "#EXTINF:") {
 			currentStream = database.StreamInfo{}
-
-			lineCommaSplit := strings.SplitN(line, ",", 2)
 			extInfLine = line
 
-			if len(lineCommaSplit) > 1 {
-				currentStream.Title = strings.TrimSpace(lineCommaSplit[1])
-			}
+			lineWithoutPairs := line
 
 			// Define a regular expression to capture key-value pairs
-			regex := regexp.MustCompile(`(\S+?)="([^"]*?)"`)
+			regex := regexp.MustCompile(`([a-zA-Z0-9_-]+)=("[^"]+"|[^",]+)`)
 
 			// Find all key-value pairs in the line
 			matches := regex.FindAllStringSubmatch(line, -1)
@@ -65,18 +61,36 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 				key := strings.TrimSpace(match[1])
 				value := strings.TrimSpace(match[2])
 
+				if strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) {
+					value = strings.Trim(value, `"`)
+				}
+
 				switch key {
 				case "tvg-id":
 					currentStream.TvgID = value
 				case "tvg-name":
-					if len(strings.TrimSpace(currentStream.Title)) == 0 {
-						currentStream.Title = value
-					}
+					currentStream.Title = value
 				case "group-title":
 					currentStream.Group = value
 				case "tvg-logo":
 					currentStream.LogoURL = value
 				}
+
+				var pair string
+				if strings.Contains(value, `"`) || strings.Contains(value, ",") {
+					// If the value contains double quotes or commas, format it as key="value"
+					pair = fmt.Sprintf(`%s="%s"`, key, value)
+				} else {
+					// Otherwise, format it as key=value
+					pair = fmt.Sprintf(`%s=%s`, key, value)
+				}
+				lineWithoutPairs = strings.Replace(lineWithoutPairs, pair, "", 1)
+			}
+
+			lineCommaSplit := strings.SplitN(lineWithoutPairs, ",", 2)
+
+			if len(lineCommaSplit) > 1 {
+				currentStream.Title = strings.TrimSpace(lineCommaSplit[1])
 			}
 		} else if strings.HasPrefix(line, "#EXTVLCOPT:") {
 			// Extract logo URL from #EXTVLCOPT line
