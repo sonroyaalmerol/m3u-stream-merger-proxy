@@ -74,6 +74,10 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 					currentStream.Group = value
 				case "tvg-logo":
 					currentStream.LogoURL = value
+				default:
+					if os.Getenv("DEBUG") == "true" {
+						log.Printf("Uncaught attribute: %s=%s\n", key, value)
+					}
 				}
 
 				var pair string
