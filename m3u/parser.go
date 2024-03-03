@@ -100,7 +100,9 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 			// Extract logo URL from #EXTVLCOPT line
 			parts := strings.SplitN(line, "=", 2)
 			if len(parts) == 2 {
-				currentStream.LogoURL = parts[1]
+				if os.Getenv("DEBUG") == "true" {
+					log.Printf("Uncaught attribute (#EXTVLCOPT): %s=%s\n", parts[0], parts[1])
+				}
 			}
 		} else if strings.HasPrefix(line, "http") {
 			if len(strings.TrimSpace(currentStream.Title)) == 0 {
