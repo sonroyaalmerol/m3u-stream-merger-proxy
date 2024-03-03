@@ -65,15 +65,16 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 					value = strings.Trim(value, `"`)
 				}
 
-				if key == "tvg-id" {
+				switch key {
+				case "tvg-id":
 					currentStream.TvgID = value
-				} else if key == "tvg-name" {
+				case "tvg-name":
 					currentStream.Title = value
-				} else if key == "group-title" {
+				case "group-title":
 					currentStream.Group = value
-				} else if key == "tvg-logo" {
+				case "tvg-logo":
 					currentStream.LogoURL = value
-				} else {
+				default:
 					if os.Getenv("DEBUG") == "true" {
 						log.Printf("Uncaught attribute: %s=%s\n", key, value)
 					}
