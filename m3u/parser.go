@@ -132,7 +132,7 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 				var dbId int64
 				if existingStream.Title != currentStream.Title {
 					if os.Getenv("DEBUG") == "true" {
-						log.Printf("Creating new database entry: %s", currentStream.Title)
+						log.Printf("Creating new database entry: %s\n", currentStream.Title)
 					}
 					dbId, err = database.InsertStream(db, currentStream)
 					if err != nil {
@@ -140,14 +140,15 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 					}
 				} else {
 					if os.Getenv("DEBUG") == "true" {
-						log.Printf("Using existing database entry: %s", existingStream.Title)
+						log.Printf("Using existing database entry: %s\n", existingStream.Title)
 					}
 					dbId = existingStream.DbId
 				}
 
 				if os.Getenv("DEBUG") == "true" {
-					log.Printf("Adding MP4 url entry to %s: %s", currentStream.Title, line)
+					log.Printf("Adding MP4 url entry to %s: %s\n", currentStream.Title, line)
 				}
+
 				_, err = database.InsertStreamUrl(db, dbId, database.StreamURL{
 					Content:        line,
 					M3UIndex:       m3uIndex,
@@ -161,7 +162,7 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 
 		if scanner.Err() == io.EOF {
 			// Unexpected EOF, retry
-			log.Printf("Unexpected EOF. Retrying in 5 secs...")
+			log.Printf("Unexpected EOF. Retrying in 5 secs... (url: %s)\n", m3uURL)
 			time.Sleep(5 * time.Second)
 			continue
 		}
