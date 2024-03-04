@@ -13,20 +13,24 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 
 	// Test LoadFromSQLite with existing data in the database
 	expected := []StreamInfo{{
+		DbId:    0,
 		Title:   "stream1",
 		TvgID:   "test1",
 		LogoURL: "http://test.com/image.png",
 		Group:   "test",
 		URLs: []StreamURL{{
+			DbId:     0,
 			Content:  "testing",
 			M3UIndex: 1,
 		}},
 	}, {
+		DbId:    1,
 		Title:   "stream2",
 		TvgID:   "test2",
 		LogoURL: "http://test2.com/image.png",
 		Group:   "test2",
 		URLs: []StreamURL{{
+			DbId:     1,
 			Content:  "testing2",
 			M3UIndex: 2,
 		}},
