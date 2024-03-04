@@ -10,6 +10,7 @@ import (
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/utils"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"syscall"
@@ -20,7 +21,7 @@ import (
 func loadBalancer(ctx context.Context, stream database.StreamInfo) (resp *http.Response, selectedUrl *database.StreamURL, err error) {
 	// Concurrency check mode
 	for _, url := range stream.URLs {
-		if checkConcurrency(ctx, url.Content, url.MaxConcurrency) {
+		if checkConcurrency(ctx, url.M3UIndex) {
 			log.Printf("Concurrency limit reached (%d): %s", url.MaxConcurrency, url.Content)
 			continue // Skip this stream if concurrency limit reached
 		}
@@ -105,7 +106,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		return
 	}
 	log.Printf("Proxying %s to %s\n", r.RemoteAddr, selectedUrl.Content)
-	updateConcurrency(ctx, selectedUrl.Content, true)
+	updateConcurrency(ctx, selectedUrl.M3UIndex, true)
 
 	// Log the successful response
 	log.Printf("Sent MP4 stream to %s\n", r.RemoteAddr)
@@ -115,7 +116,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	case <-ctx.Done():
 		// Connection closed, handle accordingly
 		log.Println("Client disconnected after fetching MP4 stream")
-		updateConcurrency(ctx, selectedUrl.Content, false)
+		updateConcurrency(ctx, selectedUrl.M3UIndex, false)
 		return
 	default:
 		// Connection still open, proceed with writing to the response
@@ -124,7 +125,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			// Log the error
 			if errors.Is(err, syscall.EPIPE) {
 				log.Println("Client disconnected after fetching MP4 stream")
-				updateConcurrency(ctx, selectedUrl.Content, false)
+				updateConcurrency(ctx, selectedUrl.M3UIndex, false)
 			} else {
 				log.Printf("Error copying MP4 stream to response: %s\n", err.Error())
 			}
@@ -133,9 +134,19 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 }
 
-func checkConcurrency(ctx context.Context, url string, maxConcurrency int) bool {
+func checkConcurrency(ctx context.Context, m3uIndex int) bool {
+	maxConcurrency := 1
+	var err error
+	rawMaxConcurrency, maxConcurrencyExists := os.LookupEnv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", m3uIndex))
+	if maxConcurrencyExists {
+		maxConcurrency, err = strconv.Atoi(rawMaxConcurrency)
+		if err != nil {
+			maxConcurrency = 1
+		}
+	}
+
 	redisClient := database.InitializeRedis()
-	val, err := redisClient.Get(ctx, url).Result()
+	val, err := redisClient.Get(ctx, fmt.Sprintf("m3u_%d", m3uIndex)).Result()
 	if err == redis.Nil {
 		return false // Key does not exist
 	} else if err != nil {
@@ -143,17 +154,22 @@ func checkConcurrency(ctx context.Context, url string, maxConcurrency int) bool 
 		return false // Error occurred, treat as concurrency not reached
 	}
 
-	count, _ := strconv.Atoi(val)
+	count, err := strconv.Atoi(val)
+	if err != nil {
+		count = 0
+	}
+
+	log.Printf("Current concurrent connections for M3U_%d: %d", m3uIndex, count)
 	return count >= maxConcurrency
 }
 
-func updateConcurrency(ctx context.Context, url string, incr bool) {
+func updateConcurrency(ctx context.Context, m3uIndex int, incr bool) {
 	redisClient := database.InitializeRedis()
 	var err error
 	if incr {
-		err = redisClient.Incr(ctx, url).Err()
+		err = redisClient.Incr(ctx, fmt.Sprintf("m3u_%d", m3uIndex)).Err()
 	} else {
-		err = redisClient.Decr(ctx, url).Err()
+		err = redisClient.Decr(ctx, fmt.Sprintf("m3u_%d", m3uIndex)).Err()
 	}
 	if err != nil {
 		log.Printf("Error updating concurrency: %s\n", err.Error())
