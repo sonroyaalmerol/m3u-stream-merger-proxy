@@ -19,7 +19,7 @@ import (
 func loadBalancer(ctx context.Context, stream database.StreamInfo) (resp *http.Response, selectedUrl *database.StreamURL, err error) {
 	// Concurrency check mode
 	for _, url := range stream.URLs {
-		if checkConcurrency(ctx, url.M3UIndex) {
+		if checkConcurrency(url.M3UIndex) {
 			log.Printf("Concurrency limit reached (%d): %s", url.MaxConcurrency, url.Content)
 			continue // Skip this stream if concurrency limit reached
 		}
@@ -104,7 +104,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		return
 	}
 	log.Printf("Proxying %s to %s\n", r.RemoteAddr, selectedUrl.Content)
-	updateConcurrency(ctx, selectedUrl.M3UIndex, true)
+	updateConcurrency(selectedUrl.M3UIndex, true)
 
 	// Log the successful response
 	log.Printf("Sent MP4 stream to %s\n", r.RemoteAddr)
@@ -114,7 +114,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	case <-ctx.Done():
 		// Connection closed, handle accordingly
 		log.Println("Client disconnected after fetching MP4 stream")
-		updateConcurrency(ctx, selectedUrl.M3UIndex, false)
+		updateConcurrency(selectedUrl.M3UIndex, false)
 		return
 	default:
 		// Connection still open, proceed with writing to the response
@@ -123,7 +123,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			// Log the error
 			if errors.Is(err, syscall.EPIPE) {
 				log.Println("Client disconnected after fetching MP4 stream")
-				updateConcurrency(ctx, selectedUrl.M3UIndex, false)
+				updateConcurrency(selectedUrl.M3UIndex, false)
 			} else {
 				log.Printf("Error copying MP4 stream to response: %s\n", err.Error())
 			}
@@ -132,7 +132,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 }
 
-func checkConcurrency(ctx context.Context, m3uIndex int) bool {
+func checkConcurrency(m3uIndex int) bool {
 	maxConcurrency := 1
 	var err error
 	rawMaxConcurrency, maxConcurrencyExists := os.LookupEnv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", m3uIndex))
@@ -153,7 +153,7 @@ func checkConcurrency(ctx context.Context, m3uIndex int) bool {
 	return count >= maxConcurrency
 }
 
-func updateConcurrency(ctx context.Context, m3uIndex int, incr bool) {
+func updateConcurrency(m3uIndex int, incr bool) {
 	var err error
 	if incr {
 		err = database.IncrementConcurrency(m3uIndex)

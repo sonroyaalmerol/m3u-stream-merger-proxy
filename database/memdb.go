@@ -20,8 +20,8 @@ func InitializeMemDB() error {
 			"concurrency": {
 				Name: "concurrency",
 				Indexes: map[string]*memdb.IndexSchema{
-					"m3uIndex": {
-						Name:    "m3uIndex",
+					"id": {
+						Name:    "id",
 						Unique:  true,
 						Indexer: &memdb.IntFieldIndex{Field: "M3UIndex"},
 					},
@@ -45,7 +45,7 @@ func GetConcurrency(m3uIndex int) (int, error) {
 	txn := memDB.Txn(false)
 	defer txn.Abort()
 
-	raw, err := txn.First("concurrency", "m3uIndex", m3uIndex)
+	raw, err := txn.First("concurrency", "id", m3uIndex)
 	if err != nil {
 		return 0, err
 	}
@@ -62,7 +62,7 @@ func IncrementConcurrency(m3uIndex int) error {
 	txn := memDB.Txn(true)
 	defer txn.Commit()
 
-	raw, err := txn.First("concurrency", "m3uIndex", m3uIndex)
+	raw, err := txn.First("concurrency", "id", m3uIndex)
 	if err != nil {
 		return err
 	}
@@ -87,7 +87,7 @@ func DecrementConcurrency(m3uIndex int) error {
 	txn := memDB.Txn(true)
 	defer txn.Commit()
 
-	raw, err := txn.First("concurrency", "m3uIndex", m3uIndex)
+	raw, err := txn.First("concurrency", "id", m3uIndex)
 	if err != nil {
 		return err
 	}
@@ -106,4 +106,3 @@ func DecrementConcurrency(m3uIndex int) error {
 
 	return nil
 }
-
