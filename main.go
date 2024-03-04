@@ -155,11 +155,6 @@ func main() {
 		log.Fatalf("Error initializing current SQLite database: %v", err)
 	}
 
-	redisClient := database.InitializeRedis()
-	if err := redisClient.Ping(context.Background()).Err(); err != nil {
-		log.Fatalf("Failed to connect to Redis: %s\n", err)
-	}
-
 	go updateSources(ctx)
 
 	// HTTP handlers
