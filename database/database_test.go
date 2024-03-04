@@ -57,12 +57,18 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 		t.Errorf("DeleteStreamByTitle returned error: %v", err)
 	}
 
+	err = DeleteStreamURL(db, expected[0].URLs[0].DbId)
+	if err != nil {
+		t.Errorf("DeleteStreamURL returned error: %v", err)
+	}
+
 	result, err = GetStreams(db)
 	if err != nil {
 		t.Errorf("GetStreams returned error: %v", err)
 	}
 
 	expected = expected[:1]
+	expected[0].URLs = make([]StreamURL, 0)
 
 	if len(result) != len(expected) {
 		t.Errorf("GetStreams returned %+v, expected %+v", result, expected)
@@ -93,4 +99,41 @@ func streamInfoEqual(a, b StreamInfo) bool {
 	}
 
 	return true
+}
+
+func TestConcurrency(t *testing.T) {
+	// Initialize the in-memory database
+	err := InitializeMemDB()
+	if err != nil {
+		t.Errorf("Error initializing in-memory database: %v", err)
+	}
+
+	// Test IncrementConcurrency and GetConcurrency
+	m3uIndex := 1
+	err = IncrementConcurrency(m3uIndex)
+	if err != nil {
+		t.Errorf("Error incrementing concurrency: %v", err)
+	}
+
+	count, err := GetConcurrency(m3uIndex)
+	if err != nil {
+		t.Errorf("Error getting concurrency: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("Expected concurrency count to be 1, got %d", count)
+	}
+
+	// Test DecrementConcurrency
+	err = DecrementConcurrency(m3uIndex)
+	if err != nil {
+		t.Errorf("Error decrementing concurrency: %v", err)
+	}
+
+	count, err = GetConcurrency(m3uIndex)
+	if err != nil {
+		t.Errorf("Error getting concurrency: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("Expected concurrency count to be 0, got %d", count)
+	}
 }
