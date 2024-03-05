@@ -100,7 +100,7 @@ func InitializeSQLite(name string) (db *sql.DB, err error) {
 	}
 	file.Close()
 
-	db, err = sql.Open("sqlite3", filename)
+	db, err = sql.Open("sqlite", filename)
 	if err != nil {
 		return nil, fmt.Errorf("error opening SQLite database: %v\n", err)
 	}
