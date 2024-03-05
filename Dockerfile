@@ -13,24 +13,13 @@ RUN go mod download
 # Copy the source code from the current directory to the Working Directory inside the container
 COPY . .
 
-# Build the Go app
-ENV CGO_ENABLED=1
-
-# hadolint ignore=DL3018
-RUN apk add --no-cache gcc musl-dev \
-  && go build -ldflags='-s -w -extldflags "-static"' -o main .
-
-# Run tests
-RUN go test ./...
+RUN go build -ldflags='-s -w' -o main . \
+  && go test ./...
 
 ####################
 
 # Start a new stage from scratch
-FROM alpine:3.19.1
-
-# Install Redis
-# hadolint ignore=DL3018
-RUN apk --no-cache add redis
+FROM scratch 
 
 # Copy the built Go binary from the previous stage
 COPY --from=build /app/main /gomain
@@ -38,11 +27,5 @@ COPY --from=build /app/main /gomain
 # Expose ports for Go application and Redis
 EXPOSE 8080
 
-# Copy the entrypoint script
-COPY entrypoint.sh /
-
-# Set execute permission on the entrypoint script
-RUN chmod +x /entrypoint.sh
-
 # Run the entrypoint script
-CMD ["/entrypoint.sh"]
+CMD ["/gomain"]
