@@ -19,7 +19,10 @@ RUN go build -ldflags='-s -w' -o main . \
 ####################
 
 # Start a new stage from scratch
-FROM scratch 
+FROM alpine:3.19.1 
+
+# Install a specific version of CA certificates
+RUN apk --no-cache add ca-certificates=20240226-r0
 
 # Copy the built Go binary from the previous stage
 COPY --from=build /app/main /gomain
