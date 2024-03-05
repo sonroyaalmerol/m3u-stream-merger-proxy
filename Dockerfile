@@ -13,12 +13,8 @@ RUN go mod download
 # Copy the source code from the current directory to the Working Directory inside the container
 COPY . .
 
-# Build the Go app
-ENV CGO_ENABLED=1
-
 # hadolint ignore=DL3018
-RUN apk add --no-cache gcc musl-dev \
-  && go build -ldflags='-s -w -extldflags "-static"' -o main .
+RUN go build -ldflags='-s -w' -o main .
 
 # Run tests
 RUN go test ./...
