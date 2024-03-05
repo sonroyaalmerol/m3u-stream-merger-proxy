@@ -13,11 +13,8 @@ RUN go mod download
 # Copy the source code from the current directory to the Working Directory inside the container
 COPY . .
 
-# hadolint ignore=DL3018
-RUN go build -ldflags='-s -w' -o main .
-
-# Run tests
-RUN go test ./...
+RUN go build -ldflags='-s -w' -o main . \
+  && go test ./...
 
 ####################
 
