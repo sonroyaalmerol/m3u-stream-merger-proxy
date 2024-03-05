@@ -63,7 +63,6 @@ func InitializeSQLite(name string) (db *sql.DB, err error) {
 			stream_id INTEGER,
 			content TEXT,
 			m3u_index INTEGER,
-			max_concurrency INTEGER DEFAULT 1,
 			FOREIGN KEY(stream_id) REFERENCES streams(id)
 		)
 	`)
@@ -207,13 +206,13 @@ func InsertStreamUrl(db *sql.DB, id int64, url StreamURL) (i int64, err error) {
 		}
 	}()
 
-	urlStmt, err := tx.Prepare("INSERT INTO stream_urls(stream_id, content, m3u_index, max_concurrency) VALUES(?, ?, ?, ?)")
+	urlStmt, err := tx.Prepare("INSERT INTO stream_urls(stream_id, content, m3u_index) VALUES(?, ?, ?, ?)")
 	if err != nil {
 		return -1, fmt.Errorf("error preparing statement: %v", err)
 	}
 	defer urlStmt.Close()
 
-	res, err := urlStmt.Exec(id, url.Content, url.M3UIndex, url.MaxConcurrency)
+	res, err := urlStmt.Exec(id, url.Content, url.M3UIndex)
 	if err != nil {
 		return -1, fmt.Errorf("error inserting stream URL: %v", err)
 	}
@@ -313,7 +312,7 @@ func GetStreamByTitle(db *sql.DB, title string) (s StreamInfo, err error) {
 			return s, fmt.Errorf("error scanning stream: %v", err)
 		}
 
-		urlRows, err := db.Query("SELECT id, content, m3u_index, max_concurrency FROM stream_urls WHERE stream_id = ?", s.DbId)
+		urlRows, err := db.Query("SELECT id, content, m3u_index FROM stream_urls WHERE stream_id = ?", s.DbId)
 		if err != nil {
 			return s, fmt.Errorf("error querying stream URLs: %v", err)
 		}
@@ -322,7 +321,7 @@ func GetStreamByTitle(db *sql.DB, title string) (s StreamInfo, err error) {
 		var urls []StreamURL
 		for urlRows.Next() {
 			var u StreamURL
-			err := urlRows.Scan(&u.DbId, &u.Content, &u.M3UIndex, &u.MaxConcurrency)
+			err := urlRows.Scan(&u.DbId, &u.Content, &u.M3UIndex)
 			if err != nil {
 				return s, fmt.Errorf("error scanning stream URL: %v", err)
 			}
@@ -349,14 +348,14 @@ func GetStreamUrlByUrlAndIndex(db *sql.DB, url string, m3u_index int) (s StreamU
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	rows, err := db.Query("SELECT id, content, m3u_index, max_concurrency FROM stream_urls WHERE content = ? AND m3u_index = ?", url, m3u_index)
+	rows, err := db.Query("SELECT id, content, m3u_index FROM stream_urls WHERE content = ? AND m3u_index = ?", url, m3u_index)
 	if err != nil {
 		return s, fmt.Errorf("error querying streams: %v", err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		err = rows.Scan(&s.DbId, &s.Content, &s.M3UIndex, &s.MaxConcurrency)
+		err = rows.Scan(&s.DbId, &s.Content, &s.M3UIndex)
 		if err != nil {
 			return s, fmt.Errorf("error scanning stream: %v", err)
 		}
@@ -387,7 +386,7 @@ func GetStreams(db *sql.DB) ([]StreamInfo, error) {
 			return nil, fmt.Errorf("error scanning stream: %v", err)
 		}
 
-		urlRows, err := db.Query("SELECT id, content, m3u_index, max_concurrency FROM stream_urls WHERE stream_id = ?", s.DbId)
+		urlRows, err := db.Query("SELECT id, content, m3u_index FROM stream_urls WHERE stream_id = ?", s.DbId)
 		if err != nil {
 			return nil, fmt.Errorf("error querying stream URLs: %v", err)
 		}
@@ -396,7 +395,7 @@ func GetStreams(db *sql.DB) ([]StreamInfo, error) {
 		var urls []StreamURL
 		for urlRows.Next() {
 			var u StreamURL
-			err := urlRows.Scan(&u.DbId, &u.Content, &u.M3UIndex, &u.MaxConcurrency)
+			err := urlRows.Scan(&u.DbId, &u.Content, &u.M3UIndex)
 			if err != nil {
 				return nil, fmt.Errorf("error scanning stream URL: %v", err)
 			}

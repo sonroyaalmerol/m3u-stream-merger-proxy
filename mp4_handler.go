@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -16,11 +15,11 @@ import (
 	"syscall"
 )
 
-func loadBalancer(ctx context.Context, stream database.StreamInfo) (resp *http.Response, selectedUrl *database.StreamURL, err error) {
+func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl *database.StreamURL, err error) {
 	// Concurrency check mode
 	for _, url := range stream.URLs {
 		if checkConcurrency(url.M3UIndex) {
-			log.Printf("Concurrency limit reached (%d): %s", url.MaxConcurrency, url.Content)
+			log.Printf("Concurrency limit reached (%s): %s", os.Getenv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", url.M3UIndex)), url.Content)
 			continue // Skip this stream if concurrency limit reached
 		}
 
@@ -98,7 +97,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	// Iterate through the streams and select one based on concurrency and availability
 	var selectedUrl *database.StreamURL
 
-	resp, selectedUrl, err = loadBalancer(ctx, stream)
+	resp, selectedUrl, err = loadBalancer(stream)
 	if err != nil {
 		http.Error(w, "Error fetching MP4 stream. Exhausted all streams.", http.StatusInternalServerError)
 		return
