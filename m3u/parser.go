@@ -156,9 +156,8 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 
 				if existingUrl.Content != line || existingUrl.M3UIndex != m3uIndex {
 					_, err = database.InsertStreamUrl(db, dbId, database.StreamURL{
-						Content:        line,
-						M3UIndex:       m3uIndex,
-						MaxConcurrency: maxConcurrency,
+						Content:  line,
+						M3UIndex: m3uIndex,
 					})
 				}
 

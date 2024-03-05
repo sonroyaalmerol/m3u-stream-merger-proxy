@@ -6,12 +6,74 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 var mutex sync.Mutex
+
+func checkAndUpdateTable(db *sql.DB, tableName string, expectedColumns map[string]string, foreignKeys map[string]string) error {
+	// Check table existence
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", tableName).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("error checking %s table: %v\n", tableName, err)
+	}
+
+	if count > 0 {
+		// Table exists, check structure
+		rows, err := db.Query("PRAGMA table_info(" + tableName + ")")
+		if err != nil {
+			return fmt.Errorf("error retrieving table info for %s: %v\n", tableName, err)
+		}
+		defer rows.Close()
+
+		existingColumns := make(map[string]string)
+		for rows.Next() {
+			var cid int
+			var name, _type string
+			var notnull, pk int
+			var dflt_value interface{}
+			err = rows.Scan(&cid, &name, &_type, &notnull, &dflt_value, &pk)
+			if err != nil {
+				return fmt.Errorf("error scanning row: %v\n", err)
+			}
+			existingColumns[name] = _type
+		}
+
+		// Check if column names and types match expected structure
+		for col, dataType := range expectedColumns {
+			if existingType, ok := existingColumns[col]; !ok || existingType != dataType {
+				// Table structure doesn't match, drop and recreate
+				_, err = db.Exec("DROP TABLE " + tableName)
+				if err != nil {
+					return fmt.Errorf("error dropping %s table: %v\n", tableName, err)
+				}
+				break
+			}
+		}
+	}
+
+	// Create table if not exists or if dropped due to structure mismatch
+	query := "CREATE TABLE IF NOT EXISTS " + tableName + " ("
+	for col, dataType := range expectedColumns {
+		query += col + " " + dataType + ","
+	}
+	if len(foreignKeys) > 0 {
+		for fk, _ := range foreignKeys {
+			query += " " + fk + ","
+		}
+	}
+	query = strings.TrimSuffix(query, ",") + ")"
+	_, err = db.Exec(query)
+	if err != nil {
+		return fmt.Errorf("error creating %s table: %v\n", tableName, err)
+	}
+
+	return nil
+}
 
 func InitializeSQLite(name string) (db *sql.DB, err error) {
 	mutex.Lock()
@@ -43,31 +105,27 @@ func InitializeSQLite(name string) (db *sql.DB, err error) {
 		return nil, fmt.Errorf("error opening SQLite database: %v\n", err)
 	}
 
-	// Create table if not exists
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS streams (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			title TEXT UNIQUE,
-			tvg_id TEXT,
-			logo_url TEXT,
-			group_name TEXT
-		)
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("error creating table: %v\n", err)
+	// Check and update 'streams' table
+	if err := checkAndUpdateTable(db, "streams", map[string]string{
+		"id":         "INTEGER PRIMARY KEY AUTOINCREMENT",
+		"title":      "TEXT UNIQUE",
+		"tvg_id":     "TEXT",
+		"logo_url":   "TEXT",
+		"group_name": "TEXT",
+	}, nil); err != nil {
+		return nil, err
 	}
 
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS stream_urls (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			stream_id INTEGER,
-			content TEXT,
-			m3u_index INTEGER,
-			FOREIGN KEY(stream_id) REFERENCES streams(id)
-		)
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("error creating table: %v\n", err)
+	// Check and update 'stream_urls' table
+	if err := checkAndUpdateTable(db, "stream_urls", map[string]string{
+		"id":        "INTEGER PRIMARY KEY AUTOINCREMENT",
+		"stream_id": "INTEGER",
+		"content":   "TEXT",
+		"m3u_index": "INTEGER",
+	}, map[string]string{
+		"FOREIGN KEY(stream_id) REFERENCES streams(id)": "",
+	}); err != nil {
+		return nil, err
 	}
 
 	return
