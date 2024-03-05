@@ -1,5 +1,5 @@
 # Start from the official Golang image
-FROM golang:alpine AS build
+FROM golang:bookworm AS build
 
 # Set the Current Working Directory inside the container
 WORKDIR /app
@@ -13,16 +13,16 @@ RUN go mod download
 # Copy the source code from the current directory to the Working Directory inside the container
 COPY . .
 
-RUN go build -ldflags='-s -w' -o main . \
+RUN CGO_ENABLED=0 go build -ldflags='-s -w' -o main . \
   && go test ./...
 
 ####################
 
 # Start a new stage from scratch
-FROM alpine:3.19.1 
+FROM scratch 
 
-# Install a specific version of CA certificates
-RUN apk --no-cache add ca-certificates=20240226-r0
+COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 # Copy the built Go binary from the previous stage
 COPY --from=build /app/main /gomain
