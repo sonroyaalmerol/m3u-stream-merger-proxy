@@ -62,7 +62,7 @@ func checkAndUpdateTable(db *sql.DB, tableName string, expectedColumns map[strin
 		query += col + " " + dataType + ","
 	}
 	if len(foreignKeys) > 0 {
-		for fk, _ := range foreignKeys {
+		for fk := range foreignKeys {
 			query += " " + fk + ","
 		}
 	}
@@ -264,7 +264,7 @@ func InsertStreamUrl(db *sql.DB, id int64, url StreamURL) (i int64, err error) {
 		}
 	}()
 
-	urlStmt, err := tx.Prepare("INSERT INTO stream_urls(stream_id, content, m3u_index) VALUES(?, ?, ?, ?)")
+	urlStmt, err := tx.Prepare("INSERT INTO stream_urls(stream_id, content, m3u_index) VALUES(?, ?, ?)")
 	if err != nil {
 		return -1, fmt.Errorf("error preparing statement: %v", err)
 	}
