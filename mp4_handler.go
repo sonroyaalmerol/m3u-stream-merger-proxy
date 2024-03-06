@@ -38,6 +38,7 @@ func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl 
 	}
 
 	if selectedUrl == nil {
+		log.Printf("All concurrency limits have been reached. Falling back to connection checking mode...\n")
 		// Connection check mode
 		for _, url := range stream.URLs {
 			resp, err = http.Get(url.Content)
