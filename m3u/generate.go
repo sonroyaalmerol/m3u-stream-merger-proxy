@@ -18,6 +18,7 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	if err != nil {
 		log.Println(fmt.Errorf("GetStreams error: %v", err))
 	}
+	log.Printf("streams: %v\n", streams)
 
 	w.Header().Set("Content-Type", "text/plain") // Set the Content-Type header to M3U
 	w.Header().Set("Access-Control-Allow-Origin", "*")
