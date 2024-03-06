@@ -19,7 +19,11 @@ func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl 
 	// Concurrency check mode
 	for _, url := range stream.URLs {
 		if checkConcurrency(url.M3UIndex) {
-			log.Printf("Concurrency limit reached (%s): %s", os.Getenv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", url.M3UIndex)), url.Content)
+			maxCon := os.Getenv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", url.M3UIndex))
+			if strings.TrimSpace(maxCon) == "" {
+				maxCon = "1"
+			}
+			log.Printf("Concurrency limit reached (%s): %s", maxCon, url.Content)
 			continue // Skip this stream if concurrency limit reached
 		}
 
@@ -34,6 +38,7 @@ func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl 
 	}
 
 	if selectedUrl == nil {
+		log.Printf("All concurrency limits have been reached. Falling back to connection checking mode...\n")
 		// Connection check mode
 		for _, url := range stream.URLs {
 			resp, err = http.Get(url.Content)

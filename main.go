@@ -155,6 +155,11 @@ func main() {
 		log.Fatalf("Error initializing current SQLite database: %v", err)
 	}
 
+	err = database.InitializeMemDB()
+	if err != nil {
+		log.Fatalf("Error initializing current memory database: %v", err)
+	}
+
 	go updateSources(ctx)
 
 	// HTTP handlers
