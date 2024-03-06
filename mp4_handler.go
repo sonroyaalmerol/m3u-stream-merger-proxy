@@ -113,26 +113,29 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	// Log the successful response
 	log.Printf("Sent MP4 stream to %s\n", r.RemoteAddr)
 
-	// Check if the connection is still open before copying the MP4 stream to the response
-	select {
-	case <-ctx.Done():
-		// Connection closed, handle accordingly
-		log.Println("Client disconnected after fetching MP4 stream")
-		updateConcurrency(selectedUrl.M3UIndex, false)
-		return
-	default:
-		// Connection still open, proceed with writing to the response
+	// Use a goroutine to copy the MP4 stream to the response
+	go func() {
+		defer func() {
+			updateConcurrency(selectedUrl.M3UIndex, false)
+			log.Printf("Closed connection for %s\n", r.RemoteAddr)
+		}()
+
 		_, err := io.Copy(w, resp.Body)
 		if err != nil {
 			// Log the error
 			if errors.Is(err, syscall.EPIPE) {
 				log.Println("Client disconnected after fetching MP4 stream")
-				updateConcurrency(selectedUrl.M3UIndex, false)
 			} else {
 				log.Printf("Error copying MP4 stream to response: %s\n", err.Error())
 			}
-			return
 		}
+	}()
+
+	// Wait for the request context to be canceled or the stream to finish
+	select {
+	case <-ctx.Done():
+		// Connection closed, handle accordingly
+		log.Println("Client disconnected after fetching MP4 stream")
 	}
 }
 
