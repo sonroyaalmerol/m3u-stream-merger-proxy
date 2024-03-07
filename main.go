@@ -136,6 +136,15 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// manually set time zone
+	if tz := os.Getenv("TZ"); tz != "" {
+		var err error
+		time.Local, err = time.LoadLocation(tz)
+		if err != nil {
+			log.Printf("error loading location '%s': %v\n", tz, err)
+		}
+	}
+
 	var err error
 	db, err = database.InitializeSQLite("current_streams")
 	if err != nil {
