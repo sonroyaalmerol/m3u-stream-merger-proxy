@@ -10,11 +10,15 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/robfig/cron/v3"
 )
 
 var db *sql.DB
+var cronMutex sync.Mutex
 
 func swapDb() error {
 	// Generate a unique temporary name
@@ -72,79 +76,58 @@ func updateSource(nextDb *sql.DB, m3uUrl string, index int, maxConcurrency int) 
 	}
 }
 
-func updateSources(ctx context.Context, disableLoop bool) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			var err error
-			nextDb, err := database.InitializeSQLite("next_streams")
-			if err != nil {
-				log.Fatalf("Error initializing next SQLite database: %v", err)
-			}
+func updateSources(ctx context.Context) {
+	// Ensure only one job is running at a time
+	cronMutex.Lock()
+	defer cronMutex.Unlock()
 
-			log.Println("Background process: Checking M3U_URLs...")
-			var wg sync.WaitGroup
-			index := 1
-			for {
-				maxConcurrency := 1
-				m3uUrl, m3uExists := os.LookupEnv(fmt.Sprintf("M3U_URL_%d", index))
-				rawMaxConcurrency, maxConcurrencyExists := os.LookupEnv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", index))
-				if !m3uExists {
-					break
-				}
-
-				log.Printf("Background process: Checking M3U_MAX_CONCURRENCY_%d...\n", index)
-				if maxConcurrencyExists {
-					var err error
-					maxConcurrency, err = strconv.Atoi(rawMaxConcurrency)
-					if err != nil {
-						maxConcurrency = 1
-					}
-				}
-
-				log.Printf("Background process: Fetching M3U_URL_%d...\n", index)
-				wg.Add(1)
-				// Start the goroutine for periodic updates
-				go func(nextDb *sql.DB, m3uUrl string, index int, maxConcurrency int) {
-					defer wg.Done()
-					updateSource(nextDb, m3uUrl, index, maxConcurrency)
-				}(nextDb, m3uUrl, index, maxConcurrency)
-
-				index++
-			}
-			wg.Wait()
-
-			err = swapDb()
-			if err != nil {
-				log.Fatalf("swapDb: %v", err)
-			}
-			log.Println("Background process: Updated M3U database.")
-
-			if disableLoop {
-				return
-			}
-
-			updateIntervalInHour, exists := os.LookupEnv("UPDATE_INTERVAL")
-			if !exists {
-				updateIntervalInHour = "24"
-			}
-
-			hourInt, err := strconv.Atoi(updateIntervalInHour)
-			if err != nil {
-				log.Println("Background process: Sleeping for 24 hours...")
-				time.Sleep(24 * time.Hour)
-			} else {
-				log.Printf("Background process: Sleeping for %d hours...\n", hourInt)
-				select {
-				case <-time.After(time.Duration(hourInt) * time.Hour):
-					// Continue loop after sleep
-				case <-ctx.Done():
-					return // Exit loop if context is cancelled
-				}
-			}
+	select {
+	case <-ctx.Done():
+		return
+	default:
+		var err error
+		nextDb, err := database.InitializeSQLite("next_streams")
+		if err != nil {
+			log.Fatalf("Error initializing next SQLite database: %v", err)
 		}
+
+		log.Println("Background process: Checking M3U_URLs...")
+		var wg sync.WaitGroup
+		index := 1
+		for {
+			maxConcurrency := 1
+			m3uUrl, m3uExists := os.LookupEnv(fmt.Sprintf("M3U_URL_%d", index))
+			rawMaxConcurrency, maxConcurrencyExists := os.LookupEnv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", index))
+			if !m3uExists {
+				break
+			}
+
+			log.Printf("Background process: Checking M3U_MAX_CONCURRENCY_%d...\n", index)
+			if maxConcurrencyExists {
+				var err error
+				maxConcurrency, err = strconv.Atoi(rawMaxConcurrency)
+				if err != nil {
+					maxConcurrency = 1
+				}
+			}
+
+			log.Printf("Background process: Fetching M3U_URL_%d...\n", index)
+			wg.Add(1)
+			// Start the goroutine for periodic updates
+			go func(nextDb *sql.DB, m3uUrl string, index int, maxConcurrency int) {
+				defer wg.Done()
+				updateSource(nextDb, m3uUrl, index, maxConcurrency)
+			}(nextDb, m3uUrl, index, maxConcurrency)
+
+			index++
+		}
+		wg.Wait()
+
+		err = swapDb()
+		if err != nil {
+			log.Fatalf("swapDb: %v", err)
+		}
+		log.Println("Background process: Updated M3U database.")
 	}
 }
 
@@ -152,6 +135,15 @@ func main() {
 	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// manually set time zone
+	if tz := os.Getenv("TZ"); tz != "" {
+		var err error
+		time.Local, err = time.LoadLocation(tz)
+		if err != nil {
+			log.Printf("error loading location '%s': %v\n", tz, err)
+		}
+	}
 
 	var err error
 	db, err = database.InitializeSQLite("current_streams")
@@ -164,7 +156,30 @@ func main() {
 		log.Fatalf("Error initializing current memory database: %v", err)
 	}
 
-	go updateSources(ctx, false)
+	cronSched := os.Getenv("SYNC_CRON")
+	if len(strings.TrimSpace(cronSched)) == 0 {
+		log.Println("SYNC_CRON not initialized. Defaulting to 0 0 * * * (12am every day).")
+		cronSched = "0 0 * * *"
+	}
+
+	c := cron.New()
+	_, err = c.AddFunc(cronSched, func() {
+		go updateSources(ctx)
+	})
+	if err != nil {
+		log.Fatalf("Error initializing background processes: %v", err)
+	}
+	c.Start()
+
+	syncOnBoot := os.Getenv("SYNC_ON_BOOT")
+	if len(strings.TrimSpace(syncOnBoot)) == 0 {
+		syncOnBoot = "true"
+	}
+
+	if syncOnBoot == "true" {
+		log.Println("SYNC_ON_BOOT enabled. Starting initial M3U update.")
+		go updateSources(ctx)
+	}
 
 	// HTTP handlers
 	http.HandleFunc("/playlist.m3u", func(w http.ResponseWriter, r *http.Request) {

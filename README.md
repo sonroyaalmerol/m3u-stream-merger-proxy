@@ -25,7 +25,7 @@ If you're tired of managing multiple IPTV connections with separate M3U links, t
    - Users can set max concurrency per stream URLs for optimized performance.
 
 4. **Periodic Updates:**
-   - Refreshes M3U playlists at specified intervals to ensure up-to-date stream information.
+   - Refreshes M3U playlists at specified intervals (cron schedule syntax) to ensure up-to-date stream information.
    - Updates run in the background with no downtime.
 
 5. **Error Handling:**
@@ -82,7 +82,11 @@ Access the proxy at `http://localhost:8080`.
 
 - **USER_AGENT**: Set the User-Agent of HTTP requests.
 
-- **UPDATE_INTERVAL**: Set the update interval in hours.
+- **TZ**: Set timezone (Default: "Etc/UTC", Possible values: [TZ Identifiers](https://nodatime.org/TimeZones)).
+
+- **SYNC_CRON**: Set cron schedule expression of the background updates. It is important to set the timezone when using this feature (Default: "0 0 * * *").
+
+- **SYNC_ON_BOOT**: Set if an initial background syncing will be executed on boot (Default: "true", Possible values: "true"/"false").
 
 ### Endpoints
 
