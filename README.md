@@ -25,7 +25,7 @@ If you're tired of managing multiple IPTV connections with separate M3U links, t
    - Users can set max concurrency per stream URLs for optimized performance.
 
 4. **Periodic Updates:**
-   - Refreshes M3U playlists at specified intervals to ensure up-to-date stream information.
+   - Refreshes M3U playlists at specified intervals (cron schedule syntax) to ensure up-to-date stream information.
    - Updates run in the background with no downtime.
 
 5. **Error Handling:**
@@ -82,7 +82,7 @@ Access the proxy at `http://localhost:8080`.
 
 - **USER_AGENT**: Set the User-Agent of HTTP requests.
 
-- **UPDATE_INTERVAL**: Set the update interval in hours.
+- **CRON_UPDATE**: Set cron schedule expression of the background updates (Default: "0 0 * * *").
 
 ### Endpoints
 
