@@ -18,6 +18,7 @@ import (
 )
 
 var db *sql.DB
+var cronMutex sync.Mutex
 
 func swapDb() error {
 	// Generate a unique temporary name
@@ -76,6 +77,10 @@ func updateSource(nextDb *sql.DB, m3uUrl string, index int, maxConcurrency int) 
 }
 
 func updateSources(ctx context.Context) {
+	// Ensure only one job is running at a time
+	cronMutex.Lock()
+	defer cronMutex.Unlock()
+
 	select {
 	case <-ctx.Done():
 		return
