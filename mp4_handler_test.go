@@ -30,6 +30,9 @@ func TestMP4Handler(t *testing.T) {
 	updateSources(ctx)
 
 	streams, err := database.GetStreams(db)
+	if err != nil {
+		t.Errorf("GetStreams returned error: %v", err)
+	}
 
 	var wg sync.WaitGroup
 	for _, stream := range streams {
