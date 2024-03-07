@@ -79,7 +79,7 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 						value = strings.Trim(value, `"`)
 					}
 
-					switch key {
+					switch strings.ToLower(key) {
 					case "tvg-id":
 						currentStream.TvgID = value
 					case "tvg-name":
