@@ -72,7 +72,7 @@ func updateSource(nextDb *sql.DB, m3uUrl string, index int, maxConcurrency int) 
 	}
 }
 
-func updateSources(ctx context.Context, disableCron bool) {
+func updateSources(ctx context.Context, disableLoop bool) {
 	for {
 		select {
 		case <-ctx.Done():
