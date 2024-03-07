@@ -82,7 +82,9 @@ Access the proxy at `http://localhost:8080`.
 
 - **USER_AGENT**: Set the User-Agent of HTTP requests.
 
-- **CRON_UPDATE**: Set cron schedule expression of the background updates (Default: "0 0 * * *").
+- **SYNC_CRON**: Set cron schedule expression of the background updates (Default: "0 0 * * *").
+
+- **SYNC_ON_BOOT**: Set if an initial background syncing will be executed on boot (Default: "true", Possible values: "true"/"false").
 
 ### Endpoints
 
