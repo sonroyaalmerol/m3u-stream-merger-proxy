@@ -147,9 +147,9 @@ func main() {
 		log.Fatalf("Error initializing current memory database: %v", err)
 	}
 
-	cronSched := os.Getenv("CRON_UPDATE")
+	cronSched := os.Getenv("SYNC_CRON")
 	if len(strings.TrimSpace(cronSched)) == 0 {
-		log.Println("CRON_UPDATE not initialized. Defaulting to 0 0 * * * (12am every day).")
+		log.Println("SYNC_CRON not initialized. Defaulting to 0 0 * * * (12am every day).")
 		cronSched = "0 0 * * *"
 	}
 
@@ -161,6 +161,16 @@ func main() {
 		log.Fatalf("Error initializing background processes: %v", err)
 	}
 	c.Start()
+
+	syncOnBoot := os.Getenv("SYNC_ON_BOOT")
+	if len(strings.TrimSpace(syncOnBoot)) == 0 {
+		syncOnBoot = "true"
+	}
+
+	if syncOnBoot == "true" {
+		log.Println("SYNC_ON_BOOT enabled. Starting initial M3U update.")
+		go updateSources(ctx)
+	}
 
 	// HTTP handlers
 	http.HandleFunc("/playlist.m3u", func(w http.ResponseWriter, r *http.Request) {
