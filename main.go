@@ -154,7 +154,7 @@ func main() {
 	}
 
 	c := cron.New()
-	_, err = c.AddFunc(os.Getenv("CRON_UPDATE"), func() {
+	_, err = c.AddFunc(cronSched, func() {
 		go updateSources(ctx)
 	})
 	if err != nil {
