@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/utils"
 	"net/http"
@@ -50,6 +52,19 @@ func TestMP4Handler(t *testing.T) {
 			resp := w.Result()
 			if resp.StatusCode != http.StatusOK {
 				t.Errorf("%s - Expected status code %d, got %d", stream.Title, http.StatusOK, resp.StatusCode)
+			}
+
+			res, err := http.Get(stream.URLs[0].Content)
+			if err != nil {
+				t.Errorf("HttpGet returned error: %v", err)
+			}
+			defer res.Body.Close()
+
+			// Example of checking response body content
+			expected, _ := io.ReadAll(res.Body)
+			body, _ := io.ReadAll(resp.Body)
+			if !bytes.Equal(body, expected) {
+				t.Errorf("Streams did not match for: %s", stream.Title)
 			}
 		}(stream)
 	}
