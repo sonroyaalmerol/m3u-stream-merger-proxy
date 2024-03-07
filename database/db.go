@@ -312,7 +312,7 @@ func GetStreamByTitle(db *sql.DB, title string) (s StreamInfo, err error) {
 			return s, fmt.Errorf("error scanning stream: %v", err)
 		}
 
-		urlRows, err := db.Query("SELECT id, content, m3u_index FROM stream_urls WHERE stream_id = ?", s.DbId)
+		urlRows, err := db.Query("SELECT id, content, m3u_index FROM stream_urls WHERE stream_id = ? ORDER BY m3u_index ASC", s.DbId)
 		if err != nil {
 			return s, fmt.Errorf("error querying stream URLs: %v", err)
 		}
@@ -348,7 +348,7 @@ func GetStreamUrlByUrlAndIndex(db *sql.DB, url string, m3u_index int) (s StreamU
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	rows, err := db.Query("SELECT id, content, m3u_index FROM stream_urls WHERE content = ? AND m3u_index = ?", url, m3u_index)
+	rows, err := db.Query("SELECT id, content, m3u_index FROM stream_urls WHERE content = ? AND m3u_index = ? ORDER BY m3u_index ASC", url, m3u_index)
 	if err != nil {
 		return s, fmt.Errorf("error querying streams: %v", err)
 	}
@@ -386,7 +386,7 @@ func GetStreams(db *sql.DB) ([]StreamInfo, error) {
 			return nil, fmt.Errorf("error scanning stream: %v", err)
 		}
 
-		urlRows, err := db.Query("SELECT id, content, m3u_index FROM stream_urls WHERE stream_id = ?", s.DbId)
+		urlRows, err := db.Query("SELECT id, content, m3u_index FROM stream_urls WHERE stream_id = ? ORDER BY m3u_index ASC", s.DbId)
 		if err != nil {
 			return nil, fmt.Errorf("error querying stream URLs: %v", err)
 		}
