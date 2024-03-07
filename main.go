@@ -122,7 +122,7 @@ func updateSources(ctx context.Context, disableLoop bool) {
 			}
 			log.Println("Background process: Updated M3U database.")
 
-			if disableCron {
+			if disableLoop {
 				return
 			}
 
