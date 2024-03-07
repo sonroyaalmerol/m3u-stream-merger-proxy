@@ -72,7 +72,7 @@ func updateSource(nextDb *sql.DB, m3uUrl string, index int, maxConcurrency int) 
 	}
 }
 
-func updateSources(ctx context.Context) {
+func updateSources(ctx context.Context, disableCron bool) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -122,6 +122,10 @@ func updateSources(ctx context.Context) {
 			}
 			log.Println("Background process: Updated M3U database.")
 
+			if disableCron {
+				return
+			}
+
 			updateIntervalInHour, exists := os.LookupEnv("UPDATE_INTERVAL")
 			if !exists {
 				updateIntervalInHour = "24"
@@ -160,7 +164,7 @@ func main() {
 		log.Fatalf("Error initializing current memory database: %v", err)
 	}
 
-	go updateSources(ctx)
+	go updateSources(ctx, false)
 
 	// HTTP handlers
 	http.HandleFunc("/playlist.m3u", func(w http.ResponseWriter, r *http.Request) {
