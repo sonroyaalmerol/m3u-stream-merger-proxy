@@ -119,7 +119,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			log.Printf("Closed connection for %s\n", r.RemoteAddr)
 			close(done)
 		}()
-
+		
 		updateConcurrency(selectedUrl.M3UIndex, true)
 		_, err := io.Copy(w, resp.Body)
 		if err != nil {
@@ -173,4 +173,10 @@ func updateConcurrency(m3uIndex int, incr bool) {
 	if err != nil {
 		log.Printf("Error updating concurrency: %s\n", err.Error())
 	}
+	
+	count, err := database.GetConcurrency(m3uIndex)
+	if err != nil {
+		log.Printf("Error checking concurrency: %s\n", err.Error())
+	}
+	log.Printf("Current concurrent connections for M3U_%d: %d", m3uIndex, count)
 }
