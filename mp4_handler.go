@@ -35,7 +35,7 @@ func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl 
 				if strings.TrimSpace(maxCon) == "" {
 					maxCon = "1"
 				}
-				log.Printf("Concurrency limit reached (%s): %s", maxCon, url.Content)
+				log.Printf("Concurrency limit reached for M3U_%d (max: %s): %s", url.M3UIndex, maxCon, url.Content)
 				continue // Skip this stream if concurrency limit reached
 			}
 
@@ -58,7 +58,7 @@ func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl 
 				if strings.TrimSpace(maxCon) == "" {
 					maxCon = "1"
 				}
-				log.Printf("Concurrency limit reached (%s): %s", maxCon, url.Content)
+				log.Printf("Concurrency limit reached for M3U_%d (max: %s): %s", url.M3UIndex, maxCon, url.Content)
 				continue // Skip this stream if concurrency limit reached
 			}
 
@@ -197,7 +197,7 @@ func checkConcurrency(m3uIndex int) bool {
 		return false // Error occurred, treat as concurrency not reached
 	}
 
-	log.Printf("Current concurrent connections for M3U_%d: %d", m3uIndex, count)
+	log.Printf("Current number of connections for M3U_%d: %d", m3uIndex, count)
 	return count >= maxConcurrency
 }
 
@@ -216,5 +216,5 @@ func updateConcurrency(m3uIndex int, incr bool) {
 	if err != nil {
 		log.Printf("Error checking concurrency: %s\n", err.Error())
 	}
-	log.Printf("Current concurrent connections for M3U_%d: %d", m3uIndex, count)
+	log.Printf("Current number of connections for M3U_%d: %d", m3uIndex, count)
 }
