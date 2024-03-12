@@ -2,6 +2,7 @@ package m3u
 
 import (
 	"bufio"
+	"bytes"
 	"database/sql"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 		userAgent = "IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)"
 	}
 
+	var buffer bytes.Buffer
 	maxRetries := 10
 	var err error
 	maxRetriesStr, maxRetriesExists := os.LookupEnv("MAX_RETRIES")
@@ -42,16 +44,22 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 		},
 	}
 
-	log.Printf("Parsing M3U from URL: %s\n", m3uURL)
-
 	for i := 0; i <= maxRetries; i++ {
+		// Download M3U for processing
+		log.Printf("Downloading M3U from URL: %s\n", m3uURL)
 		resp, err := client.Get(m3uURL)
 		if err != nil {
 			return fmt.Errorf("HTTP GET error: %v", err)
 		}
 		defer resp.Body.Close()
 
-		scanner := bufio.NewScanner(resp.Body)
+		_, err = io.Copy(&buffer, resp.Body)
+		if err != nil {
+			return fmt.Errorf("Download file error: %v", err)
+		}
+
+		log.Println("Parsing downloaded M3U file.")
+		scanner := bufio.NewScanner(&buffer)
 
 		var currentStream database.StreamInfo
 
@@ -177,6 +185,9 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 		if err := scanner.Err(); err != nil {
 			return fmt.Errorf("scanner error: %v", err)
 		}
+
+		// Free up memory used by buffer
+		buffer.Reset()
 
 		return nil
 	}
