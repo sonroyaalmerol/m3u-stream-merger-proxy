@@ -55,10 +55,10 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int
 
 		_, err = io.Copy(&buffer, resp.Body)
 		if err != nil {
-			return fmt.Errorf("download file error: %v", err)
+			return fmt.Errorf("Download file error: %v", err)
 		}
 
-		log.Printf("Parsing M3U from URL: %s\n", m3uURL)
+		log.Println("Parsing downloaded M3U file.")
 		scanner := bufio.NewScanner(&buffer)
 
 		var currentStream database.StreamInfo
