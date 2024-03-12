@@ -168,9 +168,13 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 				log.Printf("Invalid BUFFER_MB value: %s\n", err.Error())
 				bufferMbInt = 0
 			}
+
+			if bufferMbInt < 0 {
+				log.Printf("Invalid BUFFER_MB value: negative integer is not allowed\n")
+			}
 		}
 
-		if bufferMbInt != 0 {
+		if bufferMbInt > 0 {
 			log.Printf("Buffer is set to %dmb.\n", bufferMbInt)
 			buffer := make([]byte, 1024*bufferMbInt)
 			for {
