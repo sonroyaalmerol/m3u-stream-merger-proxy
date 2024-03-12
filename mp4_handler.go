@@ -16,25 +16,63 @@ import (
 )
 
 func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl *database.StreamURL, err error) {
-	// Concurrency check mode
-	for _, url := range stream.URLs {
-		if checkConcurrency(url.M3UIndex) {
-			maxCon := os.Getenv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", url.M3UIndex))
-			if strings.TrimSpace(maxCon) == "" {
-				maxCon = "1"
+	loadBalancingMode := os.Getenv("LOAD_BALANCING_MODE")
+	if loadBalancingMode == "" {
+		loadBalancingMode = "brute-force"
+	}
+
+	switch loadBalancingMode {
+	case "round-robin":
+		var lastIndex int // Track the last index used
+
+		// Round-robin mode
+		for i := 0; i < len(stream.URLs); i++ {
+			index := (lastIndex + i) % len(stream.URLs) // Calculate the next index
+			url := stream.URLs[index]
+
+			if checkConcurrency(url.M3UIndex) {
+				maxCon := os.Getenv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", url.M3UIndex))
+				if strings.TrimSpace(maxCon) == "" {
+					maxCon = "1"
+				}
+				log.Printf("Concurrency limit reached (%s): %s", maxCon, url.Content)
+				continue // Skip this stream if concurrency limit reached
 			}
-			log.Printf("Concurrency limit reached (%s): %s", maxCon, url.Content)
-			continue // Skip this stream if concurrency limit reached
-		}
 
-		resp, err = http.Get(url.Content)
-		if err == nil {
-			selectedUrl = &url
-			break
-		}
+			resp, err = http.Get(url.Content)
+			if err == nil {
+				selectedUrl = &url
+				break
+			}
 
-		// Log the error
-		log.Printf("Error fetching MP4 stream (concurrency check mode): %s\n", err.Error())
+			// Log the error
+			log.Printf("Error fetching MP4 stream (concurrency round robin mode): %s\n", err.Error())
+
+			lastIndex = (lastIndex + 1) % len(stream.URLs) // Update the last index used
+		}
+	case "brute-force":
+		// Brute force mode
+		for _, url := range stream.URLs {
+			if checkConcurrency(url.M3UIndex) {
+				maxCon := os.Getenv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", url.M3UIndex))
+				if strings.TrimSpace(maxCon) == "" {
+					maxCon = "1"
+				}
+				log.Printf("Concurrency limit reached (%s): %s", maxCon, url.Content)
+				continue // Skip this stream if concurrency limit reached
+			}
+
+			resp, err = http.Get(url.Content)
+			if err == nil {
+				selectedUrl = &url
+				break
+			}
+
+			// Log the error
+			log.Printf("Error fetching MP4 stream (concurrency brute force mode): %s\n", err.Error())
+		}
+	default:
+		log.Printf("Invalid LOAD_BALANCING_MODE. Skipping concurrency mode...")
 	}
 
 	if selectedUrl == nil {
@@ -119,7 +157,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			log.Printf("Closed connection for %s\n", r.RemoteAddr)
 			close(done)
 		}()
-		
+
 		updateConcurrency(selectedUrl.M3UIndex, true)
 		_, err := io.Copy(w, resp.Body)
 		if err != nil {
@@ -173,7 +211,7 @@ func updateConcurrency(m3uIndex int, incr bool) {
 	if err != nil {
 		log.Printf("Error updating concurrency: %s\n", err.Error())
 	}
-	
+
 	count, err := database.GetConcurrency(m3uIndex)
 	if err != nil {
 		log.Printf("Error checking concurrency: %s\n", err.Error())
