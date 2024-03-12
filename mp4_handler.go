@@ -18,13 +18,13 @@ import (
 )
 
 func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl *database.StreamURL, err error) {
-	var netTransport = &http.Transport{
+	netTransport := &http.Transport{
 		Dial: (&net.Dialer{
 			Timeout: 5 * time.Second,
 		}).Dial,
 		TLSHandshakeTimeout: 5 * time.Second,
 	}
-	var httpClient = &http.Client{
+	httpClient := &http.Client{
 		Timeout:   time.Second * 10,
 		Transport: netTransport,
 	}
