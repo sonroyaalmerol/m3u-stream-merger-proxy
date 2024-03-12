@@ -75,6 +75,7 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | M3U_MAX_CONCURRENCY_1, M3U_MAX_CONCURRENCY_2, M3U_MAX_CONCURRENCY_X | Set max concurrency.                                 |  1             |   Any integer                                             |
 | USER_AGENT                  | Set the User-Agent of HTTP requests.                    | IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)    |  Any valid user agent        |
 | LOAD_BALANCING_MODE                | Set load balancing algorithm to a specific mode | brute-force    | brute-force/round-robin   |
+| BUFFER_MB | Set buffer size in mb. | 0 (no buffer) | Any integer |
 | TZ                          | Set timezone                                           | Etc/UTC     | [TZ Identifiers](https://nodatime.org/TimeZones) |
 | SYNC_CRON                   | Set cron schedule expression of the background updates. | 0 0 * * *   |  Any valid cron expression    |
 | SYNC_ON_BOOT                | Set if an initial background syncing will be executed on boot | true    | true/false   |
