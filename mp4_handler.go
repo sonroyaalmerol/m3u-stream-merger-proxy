@@ -8,12 +8,25 @@ import (
 	"log"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/utils"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
+
+var netTransport = &http.Transport{
+	Dial: (&net.Dialer{
+		Timeout: 5 * time.Second,
+	}).Dial,
+	TLSHandshakeTimeout: 5 * time.Second,
+}
+var httpClient = &http.Client{
+	Timeout:   time.Second * 10,
+	Transport: netTransport,
+}
 
 func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl *database.StreamURL, err error) {
 	loadBalancingMode := os.Getenv("LOAD_BALANCING_MODE")
