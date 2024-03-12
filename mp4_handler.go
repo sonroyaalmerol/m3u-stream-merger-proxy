@@ -159,13 +159,49 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		}()
 
 		updateConcurrency(selectedUrl.M3UIndex, true)
-		_, err := io.Copy(w, resp.Body)
-		if err != nil {
-			// Log the error
-			if errors.Is(err, syscall.EPIPE) {
-				log.Println("Client disconnected after fetching MP4 stream")
-			} else {
-				log.Printf("Error copying MP4 stream to response: %s\n", err.Error())
+
+		bufferMbInt := 0
+		bufferMb := os.Getenv("BUFFER_MB")
+		if bufferMb != "" {
+			bufferMbInt, err = strconv.Atoi(bufferMb)
+			if err != nil {
+				log.Printf("Invalid BUFFER_MB value: %s\n", err.Error())
+				bufferMbInt = 0
+			}
+
+			if bufferMbInt < 0 {
+				log.Printf("Invalid BUFFER_MB value: negative integer is not allowed\n")
+			}
+		}
+
+		if bufferMbInt > 0 {
+			log.Printf("Buffer is set to %dmb.\n", bufferMbInt)
+			buffer := make([]byte, 1024*bufferMbInt)
+			for {
+				n, err := resp.Body.Read(buffer)
+				if err != nil {
+					if err != io.EOF {
+						log.Printf("Error reading MP4 stream: %s\n", err.Error())
+					}
+					break
+				}
+				if n > 0 {
+					_, err := w.Write(buffer[:n])
+					if err != nil {
+						log.Printf("Error writing to response: %s\n", err.Error())
+						break
+					}
+				}
+			}
+		} else {
+			_, err := io.Copy(w, resp.Body)
+			if err != nil {
+				// Log the error
+				if errors.Is(err, syscall.EPIPE) {
+					log.Println("Client disconnected after fetching MP4 stream")
+				} else {
+					log.Printf("Error copying MP4 stream to response: %s\n", err.Error())
+				}
 			}
 		}
 	}()
