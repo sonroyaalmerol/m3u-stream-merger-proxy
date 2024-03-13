@@ -8,27 +8,14 @@ import (
 	"log"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/utils"
-	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 )
 
 func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl *database.StreamURL, err error) {
-	netTransport := &http.Transport{
-		Dial: (&net.Dialer{
-			Timeout: 5 * time.Second,
-		}).Dial,
-		TLSHandshakeTimeout: 5 * time.Second,
-	}
-	httpClient := &http.Client{
-		Timeout:   time.Second * 10,
-		Transport: netTransport,
-	}
-
 	loadBalancingMode := os.Getenv("LOAD_BALANCING_MODE")
 	if loadBalancingMode == "" {
 		loadBalancingMode = "brute-force"
@@ -52,7 +39,7 @@ func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl 
 				continue // Skip this stream if concurrency limit reached
 			}
 
-			resp, err = httpClient.Get(url.Content)
+			resp, err = http.Get(url.Content)
 			if err == nil {
 				selectedUrl = &url
 				break
@@ -75,7 +62,7 @@ func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl 
 				continue // Skip this stream if concurrency limit reached
 			}
 
-			resp, err = httpClient.Get(url.Content)
+			resp, err = http.Get(url.Content)
 			if err == nil {
 				selectedUrl = &url
 				break
@@ -92,7 +79,7 @@ func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl 
 		log.Printf("All concurrency limits have been reached. Falling back to connection checking mode...\n")
 		// Connection check mode
 		for _, url := range stream.URLs {
-			resp, err = httpClient.Get(url.Content)
+			resp, err = http.Get(url.Content)
 			if err == nil {
 				selectedUrl = &url
 				break
