@@ -52,10 +52,10 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./data:/app/data # OPTIONAL: only if you want the M3U generated to persist across restarts
+      - ./data:/data # OPTIONAL: only if you want the M3U generated to persist across restarts
     environment:
       - TZ=America/Toronto
-      - SYNC_ON_B0OT=true
+      - SYNC_ON_BOOT=true
       - SYNC_CRON=0 0 * * *
       - M3U_URL_1=https://iptvprovider1.com/playlist.m3u
       - M3U_MAX_CONCURRENCY_1=2
