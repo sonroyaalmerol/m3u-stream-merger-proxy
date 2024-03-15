@@ -12,10 +12,72 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"m3u-stream-merger/database"
 )
+
+func parseLine(line string, nextLine string) database.StreamInfo {
+	var info database.StreamInfo
+	info.URLs = []database.StreamURL{{
+		Content: strings.TrimSpace(nextLine),
+	}}
+
+	// Split the line by space to get each attribute
+	attributes := strings.Split(line, " ")
+	for _, attr := range attributes {
+		// Check if the attribute contains an "=" sign
+		if strings.Contains(attr, "=") {
+			// Split each attribute by "=" to separate the key and value
+			keyValue := strings.SplitN(attr, "=", 2)
+			if len(keyValue) == 2 {
+				key := strings.TrimSpace(keyValue[0])
+				// Remove potential quotation marks from the value
+				value := strings.Trim(keyValue[1], "\" ")
+				switch key {
+				case "tvg-id":
+					info.TvgID = value
+				case "tvg-name":
+					info.Title = value
+				case "tvg-logo":
+					info.LogoURL = value
+				case "group-title":
+					info.Group = value
+				}
+			}
+		}
+	}
+	return info
+}
+
+func parseM3UParallel(buffer []string) []database.StreamInfo {
+	var wg sync.WaitGroup
+	streamInfoCh := make(chan database.StreamInfo)
+	var streamInfos []database.StreamInfo
+
+	for i := 0; i < len(buffer)-1; i++ {
+		if strings.HasPrefix(buffer[i], "#EXTINF:") {
+			wg.Add(1)
+			go func(l string, nl string) {
+				defer wg.Done()
+				streamInfoCh <- parseLine(l, nl)
+			}(buffer[i], buffer[i+1])
+			i++ // Skip the next line as it has been processed as URL
+		}
+	}
+
+	go func() {
+		wg.Wait()
+		close(streamInfoCh)
+	}()
+
+	for info := range streamInfoCh {
+		streamInfos = append(streamInfos, info)
+	}
+
+	return streamInfos
+}
 
 func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int, maxConcurrency int) error {
 	// Set the custom User-Agent header
