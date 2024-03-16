@@ -112,7 +112,7 @@ func insertStreamToDb(db *sql.DB, currentStream database.StreamInfo) error {
 	return nil
 }
 
-func downloadM3UToBuffer(m3uURL string) (buffer *bytes.Buffer, err error) {
+func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 	// Set the custom User-Agent header
 	userAgent, userAgentExists := os.LookupEnv("USER_AGENT")
 	if !userAgentExists {
@@ -132,16 +132,16 @@ func downloadM3UToBuffer(m3uURL string) (buffer *bytes.Buffer, err error) {
 	log.Printf("Downloading M3U from URL: %s\n", m3uURL)
 	resp, err := client.Get(m3uURL)
 	if err != nil {
-		return nil, fmt.Errorf("HTTP GET error: %v", err)
+		return fmt.Errorf("HTTP GET error: %v", err)
 	}
 	defer resp.Body.Close()
 
 	_, err = io.Copy(buffer, resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("Download file error: %v", err)
+		return fmt.Errorf("Download file error: %v", err)
 	}
 
-	return buffer, nil
+	return nil
 }
 
 func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int) error {
@@ -155,8 +155,10 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int) error {
 		}
 	}
 
+	var buffer bytes.Buffer
+
 	for i := 0; i <= maxRetries; i++ {
-		buffer, err := downloadM3UToBuffer(m3uURL)
+		err := downloadM3UToBuffer(m3uURL, &buffer)
 		if err != nil {
 			log.Printf("downloadM3UToBuffer error. Retrying in 5 secs... (error: %v)\n", err)
 			time.Sleep(5 * time.Second)
@@ -164,7 +166,7 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int) error {
 		}
 
 		log.Println("Parsing downloaded M3U file.")
-		scanner := bufio.NewScanner(buffer)
+		scanner := bufio.NewScanner(&buffer)
 		var wg sync.WaitGroup
 
 		streamInfoCh := make(chan database.StreamInfo)
