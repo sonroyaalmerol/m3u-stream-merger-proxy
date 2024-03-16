@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,55 +19,61 @@ import (
 )
 
 func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
-	var info database.StreamInfo
-	info.URLs = []database.StreamURL{{
+	var currentStream database.StreamInfo
+	currentStream.URLs = []database.StreamURL{{
 		Content:  strings.TrimSpace(nextLine),
 		M3UIndex: m3uIndex,
 	}}
 
-	if strings.HasPrefix(line, "#EXTINF:0,") || strings.HasPrefix(line, "#EXTINF:-1,") {
-		// Skip entire attribute checking
-		titleSplit := strings.Split(line, ",")
-		info.Title = strings.Join(titleSplit[1:], ",")
+	lineWithoutPairs := line
 
-		return info
-	}
+	// Define a regular expression to capture key-value pairs
+	regex := regexp.MustCompile(`([a-zA-Z0-9_-]+)=("[^"]+"|[^",]+)`)
 
-	titleSplit := strings.Split(line, "\",")
-	if len(titleSplit) == 2 {
-		info.Title = strings.TrimSpace(titleSplit[1])
-	}
-	// Split the line by space to get each attribute
-	attributes := strings.Split(line, " ")
-	for _, attr := range attributes {
-		// Check if the attribute contains an "=" sign
-		if strings.Contains(attr, "=") {
-			// Split each attribute by "=" to separate the key and value
-			keyValue := strings.SplitN(attr, "=", 2)
-			if len(keyValue) == 2 {
-				key := strings.ToLower(strings.TrimSpace(keyValue[0]))
-				// Remove potential quotation marks from the value
-				value := strings.Trim(keyValue[1], "\" ")
-				switch key {
-				case "tvg-id":
-					info.TvgID = value
-				case "tvg-name":
-					if info.Title == "" {
-						info.Title = value
-					}
-				case "group-title":
-					info.Group = value
-				case "tvg-logo":
-					info.LogoURL = value
-				default:
-					if os.Getenv("DEBUG") == "true" {
-						log.Printf("Uncaught attribute: %s=%s\n", key, value)
-					}
-				}
+	// Find all key-value pairs in the line
+	matches := regex.FindAllStringSubmatch(line, -1)
+
+	for _, match := range matches {
+		key := strings.TrimSpace(match[1])
+		value := strings.TrimSpace(match[2])
+
+		if strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) {
+			value = strings.Trim(value, `"`)
+		}
+
+		switch strings.ToLower(key) {
+		case "tvg-id":
+			currentStream.TvgID = value
+		case "tvg-name":
+			currentStream.Title = value
+		case "group-title":
+			currentStream.Group = value
+		case "tvg-logo":
+			currentStream.LogoURL = value
+		default:
+			if os.Getenv("DEBUG") == "true" {
+				log.Printf("Uncaught attribute: %s=%s\n", key, value)
 			}
 		}
+
+		var pair string
+		if strings.Contains(value, `"`) || strings.Contains(value, ",") {
+			// If the value contains double quotes or commas, format it as key="value"
+			pair = fmt.Sprintf(`%s="%s"`, key, value)
+		} else {
+			// Otherwise, format it as key=value
+			pair = fmt.Sprintf(`%s=%s`, key, value)
+		}
+		lineWithoutPairs = strings.Replace(lineWithoutPairs, pair, "", 1)
 	}
-	return info
+
+	lineCommaSplit := strings.SplitN(lineWithoutPairs, ",", 2)
+
+	if len(lineCommaSplit) > 1 {
+		currentStream.Title = strings.TrimSpace(lineCommaSplit[1])
+	}
+
+	return currentStream
 }
 
 func insertStreamToDb(db *sql.DB, currentStream database.StreamInfo) error {
