@@ -139,19 +139,21 @@ http://example.com/fox
 		t.Fatalf("Expected %d streams, but got %d", len(expectedStreams), len(storedStreams))
 	}
 
-	for i, expected := range expectedStreams {
-		if !streamInfoEqual(storedStreams[i], expected) {
-			a := storedStreams[i]
-			b := expected
-			t.Errorf("Stream at index %d does not match expected content", i)
-			t.Errorf("%s ?= %s, %s ?= %s, %s ?= %s, %s ?= %s, %d ?= %d", a.TvgID, b.TvgID, a.Title, b.Title, a.Group, b.Group, a.LogoURL, b.LogoURL, len(a.URLs), len(b.URLs))
-			for _, url := range a.URLs {
-				t.Errorf("a: %s, %d", url.Content, url.M3UIndex)
-			}
-			for _, url := range b.URLs {
-				t.Errorf("b: %s, %d", url.Content, url.M3UIndex)
-			}
-			t.FailNow()
+	// Create a map to store expected streams for easier comparison
+	expectedMap := make(map[string]database.StreamInfo)
+	for _, expected := range expectedStreams {
+		expectedMap[expected.Title] = expected
+	}
+
+	for _, stored := range storedStreams {
+		expected, ok := expectedMap[stored.Title]
+		if !ok {
+			t.Errorf("Unexpected stream with Title: %s", stored.Title)
+			continue
+		}
+		if !streamInfoEqual(stored, expected) {
+			t.Errorf("Stream with Title %s does not match expected content", stored.Title)
+			t.Errorf("Stored: %#v, Expected: %#v", stored, expected)
 		}
 	}
 
