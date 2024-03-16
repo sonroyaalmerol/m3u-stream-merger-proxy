@@ -30,6 +30,8 @@ func swapDb(newInstance *database.Instance) error {
 		}
 
 		db = newInstance
+		newInstance = nil
+
 		return nil
 	}
 
@@ -55,6 +57,7 @@ func swapDb(newInstance *database.Instance) error {
 	}
 
 	db = newInstance
+	newInstance = nil
 
 	return nil
 }
