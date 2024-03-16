@@ -112,8 +112,6 @@ func updateSources(ctx context.Context) {
 		if err != nil {
 			log.Fatalf("swapDb: %v", err)
 		}
-
-		nextDb = nil
 		log.Println("Background process: Updated M3U database.")
 	}
 }
