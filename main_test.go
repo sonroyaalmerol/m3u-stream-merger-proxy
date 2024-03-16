@@ -29,6 +29,7 @@ func TestMP4Handler(t *testing.T) {
 
 	os.Setenv("M3U_URL_1", "https://gist.githubusercontent.com/sonroyaalmerol/de1c90e8681af040924da5d15c7f530d/raw/06844df09e69ea278060252ca5aa8d767eb4543d/test-m3u.m3u")
 	os.Setenv("BUFFER_MB", "3")
+	os.Setenv("INCLUDE_GROUPS", "movies")
 
 	updateSources(ctx)
 

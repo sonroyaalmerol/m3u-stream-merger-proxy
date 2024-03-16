@@ -119,9 +119,7 @@ func insertStreamToDb(db *sql.DB, currentStream database.StreamInfo) error {
 	return nil
 }
 
-// Should group be included
 func checkInludeGroup(groups []string, line string) bool {
-
 	if len(groups) == 0 {
 		return true
 	} else {
