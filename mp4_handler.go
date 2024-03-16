@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -100,7 +99,7 @@ func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl 
 	return resp, selectedUrl, nil
 }
 
-func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	ctx := r.Context()
 
 	// Log the incoming request
@@ -119,7 +118,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		return
 	}
 
-	stream, err := database.GetStreamByTitle(db, streamName)
+	stream, err := db.GetStreamByTitle(streamName)
 	if err != nil {
 		http.NotFound(w, r)
 		return

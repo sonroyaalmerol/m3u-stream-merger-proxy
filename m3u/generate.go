@@ -1,7 +1,6 @@
 package m3u
 
 import (
-	"database/sql"
 	"fmt"
 	"log"
 	"m3u-stream-merger/database"
@@ -13,8 +12,8 @@ func generateStreamURL(baseUrl string, title string) string {
 	return fmt.Sprintf("%s/%s.mp4\n", baseUrl, utils.GetStreamUID(title))
 }
 
-func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	streams, err := database.GetStreams(db)
+func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Instance) {
+	streams, err := db.GetStreams()
 	if err != nil {
 		log.Println(fmt.Errorf("GetStreams error: %v", err))
 	}

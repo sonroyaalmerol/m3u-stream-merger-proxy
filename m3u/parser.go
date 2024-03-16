@@ -3,7 +3,6 @@ package m3u
 import (
 	"bufio"
 	"bytes"
-	"database/sql"
 	"fmt"
 	"io"
 	"log"
@@ -76,8 +75,8 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 	return currentStream
 }
 
-func insertStreamToDb(db *sql.DB, currentStream database.StreamInfo) error {
-	existingStream, err := database.GetStreamByTitle(db, currentStream.Title)
+func insertStreamToDb(db *database.Instance, currentStream database.StreamInfo) error {
+	existingStream, err := db.GetStreamByTitle(currentStream.Title)
 	if err != nil {
 		return fmt.Errorf("GetStreamByTitle error (title: %s): %v", currentStream.Title, err)
 	}
@@ -87,7 +86,7 @@ func insertStreamToDb(db *sql.DB, currentStream database.StreamInfo) error {
 		if os.Getenv("DEBUG") == "true" {
 			log.Printf("Creating new database entry: %s\n", currentStream.Title)
 		}
-		dbId, err = database.InsertStream(db, currentStream)
+		dbId, err = db.InsertStream(currentStream)
 		if err != nil {
 			return fmt.Errorf("InsertStream error (title: %s): %v", currentStream.Title, err)
 		}
@@ -103,13 +102,13 @@ func insertStreamToDb(db *sql.DB, currentStream database.StreamInfo) error {
 	}
 
 	for _, currentStreamUrl := range currentStream.URLs {
-		existingUrl, err := database.GetStreamUrlByUrlAndIndex(db, currentStreamUrl.Content, currentStreamUrl.M3UIndex)
+		existingUrl, err := db.GetStreamUrlByUrlAndIndex(currentStreamUrl.Content, currentStreamUrl.M3UIndex)
 		if err != nil {
 			return fmt.Errorf("GetStreamUrlByUrlAndIndex error (url: %s): %v", currentStreamUrl.Content, err)
 		}
 
 		if existingUrl.Content != currentStreamUrl.Content || existingUrl.M3UIndex != currentStreamUrl.M3UIndex {
-			_, err = database.InsertStreamUrl(db, dbId, currentStreamUrl)
+			_, err = db.InsertStreamUrl(dbId, currentStreamUrl)
 			if err != nil {
 				return fmt.Errorf("InsertStreamUrl error (title: %s): %v", currentStream.Title, err)
 			}
@@ -136,7 +135,7 @@ func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 	return nil
 }
 
-func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int) error {
+func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 	maxRetries := 10
 	var err error
 	maxRetriesStr, maxRetriesExists := os.LookupEnv("MAX_RETRIES")
