@@ -14,7 +14,7 @@ RUN go mod download
 COPY . .
 
 RUN go test ./... \
-  && CGO_ENABLED=0 go build -ldflags='-s -w' -o main .
+  && CGO_ENABLED=1 go build -ldflags='-s -w' -o main .
 
 ####################
 
