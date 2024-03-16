@@ -118,7 +118,7 @@ func insertStreamToDb(db *database.Instance, currentStream database.StreamInfo) 
 	return nil
 }
 
-func checkInludeGroup(groups []string, line string) bool {
+func checkIncludeGroup(groups []string, line string) bool {
 	if len(groups) == 0 {
 		return true
 	} else {
@@ -186,7 +186,7 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 		for scanner.Scan() {
 			line := scanner.Text()
 
-			if strings.HasPrefix(line, "#EXTINF:") && checkInludeGroup(grps, line) {
+			if strings.HasPrefix(line, "#EXTINF:") && checkIncludeGroup(grps, line) {
 				if scanner.Scan() {
 					wg.Add(2)
 					nextLine := scanner.Text()
