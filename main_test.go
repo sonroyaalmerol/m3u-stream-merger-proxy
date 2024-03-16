@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"m3u-stream-merger/database"
+	"m3u-stream-merger/m3u"
 	"m3u-stream-merger/utils"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 )
@@ -33,9 +35,24 @@ func TestMP4Handler(t *testing.T) {
 
 	updateSources(ctx)
 
-	streams, err := database.GetStreams(db)
+	streams, err := db.GetStreams()
 	if err != nil {
 		t.Errorf("GetStreams returned error: %v", err)
+	}
+
+	m3uReq := httptest.NewRequest("GET", "/playlist.m3u", nil)
+	m3uW := httptest.NewRecorder()
+
+	func() {
+		swappingLock.Lock()
+		defer swappingLock.Unlock()
+
+		m3u.GenerateM3UContent(m3uW, m3uReq, db)
+	}()
+
+	m3uResp := m3uW.Result()
+	if m3uResp.StatusCode != http.StatusOK {
+		t.Errorf("Playlist Route - Expected status code %d, got %d", http.StatusOK, m3uResp.StatusCode)
 	}
 
 	var wg sync.WaitGroup
@@ -73,8 +90,14 @@ func TestMP4Handler(t *testing.T) {
 
 	wg.Wait()
 
-	err = database.DeleteSQLite("current_streams")
+	err = db.DeleteSQLite()
 	if err != nil {
 		t.Errorf("DeleteSQLite returned error: %v", err)
+	}
+
+	foldername := filepath.Join(".", "data")
+	err = os.RemoveAll(foldername)
+	if err != nil {
+		t.Errorf("Error deleting data folder: %v\n", err)
 	}
 }

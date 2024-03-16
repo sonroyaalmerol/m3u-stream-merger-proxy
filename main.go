@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"m3u-stream-merger/database"
@@ -16,56 +15,54 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
-var db *sql.DB
+var db *database.Instance
 var cronMutex sync.Mutex
+var swappingLock sync.Mutex
 
-func swapDb() error {
-	// Generate a unique temporary name
+func swapDb(newInstance *database.Instance) error {
+	swappingLock.Lock()
+	defer swappingLock.Unlock()
+
+	if db == nil {
+		err := newInstance.RenameSQLite("current_streams")
+		if err != nil {
+			return fmt.Errorf("Error renaming next_streams to current_streams: %v\n", err)
+		}
+
+		db = newInstance
+		newInstance = nil
+
+		return nil
+	}
+
 	tempName := fmt.Sprintf("temp_%d", time.Now().UnixNano())
 
-	// Rename the current database to a temporary name
-	err := database.RenameSQLite("current_streams", tempName)
+	err := db.RenameSQLite(tempName)
 	if err != nil {
 		return fmt.Errorf("Error renaming current_streams to temp: %v\n", err)
 	}
 
-	// Rename the next database to current
-	err = database.RenameSQLite("next_streams", "current_streams")
+	err = newInstance.RenameSQLite("current_streams")
 	if err != nil {
-		// If renaming fails, revert the previous renaming to maintain consistency
-		revertErr := database.RenameSQLite(tempName, "current_streams")
+		revertErr := db.RenameSQLite("current_streams")
 		if revertErr != nil {
 			return fmt.Errorf("Error renaming back to current_streams: %v\n", revertErr)
 		}
 		return fmt.Errorf("Error renaming next_streams to current_streams: %v\n", err)
 	}
 
-	// Initialize the new current database
-	db, err = database.InitializeSQLite("current_streams")
+	err = db.DeleteSQLite()
 	if err != nil {
-		// If initialization fails, revert both renamings
-		revertErr := database.RenameSQLite(tempName, "current_streams")
-		if revertErr != nil {
-			return fmt.Errorf("Error renaming back to current_streams: %v\n", revertErr)
-		}
-		revertErr = database.RenameSQLite("current_streams", "next_streams")
-		if revertErr != nil {
-			return fmt.Errorf("Error renaming back to next_streams: %v\n", revertErr)
-		}
-		return fmt.Errorf("Error initializing current_streams: %v\n", err)
-	}
-
-	// Delete the temporary database
-	err = database.DeleteSQLite(tempName)
-	if err != nil {
-		// Log the error but do not return as this is not a critical error
 		fmt.Printf("Error deleting temp database: %v\n", err)
 	}
+
+	db = newInstance
+	newInstance = nil
 
 	return nil
 }
 
-func updateSource(nextDb *sql.DB, m3uUrl string, index int) {
+func updateSource(nextDb *database.Instance, m3uUrl string, index int) {
 	log.Printf("Background process: Updating M3U #%d from %s\n", index, m3uUrl)
 	err := m3u.ParseM3UFromURL(nextDb, m3uUrl, index)
 	if err != nil {
@@ -102,7 +99,7 @@ func updateSources(ctx context.Context) {
 			log.Printf("Background process: Fetching M3U_URL_%d...\n", index)
 			wg.Add(1)
 			// Start the goroutine for periodic updates
-			go func(nextDb *sql.DB, m3uUrl string, index int) {
+			go func(nextDb *database.Instance, m3uUrl string, index int) {
 				defer wg.Done()
 				updateSource(nextDb, m3uUrl, index)
 			}(nextDb, m3uUrl, index)
@@ -111,7 +108,7 @@ func updateSources(ctx context.Context) {
 		}
 		wg.Wait()
 
-		err = swapDb()
+		err = swapDb(nextDb)
 		if err != nil {
 			log.Fatalf("swapDb: %v", err)
 		}
@@ -171,6 +168,9 @@ func main() {
 
 	// HTTP handlers
 	http.HandleFunc("/playlist.m3u", func(w http.ResponseWriter, r *http.Request) {
+		swappingLock.Lock()
+		defer swappingLock.Unlock()
+
 		m3u.GenerateM3UContent(w, r, db)
 	})
 	http.HandleFunc("/stream/", func(w http.ResponseWriter, r *http.Request) {
