@@ -9,7 +9,6 @@ import (
 	"m3u-stream-merger/m3u"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -66,9 +65,9 @@ func swapDb() error {
 	return nil
 }
 
-func updateSource(nextDb *sql.DB, m3uUrl string, index int, maxConcurrency int) {
+func updateSource(nextDb *sql.DB, m3uUrl string, index int) {
 	log.Printf("Background process: Updating M3U #%d from %s\n", index, m3uUrl)
-	err := m3u.ParseM3UFromURL(nextDb, m3uUrl, index, maxConcurrency)
+	err := m3u.ParseM3UFromURL(nextDb, m3uUrl, index)
 	if err != nil {
 		log.Printf("Background process: Error updating M3U: %v\n", err)
 	} else {
@@ -95,29 +94,18 @@ func updateSources(ctx context.Context) {
 		var wg sync.WaitGroup
 		index := 1
 		for {
-			maxConcurrency := 1
 			m3uUrl, m3uExists := os.LookupEnv(fmt.Sprintf("M3U_URL_%d", index))
-			rawMaxConcurrency, maxConcurrencyExists := os.LookupEnv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", index))
 			if !m3uExists {
 				break
-			}
-
-			log.Printf("Background process: Checking M3U_MAX_CONCURRENCY_%d...\n", index)
-			if maxConcurrencyExists {
-				var err error
-				maxConcurrency, err = strconv.Atoi(rawMaxConcurrency)
-				if err != nil {
-					maxConcurrency = 1
-				}
 			}
 
 			log.Printf("Background process: Fetching M3U_URL_%d...\n", index)
 			wg.Add(1)
 			// Start the goroutine for periodic updates
-			go func(nextDb *sql.DB, m3uUrl string, index int, maxConcurrency int) {
+			go func(nextDb *sql.DB, m3uUrl string, index int) {
 				defer wg.Done()
-				updateSource(nextDb, m3uUrl, index, maxConcurrency)
-			}(nextDb, m3uUrl, index, maxConcurrency)
+				updateSource(nextDb, m3uUrl, index)
+			}(nextDb, m3uUrl, index)
 
 			index++
 		}
