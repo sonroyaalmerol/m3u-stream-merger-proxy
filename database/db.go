@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type Instance struct {
@@ -36,7 +36,7 @@ func InitializeSQLite(name string) (db *Instance, err error) {
 	}
 	file.Close()
 
-	db.Sql, err = sql.Open("sqlite", db.FileName)
+	db.Sql, err = sql.Open("sqlite3", db.FileName)
 	if err != nil {
 		return nil, fmt.Errorf("error opening SQLite database: %v\n", err)
 	}
@@ -103,7 +103,7 @@ func (db *Instance) RenameSQLite(newName string) error {
 	}
 
 	db.FileName = nextFileName
-	db.Sql, err = sql.Open("sqlite", db.FileName)
+	db.Sql, err = sql.Open("sqlite3", db.FileName)
 	if err != nil {
 		return fmt.Errorf("error opening SQLite database: %v\n", err)
 	}
