@@ -20,7 +20,7 @@ RUN go mod download
 COPY . .
 
 RUN go test ./... \
-  && CGO_ENABLED=1 go build -ldflags='-s -w -extldflags "-static"' -o main .
+  && CGO_ENABLED=1 CC=musl-gcc go build -ldflags='-s -w -extldflags "-static"' -o main .
 
 ####################
 
