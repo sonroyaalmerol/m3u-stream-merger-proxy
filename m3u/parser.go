@@ -183,28 +183,30 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int) error {
 			line := scanner.Text()
 
 			if strings.HasPrefix(line, "#EXTINF:") {
-				wg.Add(2)
-				nextLine := scanner.Text()
+				if scanner.Scan() {
+					wg.Add(2)
+					nextLine := scanner.Text()
 
-				// Insert parsed stream to database
-				go func(c chan database.StreamInfo) {
-					defer wg.Done()
-					errCh <- insertStreamToDb(db, <-c)
-				}(streamInfoCh)
+					// Insert parsed stream to database
+					go func(c chan database.StreamInfo) {
+						defer wg.Done()
+						errCh <- insertStreamToDb(db, <-c)
+					}(streamInfoCh)
 
-				// Parse stream lines
-				go func(l string, nl string) {
-					defer wg.Done()
-					streamInfoCh <- parseLine(l, nl, m3uIndex)
-				}(line, nextLine)
+					// Parse stream lines
+					go func(l string, nl string) {
+						defer wg.Done()
+						streamInfoCh <- parseLine(l, nl, m3uIndex)
+					}(line, nextLine)
 
-				// Error handler
-				go func() {
-					err := <-errCh
-					if err != nil {
-						log.Printf("M3U Parser error: %v", err)
-					}
-				}()
+					// Error handler
+					go func() {
+						err := <-errCh
+						if err != nil {
+							log.Printf("M3U Parser error: %v", err)
+						}
+					}()
+				}
 			}
 		}
 
