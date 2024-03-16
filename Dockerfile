@@ -13,8 +13,8 @@ RUN go mod download
 # Copy the source code from the current directory to the Working Directory inside the container
 COPY . .
 
-RUN CGO_ENABLED=0 go build -ldflags='-s -w' -o main . \
-  && go test ./...
+RUN go test ./... \
+  && CGO_ENABLED=0 go build -ldflags='-s -w' -o main .
 
 ####################
 
