@@ -119,6 +119,22 @@ func insertStreamToDb(db *sql.DB, currentStream database.StreamInfo) error {
 	return nil
 }
 
+// Should group be included
+func checkInludeGroup(groups []string, line string) bool {
+
+	if len(groups) == 0 {
+		return true
+	} else {
+		for _, group := range groups {
+			toMatch := strings.ToLower("group-title=" + "\"" + group + "\"")
+			if strings.Contains(strings.ToLower(line), toMatch) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
 func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 	// Download M3U for processing
 	log.Printf("Downloading M3U from URL: %s\n", m3uURL)
@@ -148,6 +164,12 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int) error {
 	}
 
 	var buffer bytes.Buffer
+	var grps []string
+
+	includeGroups := os.Getenv("INCLUDE_GROUPS")
+	if includeGroups != "" {
+		grps = strings.Split(includeGroups, ",")
+	}
 
 	for i := 0; i <= maxRetries; i++ {
 		err := downloadM3UToBuffer(m3uURL, &buffer)
@@ -167,7 +189,7 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int) error {
 		for scanner.Scan() {
 			line := scanner.Text()
 
-			if strings.HasPrefix(line, "#EXTINF:") {
+			if strings.HasPrefix(line, "#EXTINF:") && checkInludeGroup(grps, line) {
 				if scanner.Scan() {
 					wg.Add(2)
 					nextLine := scanner.Text()
@@ -192,6 +214,7 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int) error {
 						}
 					}()
 				}
+				//}
 			}
 		}
 
