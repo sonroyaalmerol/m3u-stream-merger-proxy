@@ -16,17 +16,6 @@ import (
 )
 
 func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl *database.StreamURL, err error) {
-	userAgent := utils.GetEnv("USER_AGENT")
-
-	// Create a new HTTP client with a custom User-Agent header
-	client := &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			// Follow redirects while preserving the custom User-Agent header
-			req.Header.Set("User-Agent", userAgent)
-			return nil
-		},
-	}
-
 	loadBalancingMode := os.Getenv("LOAD_BALANCING_MODE")
 	if loadBalancingMode == "" {
 		loadBalancingMode = "brute-force"
@@ -50,7 +39,7 @@ func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl 
 				continue // Skip this stream if concurrency limit reached
 			}
 
-			resp, err = client.Get(url.Content)
+			resp, err = utils.CustomHttpRequest("GET", url.Content)
 			if err == nil {
 				selectedUrl = &url
 				break
@@ -73,7 +62,7 @@ func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl 
 				continue // Skip this stream if concurrency limit reached
 			}
 
-			resp, err = client.Get(url.Content)
+			resp, err = utils.CustomHttpRequest("GET", url.Content)
 			if err == nil {
 				selectedUrl = &url
 				break
@@ -90,7 +79,7 @@ func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl 
 		log.Printf("All concurrency limits have been reached. Falling back to connection checking mode...\n")
 		// Connection check mode
 		for _, url := range stream.URLs {
-			resp, err = client.Get(url.Content)
+			resp, err = utils.CustomHttpRequest("GET", url.Content)
 			if err == nil {
 				selectedUrl = &url
 				break
