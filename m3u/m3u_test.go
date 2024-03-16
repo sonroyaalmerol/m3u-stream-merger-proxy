@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"m3u-stream-merger/database"
@@ -25,7 +27,7 @@ func TestGenerateM3UContent(t *testing.T) {
 		t.Errorf("InitializeSQLite returned error: %v", err)
 	}
 
-	_, err = database.InsertStream(db, stream)
+	_, err = db.InsertStream(stream)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,9 +69,15 @@ func TestGenerateM3UContent(t *testing.T) {
 			rr.Body.String(), expectedContent)
 	}
 
-	err = database.DeleteSQLite("test")
+	err = db.DeleteSQLite()
 	if err != nil {
 		t.Errorf("DeleteSQLite returned error: %v", err)
+	}
+
+	foldername := filepath.Join(".", "data")
+	err = os.RemoveAll(foldername)
+	if err != nil {
+		t.Errorf("Error deleting data folder: %v\n", err)
 	}
 }
 
@@ -129,7 +137,7 @@ http://example.com/fox
 		}},
 	}
 
-	storedStreams, err := database.GetStreams(db)
+	storedStreams, err := db.GetStreams()
 	if err != nil {
 		t.Fatalf("Error retrieving streams from database: %v", err)
 	}
@@ -157,9 +165,15 @@ http://example.com/fox
 		}
 	}
 
-	err = database.DeleteSQLite("test")
+	err = db.DeleteSQLite()
 	if err != nil {
 		t.Errorf("DeleteSQLite returned error: %v", err)
+	}
+
+	foldername := filepath.Join(".", "data")
+	err = os.RemoveAll(foldername)
+	if err != nil {
+		t.Errorf("Error deleting data folder: %v\n", err)
 	}
 }
 

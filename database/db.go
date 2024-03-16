@@ -3,7 +3,6 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -11,40 +10,39 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-var mutex sync.Mutex
+type Instance struct {
+	Sql      *sql.DB
+	FileName string
+	Lock     sync.Mutex
+}
 
-func InitializeSQLite(name string) (db *sql.DB, err error) {
-	mutex.Lock()
-	defer mutex.Unlock()
+func InitializeSQLite(name string) (db *Instance, err error) {
+	db = new(Instance)
 
-	if db != nil {
-		err := db.Close()
-		if err == nil {
-			log.Printf("Database session has already been closed: %v\n", err)
-		}
-	}
+	db.Lock.Lock()
+	defer db.Lock.Unlock()
 
 	foldername := filepath.Join(".", "data")
-	filename := filepath.Join(foldername, fmt.Sprintf("%s.db", name))
+	db.FileName = filepath.Join(foldername, fmt.Sprintf("%s.db", name))
 
 	err = os.MkdirAll(foldername, 0755)
 	if err != nil {
 		return nil, fmt.Errorf("error creating data folder: %v\n", err)
 	}
 
-	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0666)
+	file, err := os.OpenFile(db.FileName, os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
 		return nil, fmt.Errorf("error creating database file: %v\n", err)
 	}
 	file.Close()
 
-	db, err = sql.Open("sqlite", filename)
+	db.Sql, err = sql.Open("sqlite", db.FileName)
 	if err != nil {
 		return nil, fmt.Errorf("error opening SQLite database: %v\n", err)
 	}
 
 	// Create table if not exists
-	_, err = db.Exec(`
+	_, err = db.Sql.Exec(`
 		CREATE TABLE IF NOT EXISTS streams (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			title TEXT UNIQUE,
@@ -57,7 +55,7 @@ func InitializeSQLite(name string) (db *sql.DB, err error) {
 		return nil, fmt.Errorf("error creating table: %v\n", err)
 	}
 
-	_, err = db.Exec(`
+	_, err = db.Sql.Exec(`
 		CREATE TABLE IF NOT EXISTS stream_urls (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			stream_id INTEGER,
@@ -74,39 +72,50 @@ func InitializeSQLite(name string) (db *sql.DB, err error) {
 }
 
 // DeleteSQLite deletes the SQLite database file.
-func DeleteSQLite(name string) error {
-	mutex.Lock()
-	defer mutex.Unlock()
+func (db *Instance) DeleteSQLite() error {
+	db.Lock.Lock()
+	defer db.Lock.Unlock()
 
-	foldername := filepath.Join(".", "data")
-	filename := filepath.Join(foldername, fmt.Sprintf("%s.db", name))
+	_ = db.Sql.Close()
 
-	err := os.Remove(filename)
+	err := os.Remove(db.FileName)
 	if err != nil {
 		return fmt.Errorf("error deleting database file: %v\n", err)
 	}
 
+	db.Sql = nil
+
 	return nil
 }
 
-func RenameSQLite(prevName string, nextName string) error {
-	mutex.Lock()
-	defer mutex.Unlock()
+func (db *Instance) RenameSQLite(newName string) error {
+	db.Lock.Lock()
+	defer db.Lock.Unlock()
+
+	_ = db.Sql.Close()
 
 	foldername := filepath.Join(".", "data")
-	prevFileName := filepath.Join(foldername, fmt.Sprintf("%s.db", prevName))
-	nextFileName := filepath.Join(foldername, fmt.Sprintf("%s.db", nextName))
+	nextFileName := filepath.Join(foldername, fmt.Sprintf("%s.db", newName))
 
-	err := os.Rename(prevFileName, nextFileName)
+	err := os.Rename(db.FileName, nextFileName)
+	if err != nil {
+		return fmt.Errorf("error renaming database file: %v\n", err)
+	}
+
+	db.FileName = nextFileName
+	db.Sql, err = sql.Open("sqlite", db.FileName)
+	if err != nil {
+		return fmt.Errorf("error opening SQLite database: %v\n", err)
+	}
 
 	return err
 }
 
-func SaveToSQLite(db *sql.DB, streams []StreamInfo) (err error) {
-	mutex.Lock()
-	defer mutex.Unlock()
+func (db *Instance) SaveToSQLite(streams []StreamInfo) (err error) {
+	db.Lock.Lock()
+	defer db.Lock.Unlock()
 
-	tx, err := db.Begin()
+	tx, err := db.Sql.Begin()
 	if err != nil {
 		return fmt.Errorf("error beginning transaction: %v", err)
 	}
@@ -155,11 +164,11 @@ func SaveToSQLite(db *sql.DB, streams []StreamInfo) (err error) {
 	return
 }
 
-func InsertStream(db *sql.DB, s StreamInfo) (i int64, err error) {
-	mutex.Lock()
-	defer mutex.Unlock()
+func (db *Instance) InsertStream(s StreamInfo) (i int64, err error) {
+	db.Lock.Lock()
+	defer db.Lock.Unlock()
 
-	tx, err := db.Begin()
+	tx, err := db.Sql.Begin()
 	if err != nil {
 		return -1, fmt.Errorf("error beginning transaction: %v", err)
 	}
@@ -192,11 +201,11 @@ func InsertStream(db *sql.DB, s StreamInfo) (i int64, err error) {
 	return streamID, err
 }
 
-func InsertStreamUrl(db *sql.DB, id int64, url StreamURL) (i int64, err error) {
-	mutex.Lock()
-	defer mutex.Unlock()
+func (db *Instance) InsertStreamUrl(id int64, url StreamURL) (i int64, err error) {
+	db.Lock.Lock()
+	defer db.Lock.Unlock()
 
-	tx, err := db.Begin()
+	tx, err := db.Sql.Begin()
 	if err != nil {
 		return -1, fmt.Errorf("error beginning transaction: %v", err)
 	}
@@ -230,11 +239,11 @@ func InsertStreamUrl(db *sql.DB, id int64, url StreamURL) (i int64, err error) {
 	return insertedId, err
 }
 
-func DeleteStreamByTitle(db *sql.DB, title string) error {
-	mutex.Lock()
-	defer mutex.Unlock()
+func (db *Instance) DeleteStreamByTitle(title string) error {
+	db.Lock.Lock()
+	defer db.Lock.Unlock()
 
-	tx, err := db.Begin()
+	tx, err := db.Sql.Begin()
 	if err != nil {
 		return fmt.Errorf("error beginning transaction: %v", err)
 	}
@@ -263,11 +272,11 @@ func DeleteStreamByTitle(db *sql.DB, title string) error {
 	return nil
 }
 
-func DeleteStreamURL(db *sql.DB, streamURLID int64) error {
-	mutex.Lock()
-	defer mutex.Unlock()
+func (db *Instance) DeleteStreamURL(streamURLID int64) error {
+	db.Lock.Lock()
+	defer db.Lock.Unlock()
 
-	tx, err := db.Begin()
+	tx, err := db.Sql.Begin()
 	if err != nil {
 		return fmt.Errorf("error beginning transaction: %v", err)
 	}
@@ -296,11 +305,11 @@ func DeleteStreamURL(db *sql.DB, streamURLID int64) error {
 	return nil
 }
 
-func GetStreamByTitle(db *sql.DB, title string) (s StreamInfo, err error) {
-	mutex.Lock()
-	defer mutex.Unlock()
+func (db *Instance) GetStreamByTitle(title string) (s StreamInfo, err error) {
+	db.Lock.Lock()
+	defer db.Lock.Unlock()
 
-	rows, err := db.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams WHERE title = ?", title)
+	rows, err := db.Sql.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams WHERE title = ?", title)
 	if err != nil {
 		return s, fmt.Errorf("error querying streams: %v", err)
 	}
@@ -312,7 +321,7 @@ func GetStreamByTitle(db *sql.DB, title string) (s StreamInfo, err error) {
 			return s, fmt.Errorf("error scanning stream: %v", err)
 		}
 
-		urlRows, err := db.Query("SELECT id, content, m3u_index FROM stream_urls WHERE stream_id = ? ORDER BY m3u_index ASC", s.DbId)
+		urlRows, err := db.Sql.Query("SELECT id, content, m3u_index FROM stream_urls WHERE stream_id = ? ORDER BY m3u_index ASC", s.DbId)
 		if err != nil {
 			return s, fmt.Errorf("error querying stream URLs: %v", err)
 		}
@@ -344,11 +353,11 @@ func GetStreamByTitle(db *sql.DB, title string) (s StreamInfo, err error) {
 	return s, nil
 }
 
-func GetStreamUrlByUrlAndIndex(db *sql.DB, url string, m3u_index int) (s StreamURL, err error) {
-	mutex.Lock()
-	defer mutex.Unlock()
+func (db *Instance) GetStreamUrlByUrlAndIndex(url string, m3u_index int) (s StreamURL, err error) {
+	db.Lock.Lock()
+	defer db.Lock.Unlock()
 
-	rows, err := db.Query("SELECT id, content, m3u_index FROM stream_urls WHERE content = ? AND m3u_index = ? ORDER BY m3u_index ASC", url, m3u_index)
+	rows, err := db.Sql.Query("SELECT id, content, m3u_index FROM stream_urls WHERE content = ? AND m3u_index = ? ORDER BY m3u_index ASC", url, m3u_index)
 	if err != nil {
 		return s, fmt.Errorf("error querying streams: %v", err)
 	}
@@ -368,11 +377,11 @@ func GetStreamUrlByUrlAndIndex(db *sql.DB, url string, m3u_index int) (s StreamU
 	return s, nil
 }
 
-func GetStreams(db *sql.DB) ([]StreamInfo, error) {
-	mutex.Lock()
-	defer mutex.Unlock()
+func (db *Instance) GetStreams() ([]StreamInfo, error) {
+	db.Lock.Lock()
+	defer db.Lock.Unlock()
 
-	rows, err := db.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams")
+	rows, err := db.Sql.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams")
 	if err != nil {
 		return nil, fmt.Errorf("error querying streams: %v", err)
 	}
@@ -386,7 +395,7 @@ func GetStreams(db *sql.DB) ([]StreamInfo, error) {
 			return nil, fmt.Errorf("error scanning stream: %v", err)
 		}
 
-		urlRows, err := db.Query("SELECT id, content, m3u_index FROM stream_urls WHERE stream_id = ? ORDER BY m3u_index ASC", s.DbId)
+		urlRows, err := db.Sql.Query("SELECT id, content, m3u_index FROM stream_urls WHERE stream_id = ? ORDER BY m3u_index ASC", s.DbId)
 		if err != nil {
 			return nil, fmt.Errorf("error querying stream URLs: %v", err)
 		}

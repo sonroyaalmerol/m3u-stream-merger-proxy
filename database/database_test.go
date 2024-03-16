@@ -1,6 +1,8 @@
 package database
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -36,12 +38,12 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 		}},
 	}}
 
-	err = SaveToSQLite(db, expected) // Insert test data into the database
+	err = db.SaveToSQLite(expected) // Insert test data into the database
 	if err != nil {
 		t.Errorf("SaveToSQLite returned error: %v", err)
 	}
 
-	result, err := GetStreams(db)
+	result, err := db.GetStreams()
 	if err != nil {
 		t.Errorf("GetStreams returned error: %v", err)
 	}
@@ -56,17 +58,17 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 		}
 	}
 
-	err = DeleteStreamByTitle(db, expected[1].Title)
+	err = db.DeleteStreamByTitle(expected[1].Title)
 	if err != nil {
 		t.Errorf("DeleteStreamByTitle returned error: %v", err)
 	}
 
-	err = DeleteStreamURL(db, expected[0].URLs[0].DbId)
+	err = db.DeleteStreamURL(expected[0].URLs[0].DbId)
 	if err != nil {
 		t.Errorf("DeleteStreamURL returned error: %v", err)
 	}
 
-	result, err = GetStreams(db)
+	result, err = db.GetStreams()
 	if err != nil {
 		t.Errorf("GetStreams returned error: %v", err)
 	}
@@ -84,9 +86,15 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 		}
 	}
 
-	err = DeleteSQLite("test")
+	err = db.DeleteSQLite()
 	if err != nil {
 		t.Errorf("DeleteSQLite returned error: %v", err)
+	}
+
+	foldername := filepath.Join(".", "data")
+	err = os.RemoveAll(foldername)
+	if err != nil {
+		t.Errorf("Error deleting data folder: %v\n", err)
 	}
 }
 
