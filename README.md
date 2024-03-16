@@ -3,7 +3,9 @@
 
 Streamline your IPTV experience by consolidating multiple M3U playlists into a single source with the blazingly fast 🔥 and lightweight M3U Stream Merger Proxy. This service acts as a modern HTTP proxy server, effortlessly merging and streaming content from various M3U sources.
 
-If you're tired of managing multiple IPTV connections with separate but identical M3U links, this proxy is the solution you need. Currently, nested M3U files are not supported (M3U playlists inside a parent M3U playlist).
+Uses the channel title or `tvg-name` (as fallback) to merge multiple identical channels into one. This is not an xTeVe/Threadfin replacement but is often used with it.
+
+Currently, nested M3U files are not supported (M3U playlists inside a parent M3U playlist).
 
 ## How It Works
 
@@ -94,6 +96,8 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 First off, thanks for taking the time to contribute! ❤️
 
 All types of contributions are encouraged and valued. 🎉
+
+I'm currently looking to add more `tvg-*` tags that might be used by some IPTV providers. Feel free to post an issue if you require a specific tag!
 
 And if you like the project, but just don't have time to contribute, that's fine. There are other easy ways to support the project and show your appreciation, which I would also be very happy about:
 - Star the project
