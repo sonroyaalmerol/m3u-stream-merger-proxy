@@ -194,7 +194,9 @@ func ParseM3UFromURL(db *sql.DB, m3uURL string, m3uIndex int) error {
 				// Error handler
 				go func() {
 					err := <-errCh
-					log.Printf("M3U Parser error: %v", err)
+					if err != nil {
+						log.Printf("M3U Parser error: %v", err)
+					}
 				}()
 			}
 		}
