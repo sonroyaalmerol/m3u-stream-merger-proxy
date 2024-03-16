@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"m3u-stream-merger/database"
+	"m3u-stream-merger/utils"
 )
 
 func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
@@ -120,11 +121,7 @@ func insertStreamToDb(db *sql.DB, currentStream database.StreamInfo) error {
 }
 
 func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
-	// Set the custom User-Agent header
-	userAgent, userAgentExists := os.LookupEnv("USER_AGENT")
-	if !userAgentExists {
-		userAgent = "IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)"
-	}
+	userAgent := utils.GetEnv("USER_AGENT")
 
 	// Create a new HTTP client with a custom User-Agent header
 	client := &http.Client{
