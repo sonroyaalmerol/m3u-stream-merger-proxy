@@ -1,6 +1,12 @@
 # Start from the official Golang image
 FROM golang:bookworm AS build
 
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive \
+    apt-get install --assume-yes --no-install-recommends \
+      build-essential=12.9 \
+      musl-tools=1.2.3-1
+
 # Set the Current Working Directory inside the container
 WORKDIR /app
 
@@ -14,7 +20,7 @@ RUN go mod download
 COPY . .
 
 RUN go test ./... \
-  && CGO_ENABLED=1 go build -ldflags='-s -w' -o main .
+  && CGO_ENABLED=1 CC=musl-gcc go build -ldflags='-s -w -extldflags "-static"' -o main .
 
 ####################
 
