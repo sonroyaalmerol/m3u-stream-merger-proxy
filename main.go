@@ -28,6 +28,8 @@ func swapDb(newInstance *database.Instance) error {
 		if err != nil {
 			return fmt.Errorf("Error renaming next_streams to current_streams: %v\n", err)
 		}
+
+		db = newInstance
 		return nil
 	}
 
