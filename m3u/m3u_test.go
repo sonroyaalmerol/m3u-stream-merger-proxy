@@ -100,7 +100,7 @@ http://example.com/fox
 	}
 
 	// Test the parseM3UFromURL function with the mock server URL
-	err = ParseM3UFromURL(db, mockServer.URL, 0, 1)
+	err = ParseM3UFromURL(db, mockServer.URL, 0)
 	if err != nil {
 		t.Errorf("Error parsing M3U from URL: %v", err)
 	}
