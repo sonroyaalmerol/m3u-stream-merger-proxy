@@ -123,8 +123,8 @@ func checkIncludeGroup(groups []string, line string) bool {
 		return true
 	} else {
 		for _, group := range groups {
-			toMatch := strings.ToLower("group-title=" + "\"" + group + "\"")
-			if strings.Contains(strings.ToLower(line), toMatch) {
+			toMatch := "group-title=" + "\"" + group + "\""
+			if strings.Contains(line, toMatch) {
 				return true
 			}
 		}
