@@ -4,7 +4,8 @@ FROM golang:bookworm AS build
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive \
     apt-get install --assume-yes --no-install-recommends \
-      build-essential=12.9
+      build-essential=12.9 \
+      musl-tools=1.2.3-1
 
 # Set the Current Working Directory inside the container
 WORKDIR /app
