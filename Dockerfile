@@ -48,8 +48,7 @@ RUN GOARCH=arm64 CC='zig cc -target aarch64-linux-musl' CXX='zig c++ -target aar
 ####################
 
 ARG TARGETARCH
-ARG TARGETARCH_STAGE=$TARGETARCH-build
-FROM $TARGETARCH_STAGE as arch-build-stage
+FROM ${TARGETARCH}-build as arch-build-stage
 
 FROM scratch 
 
