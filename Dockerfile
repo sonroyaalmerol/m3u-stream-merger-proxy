@@ -25,27 +25,40 @@ COPY . .
 
 ENV CGO_ENABLED=1
 ENV GOOS=linux
+ENV CC="zig cc"
+ENV CXX="zig c++"
 
-RUN GOARCH=amd64 CC='zig cc' CXX='zig c++' go test ./... \
-  && GOARCH=amd64 CC='zig cc' CXX='zig c++' go build -ldflags='-s -w -extldflags "-static"' -o main .
+RUN go test ./...
+
+###################
+
+FROM build AS amd64-build
+
+RUN GOARCH=amd64 CC='zig cc -target x86_64-linux-musl' CXX='zig c++ -target x86_64-linux-musl' \
+  go build -ldflags='-s -w -extldflags "-static"' -o main .
+
+###################
+
+# hadolint ignore=DL3029
+FROM --platform=arm64 build AS arm64-build
 
 RUN GOARCH=arm64 CC='zig cc -target aarch64-linux-musl' CXX='zig c++ -target aarch64-linux-musl' \
-  go build -ldflags='-s -w -extldflags "-static"' -o main-arm64 .
+  go build -ldflags='-s -w -extldflags "-static"' -o main .
 
 ####################
 
 # Start a new stage from scratch
 FROM scratch AS amd64-release
 
-COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=build /zoneinfo.zip /
+COPY --from=amd64-build /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=amd64-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=amd64-build /zoneinfo.zip /
 
 ENV ZONEINFO=/zoneinfo.zip
 ENV TZ=Etc/UTC
 
 # Copy the built Go binary from the previous stage
-COPY --from=build /app/main /gomain
+COPY --from=amd64-build /app/main /gomain
 
 # Expose ports for Go application and Redis
 EXPOSE 8080
@@ -53,19 +66,21 @@ EXPOSE 8080
 # Run the entrypoint script
 CMD ["/gomain"]
 
+###################
+
 # Start a new stage for arm64 
 # hadolint ignore=DL3029
 FROM --platform=arm64 scratch AS arm64-release
 
-COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=build /zoneinfo.zip /
+COPY --from=arm64-build /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=arm64-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=arm64-build /zoneinfo.zip /
 
 ENV ZONEINFO=/zoneinfo.zip
 ENV TZ=Etc/UTC
 
 # Copy the built Go binary from the previous stage
-COPY --from=build /app/main-arm64 /gomain
+COPY --from=arm64-build /app/main /gomain
 
 # Expose ports for Go application and Redis
 EXPOSE 8080
