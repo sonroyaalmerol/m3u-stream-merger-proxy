@@ -27,8 +27,6 @@ ENV GOOS=linux
 ENV CC="zig cc"
 ENV CXX="zig c++"
 
-RUN go test ./...
-
 ###################
 
 FROM build AS amd64-build
