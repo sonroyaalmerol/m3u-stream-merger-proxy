@@ -47,50 +47,20 @@ RUN GOARCH=arm64 CC='zig cc -target aarch64-linux-musl' CXX='zig c++ -target aar
 
 ####################
 
-# Start a new stage from scratch
-FROM scratch AS amd64-release
-
-COPY --from=amd64-build /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=amd64-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=amd64-build /zoneinfo.zip /
-
-ENV ZONEINFO=/zoneinfo.zip
-ENV TZ=Etc/UTC
-
-# Copy the built Go binary from the previous stage
-COPY --from=amd64-build /app/main /gomain
-
-# Expose ports for Go application and Redis
-EXPOSE 8080
-
-# Run the entrypoint script
-CMD ["/gomain"]
-
-###################
-
-# Start a new stage for arm64 
-# hadolint ignore=DL3029
-FROM --platform=arm64 scratch AS arm64-release
-
-COPY --from=arm64-build /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=arm64-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=arm64-build /zoneinfo.zip /
-
-ENV ZONEINFO=/zoneinfo.zip
-ENV TZ=Etc/UTC
-
-# Copy the built Go binary from the previous stage
-COPY --from=arm64-build /app/main /gomain
-
-# Expose ports for Go application and Redis
-EXPOSE 8080
-
-# Run the entrypoint script
-CMD ["/gomain"]
-
-###################
-
 ARG TARGETARCH
+FROM scratch 
 
-# hadolint ignore=DL3006
-FROM ${TARGETARCH}-release
+COPY --from=${TARGETARCH}-build /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=${TARGETARCH}-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=${TARGETARCH}-build /zoneinfo.zip /
+
+ENV ZONEINFO=/zoneinfo.zip
+ENV TZ=Etc/UTC
+
+# Copy the built Go binary from the previous stage
+COPY --from=${TARGETARCH}-build /app/main /gomain
+
+EXPOSE 8080
+
+# Run the entrypoint script
+CMD ["/gomain"]
