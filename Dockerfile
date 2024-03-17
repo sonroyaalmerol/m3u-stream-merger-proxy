@@ -8,7 +8,7 @@ RUN apk add --no-cache \
   ca-certificates \
   && apk add --no-cache \
     zig --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing \
-  && zip -r -0 /zoneinfo.zip /usr/share/zoneinfo
+  && zip -q -r -0 /zoneinfo.zip /usr/share/zoneinfo
 
 # Set the Current Working Directory inside the container
 WORKDIR /app
@@ -23,16 +23,25 @@ RUN go mod download
 COPY . .
 
 ENV CGO_ENABLED=1
-ENV CC="zig cc"
-ENV CXX="zig c++"
+ENV GOOS=linux
+ENV CC="zig cc -target x86_64-linux"
+ENV CXX="zig c++ -target x86_64-linux"
+RUN GOARCH=amd64
 
 RUN go test ./... \
   && go build -ldflags='-s -w -extldflags "-static"' -o main .
 
+ENV GOARCH=arm64
+ENV CC="zig cc -target aarch64-linux"
+ENV CXX="zig c++ -target aarch64-linux"
+
+RUN go test ./... \
+  && go build -ldflags='-s -w -extldflags "-static"' -o main-arm64 .
+
 ####################
 
 # Start a new stage from scratch
-FROM scratch 
+FROM scratch AS amd64-release
 
 COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
@@ -49,3 +58,30 @@ EXPOSE 8080
 
 # Run the entrypoint script
 CMD ["/gomain"]
+
+# Start a new stage for arm64 
+# hadolint ignore=DL3029
+FROM --platform=arm64 scratch AS arm64-release
+
+COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=build /zoneinfo.zip /
+
+ENV ZONEINFO=/zoneinfo.zip
+ENV TZ=Etc/UTC
+
+# Copy the built Go binary from the previous stage
+COPY --from=build /app/main-arm64 /gomain
+
+# Expose ports for Go application and Redis
+EXPOSE 8080
+
+# Run the entrypoint script
+CMD ["/gomain"]
+
+###################
+
+ARG TARGETARCH
+
+# hadolint ignore=DL3006
+FROM ${TARGETARCH}-release
