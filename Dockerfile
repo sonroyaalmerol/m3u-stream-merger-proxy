@@ -22,8 +22,10 @@ RUN go mod download
 # Copy the source code from the current directory to the Working Directory inside the container
 COPY . .
 
+ENV CGO_ENABLED=1
+
 RUN go test ./... \
-  && CGO_ENABLED=1 CC="zig cc" go build -ldflags='-s -w -extldflags "-static"' -o main .
+  && CC="zig cc" CXX="zig c++" go build -ldflags='-s -w -extldflags "-static"' -o main .
 
 ####################
 
