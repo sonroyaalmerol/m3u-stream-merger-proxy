@@ -24,8 +24,8 @@ COPY . .
 
 ENV CGO_ENABLED=1
 ENV GOOS=linux
-ENV CC="zig cc -target x86_64-linux"
-ENV CXX="zig c++ -target x86_64-linux"
+ENV CC="zig cc"
+ENV CXX="zig c++"
 ENV GOARCH=amd64
 
 RUN go test ./... \
