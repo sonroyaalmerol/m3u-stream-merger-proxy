@@ -5,6 +5,7 @@ FROM golang:1.22-alpine AS build
 RUN apk add --no-cache \
   tzdata \
   zip \
+  musl-dev \
   ca-certificates \
   && apk add --no-cache \
     zig --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing \
@@ -32,8 +33,8 @@ RUN go test ./... \
   && go build -ldflags='-s -w -extldflags "-static"' -o main .
 
 ENV GOARCH=arm64
-ENV CC="zig cc -target aarch64-linux"
-ENV CXX="zig c++ -target aarch64-linux"
+ENV CC="zig cc -target aarch64-linux-musl"
+ENV CXX="zig c++ -target aarch64-linux-musl"
 
 RUN go test ./... \
   && go build -ldflags='-s -w -extldflags "-static"' -o main-arm64 .
