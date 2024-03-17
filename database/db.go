@@ -41,6 +41,11 @@ func InitializeSQLite(name string) (db *Instance, err error) {
 		return nil, fmt.Errorf("error opening SQLite database: %v\n", err)
 	}
 
+	_, err = db.Sql.Exec("PRAGMA journal_mode=WAL;")
+	if err != nil {
+		return nil, fmt.Errorf("error enabling wal mode: %v\n", err)
+	}
+
 	// Create table if not exists
 	_, err = db.Sql.Exec(`
 		CREATE TABLE IF NOT EXISTS streams (
@@ -306,9 +311,6 @@ func (db *Instance) DeleteStreamURL(streamURLID int64) error {
 }
 
 func (db *Instance) GetStreamByTitle(title string) (s StreamInfo, err error) {
-	db.Lock.Lock()
-	defer db.Lock.Unlock()
-
 	rows, err := db.Sql.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams WHERE title = ?", title)
 	if err != nil {
 		return s, fmt.Errorf("error querying streams: %v", err)
@@ -354,9 +356,6 @@ func (db *Instance) GetStreamByTitle(title string) (s StreamInfo, err error) {
 }
 
 func (db *Instance) GetStreamUrlByUrlAndIndex(url string, m3u_index int) (s StreamURL, err error) {
-	db.Lock.Lock()
-	defer db.Lock.Unlock()
-
 	rows, err := db.Sql.Query("SELECT id, content, m3u_index FROM stream_urls WHERE content = ? AND m3u_index = ? ORDER BY m3u_index ASC", url, m3u_index)
 	if err != nil {
 		return s, fmt.Errorf("error querying streams: %v", err)
@@ -378,9 +377,6 @@ func (db *Instance) GetStreamUrlByUrlAndIndex(url string, m3u_index int) (s Stre
 }
 
 func (db *Instance) GetStreams() ([]StreamInfo, error) {
-	db.Lock.Lock()
-	defer db.Lock.Unlock()
-
 	rows, err := db.Sql.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams")
 	if err != nil {
 		return nil, fmt.Errorf("error querying streams: %v", err)
