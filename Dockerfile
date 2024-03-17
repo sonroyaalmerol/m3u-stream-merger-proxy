@@ -25,19 +25,12 @@ COPY . .
 
 ENV CGO_ENABLED=1
 ENV GOOS=linux
-ENV CC="zig cc"
-ENV CXX="zig c++"
-ENV GOARCH=amd64
 
 RUN go test ./... \
-  && go build -ldflags='-s -w -extldflags "-static"' -o main .
+  && GOARCH=amd64 CC='zig cc' CXX='zig c++' go build -ldflags='-s -w -extldflags "-static"' -o main .
 
-ENV GOARCH=arm64
-ENV CC="zig cc -target aarch64-linux-musl"
-ENV CXX="zig c++ -target aarch64-linux-musl"
-
-RUN go test ./... \
-  && go build -ldflags='-s -w -extldflags "-static"' -o main-arm64 .
+RUN GOARCH=arm64 CC='zig cc -target aarch64-linux-musl' CXX='zig c++ -target aarch64-linux-musl' \
+  go build -ldflags='-s -w -extldflags "-static"' -o main-arm64 .
 
 ####################
 
