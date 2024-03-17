@@ -49,6 +49,16 @@ func InitializeSQLite(name string) (db *Instance, err error) {
 		return nil, fmt.Errorf("error enabling wal mode: %v\n", err)
 	}
 
+	_, err = db.Sql.Exec("PRAGMA synchronous=normal;")
+	if err != nil {
+		return nil, fmt.Errorf("error enabling wal mode: %v\n", err)
+	}
+
+	_, err = db.Sql.Exec("PRAGMA journal_size_limit=6144000;")
+	if err != nil {
+		return nil, fmt.Errorf("error enabling wal mode: %v\n", err)
+	}
+
 	// Create table if not exists
 	_, err = db.Sql.Exec(`
 		CREATE TABLE IF NOT EXISTS streams (
