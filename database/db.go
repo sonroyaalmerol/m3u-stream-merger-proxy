@@ -11,16 +11,19 @@ import (
 )
 
 type Instance struct {
-	Sql      *sql.DB
-	FileName string
-	Lock     sync.Mutex
+	Sql       *sql.DB
+	FileName  string
+	FileLock  sync.Mutex
+	WriteLock sync.Mutex
 }
 
 func InitializeSQLite(name string) (db *Instance, err error) {
 	db = new(Instance)
 
-	db.Lock.Lock()
-	defer db.Lock.Unlock()
+	db.FileLock.Lock()
+	db.WriteLock.Lock()
+	defer db.FileLock.Unlock()
+	defer db.WriteLock.Unlock()
 
 	foldername := filepath.Join(".", "data")
 	db.FileName = filepath.Join(foldername, fmt.Sprintf("%s.db", name))
@@ -39,6 +42,11 @@ func InitializeSQLite(name string) (db *Instance, err error) {
 	db.Sql, err = sql.Open("sqlite3", db.FileName)
 	if err != nil {
 		return nil, fmt.Errorf("error opening SQLite database: %v\n", err)
+	}
+
+	_, err = db.Sql.Exec("PRAGMA journal_mode=WAL;")
+	if err != nil {
+		return nil, fmt.Errorf("error enabling wal mode: %v\n", err)
 	}
 
 	// Create table if not exists
@@ -73,8 +81,10 @@ func InitializeSQLite(name string) (db *Instance, err error) {
 
 // DeleteSQLite deletes the SQLite database file.
 func (db *Instance) DeleteSQLite() error {
-	db.Lock.Lock()
-	defer db.Lock.Unlock()
+	db.FileLock.Lock()
+	db.WriteLock.Lock()
+	defer db.FileLock.Unlock()
+	defer db.WriteLock.Unlock()
 
 	_ = db.Sql.Close()
 
@@ -89,8 +99,10 @@ func (db *Instance) DeleteSQLite() error {
 }
 
 func (db *Instance) RenameSQLite(newName string) error {
-	db.Lock.Lock()
-	defer db.Lock.Unlock()
+	db.FileLock.Lock()
+	db.WriteLock.Lock()
+	defer db.FileLock.Unlock()
+	defer db.WriteLock.Unlock()
 
 	_ = db.Sql.Close()
 
@@ -112,8 +124,8 @@ func (db *Instance) RenameSQLite(newName string) error {
 }
 
 func (db *Instance) SaveToSQLite(streams []StreamInfo) (err error) {
-	db.Lock.Lock()
-	defer db.Lock.Unlock()
+	db.WriteLock.Lock()
+	defer db.WriteLock.Unlock()
 
 	tx, err := db.Sql.Begin()
 	if err != nil {
@@ -165,8 +177,8 @@ func (db *Instance) SaveToSQLite(streams []StreamInfo) (err error) {
 }
 
 func (db *Instance) InsertStream(s StreamInfo) (i int64, err error) {
-	db.Lock.Lock()
-	defer db.Lock.Unlock()
+	db.WriteLock.Lock()
+	defer db.WriteLock.Unlock()
 
 	tx, err := db.Sql.Begin()
 	if err != nil {
@@ -202,8 +214,8 @@ func (db *Instance) InsertStream(s StreamInfo) (i int64, err error) {
 }
 
 func (db *Instance) InsertStreamUrl(id int64, url StreamURL) (i int64, err error) {
-	db.Lock.Lock()
-	defer db.Lock.Unlock()
+	db.WriteLock.Lock()
+	defer db.WriteLock.Unlock()
 
 	tx, err := db.Sql.Begin()
 	if err != nil {
@@ -240,8 +252,8 @@ func (db *Instance) InsertStreamUrl(id int64, url StreamURL) (i int64, err error
 }
 
 func (db *Instance) DeleteStreamByTitle(title string) error {
-	db.Lock.Lock()
-	defer db.Lock.Unlock()
+	db.WriteLock.Lock()
+	defer db.WriteLock.Unlock()
 
 	tx, err := db.Sql.Begin()
 	if err != nil {
@@ -273,8 +285,8 @@ func (db *Instance) DeleteStreamByTitle(title string) error {
 }
 
 func (db *Instance) DeleteStreamURL(streamURLID int64) error {
-	db.Lock.Lock()
-	defer db.Lock.Unlock()
+	db.WriteLock.Lock()
+	defer db.WriteLock.Unlock()
 
 	tx, err := db.Sql.Begin()
 	if err != nil {
@@ -306,9 +318,6 @@ func (db *Instance) DeleteStreamURL(streamURLID int64) error {
 }
 
 func (db *Instance) GetStreamByTitle(title string) (s StreamInfo, err error) {
-	db.Lock.Lock()
-	defer db.Lock.Unlock()
-
 	rows, err := db.Sql.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams WHERE title = ?", title)
 	if err != nil {
 		return s, fmt.Errorf("error querying streams: %v", err)
@@ -354,9 +363,6 @@ func (db *Instance) GetStreamByTitle(title string) (s StreamInfo, err error) {
 }
 
 func (db *Instance) GetStreamUrlByUrlAndIndex(url string, m3u_index int) (s StreamURL, err error) {
-	db.Lock.Lock()
-	defer db.Lock.Unlock()
-
 	rows, err := db.Sql.Query("SELECT id, content, m3u_index FROM stream_urls WHERE content = ? AND m3u_index = ? ORDER BY m3u_index ASC", url, m3u_index)
 	if err != nil {
 		return s, fmt.Errorf("error querying streams: %v", err)
@@ -378,9 +384,6 @@ func (db *Instance) GetStreamUrlByUrlAndIndex(url string, m3u_index int) (s Stre
 }
 
 func (db *Instance) GetStreams() ([]StreamInfo, error) {
-	db.Lock.Lock()
-	defer db.Lock.Unlock()
-
 	rows, err := db.Sql.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams")
 	if err != nil {
 		return nil, fmt.Errorf("error querying streams: %v", err)
