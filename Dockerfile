@@ -3,9 +3,7 @@ FROM golang:1.22-alpine AS build
 
 # hadolint ignore=DL3018
 RUN apk add --no-cache \
-  tzdata=2024a-r1 \
   zip=3.0-r12 \ 
-  ca-certificates=20240226-r0 \
   && apk add --no-cache \
     zig --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing \
   && zip -r -0 /zoneinfo.zip /usr/share/zoneinfo
