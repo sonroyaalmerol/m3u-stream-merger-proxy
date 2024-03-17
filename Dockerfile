@@ -48,17 +48,20 @@ RUN GOARCH=arm64 CC='zig cc -target aarch64-linux-musl' CXX='zig c++ -target aar
 ####################
 
 ARG TARGETARCH
+ARG TARGETARCH_STAGE=$TARGETARCH-build
+FROM $TARGETARCH_STAGE as arch-build-stage
+
 FROM scratch 
 
-COPY --from=${TARGETARCH}-build /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=${TARGETARCH}-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=${TARGETARCH}-build /zoneinfo.zip /
+COPY --from=arch-build-stage /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=arch-build-stage /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=arch-build-stage /zoneinfo.zip /
 
 ENV ZONEINFO=/zoneinfo.zip
 ENV TZ=Etc/UTC
 
 # Copy the built Go binary from the previous stage
-COPY --from=${TARGETARCH}-build /app/main /gomain
+COPY --from=arch-build-stage /app/main /gomain
 
 EXPOSE 8080
 
