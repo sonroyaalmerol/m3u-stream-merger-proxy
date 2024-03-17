@@ -26,7 +26,7 @@ COPY . .
 ENV CGO_ENABLED=1
 ENV GOOS=linux
 
-RUN go test ./... \
+RUN GOARCH=amd64 CC='zig cc' CXX='zig c++' go test ./... \
   && GOARCH=amd64 CC='zig cc' CXX='zig c++' go build -ldflags='-s -w -extldflags "-static"' -o main .
 
 RUN GOARCH=arm64 CC='zig cc -target aarch64-linux-musl' CXX='zig c++ -target aarch64-linux-musl' \
