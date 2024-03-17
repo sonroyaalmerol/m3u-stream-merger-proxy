@@ -5,7 +5,6 @@ FROM golang:1.22-alpine AS build
 RUN apk add --no-cache \
   tzdata \
   zip \
-  musl-dev \
   ca-certificates \
   && apk add --no-cache \
     zig --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing \
@@ -34,7 +33,7 @@ RUN go test ./...
 
 FROM build AS amd64-build
 
-RUN GOARCH=amd64 CC='zig cc -target x86_64-linux-musl' CXX='zig c++ -target x86_64-linux-musl' \
+RUN GOARCH=amd64 CC='zig cc -target x86_64-linux' CXX='zig c++ -target x86_64-linux' \
   go build -ldflags='-s -w -extldflags "-static"' -o main .
 
 ###################
@@ -42,12 +41,14 @@ RUN GOARCH=amd64 CC='zig cc -target x86_64-linux-musl' CXX='zig c++ -target x86_
 # hadolint ignore=DL3029
 FROM --platform=arm64 build AS arm64-build
 
-RUN GOARCH=arm64 CC='zig cc -target aarch64-linux-musl' CXX='zig c++ -target aarch64-linux-musl' \
+RUN GOARCH=arm64 CC='zig cc -target aarch64-linux' CXX='zig c++ -target aarch64-linux' \
   go build -ldflags='-s -w -extldflags "-static"' -o main .
 
 ####################
 
 ARG TARGETARCH
+
+# hadolint ignore=DL3006
 FROM ${TARGETARCH}-build as arch-build-stage
 
 FROM scratch 
