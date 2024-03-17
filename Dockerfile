@@ -26,7 +26,7 @@ ENV CGO_ENABLED=1
 ENV GOOS=linux
 ENV CC="zig cc -target x86_64-linux"
 ENV CXX="zig c++ -target x86_64-linux"
-RUN GOARCH=amd64
+ENV GOARCH=amd64
 
 RUN go test ./... \
   && go build -ldflags='-s -w -extldflags "-static"' -o main .
