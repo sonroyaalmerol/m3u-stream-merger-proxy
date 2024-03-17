@@ -23,9 +23,11 @@ RUN go mod download
 COPY . .
 
 ENV CGO_ENABLED=1
+ENV CC="zig cc"
+ENV CXX="zig c++"
 
 RUN go test ./... \
-  && CC="zig cc" CXX="zig c++" go build -ldflags='-s -w -extldflags "-static"' -o main .
+  && go build -ldflags='-s -w -extldflags "-static"' -o main .
 
 ####################
 
