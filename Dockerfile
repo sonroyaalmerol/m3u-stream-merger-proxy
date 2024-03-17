@@ -1,11 +1,13 @@
 # Start from the official Golang image
-FROM golang:bookworm AS build
+FROM golang:1.22-alpine AS build
 
-RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive \
-    apt-get install --assume-yes --no-install-recommends \
-      build-essential=12.9 \
-      musl-tools=1.2.3-1
+RUN apk add --no-cache \
+  tzdata \
+  zip \ 
+  ca-certificates \
+  && apk add --no-cache \
+    zig --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing \
+  && zip -r -0 /zoneinfo.zip /usr/share/zoneinfo
 
 # Set the Current Working Directory inside the container
 WORKDIR /app
@@ -20,7 +22,7 @@ RUN go mod download
 COPY . .
 
 RUN go test ./... \
-  && CGO_ENABLED=1 CC=musl-gcc go build -ldflags='-s -w -extldflags "-static"' -o main .
+  && CGO_ENABLED=1 CC="zig cc" go build -ldflags='-s -w -extldflags "-static"' -o main .
 
 ####################
 
@@ -29,7 +31,7 @@ FROM scratch
 
 COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=build /usr/local/go/lib/time/zoneinfo.zip /
+COPY --from=build /zoneinfo.zip /
 
 ENV ZONEINFO=/zoneinfo.zip
 ENV TZ=Etc/UTC
