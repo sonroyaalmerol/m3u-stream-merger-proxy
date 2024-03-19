@@ -65,7 +65,7 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 	lineCommaSplit := strings.SplitN(lineWithoutPairs, ",", 2)
 
 	if len(lineCommaSplit) > 1 {
-		currentStream.Title = strings.TrimSpace(lineCommaSplit[1])
+		currentStream.Title = tvgNameParser(strings.TrimSpace(lineCommaSplit[1]))
 	}
 
 	return currentStream
