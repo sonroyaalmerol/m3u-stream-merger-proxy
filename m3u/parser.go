@@ -36,19 +36,15 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 		key := strings.TrimSpace(match[1])
 		value := strings.TrimSpace(match[2])
 
-		if strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) {
-			value = strings.Trim(value, `"`)
-		}
-
 		switch strings.ToLower(key) {
 		case "tvg-id":
-			currentStream.TvgID = value
+			currentStream.TvgID = tvgIdParser(value)
 		case "tvg-name":
-			currentStream.Title = value
+			currentStream.Title = tvgNameParser(value)
 		case "group-title":
-			currentStream.Group = value
+			currentStream.Group = groupTitleParser(value)
 		case "tvg-logo":
-			currentStream.LogoURL = value
+			currentStream.LogoURL = tvgLogoParser(value)
 		default:
 			if os.Getenv("DEBUG") == "true" {
 				log.Printf("Uncaught attribute: %s=%s\n", key, value)
@@ -168,8 +164,6 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 		grps = strings.Split(includeGroups, ",")
 	}
 
-	characterFilter := os.Getenv("CHARACTER_FILTER")
-
 	for i := 0; i <= maxRetries; i++ {
 		err := downloadM3UToBuffer(m3uURL, &buffer)
 		if err != nil {
@@ -189,18 +183,6 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 			line := scanner.Text()
 
 			if strings.HasPrefix(line, "#EXTINF:") && checkIncludeGroup(grps, line) {
-
-				// Apply character filter
-				if characterFilter != "" {
-					re, err := regexp.Compile(characterFilter)
-					if err != nil {
-						fmt.Println("Error compiling character filter regex:", err)
-					} else {
-						line = re.ReplaceAllString(line, "")
-					}
-
-				}
-
 				if scanner.Scan() {
 					wg.Add(2)
 					nextLine := scanner.Text()
