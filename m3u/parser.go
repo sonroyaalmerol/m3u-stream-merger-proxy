@@ -36,19 +36,15 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 		key := strings.TrimSpace(match[1])
 		value := strings.TrimSpace(match[2])
 
-		if strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) {
-			value = strings.Trim(value, `"`)
-		}
-
 		switch strings.ToLower(key) {
 		case "tvg-id":
-			currentStream.TvgID = value
+			currentStream.TvgID = tvgIdParser(value)
 		case "tvg-name":
-			currentStream.Title = value
+			currentStream.Title = tvgNameParser(value)
 		case "group-title":
-			currentStream.Group = value
+			currentStream.Group = groupTitleParser(value)
 		case "tvg-logo":
-			currentStream.LogoURL = value
+			currentStream.LogoURL = tvgLogoParser(value)
 		default:
 			if os.Getenv("DEBUG") == "true" {
 				log.Printf("Uncaught attribute: %s=%s\n", key, value)
@@ -69,7 +65,7 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 	lineCommaSplit := strings.SplitN(lineWithoutPairs, ",", 2)
 
 	if len(lineCommaSplit) > 1 {
-		currentStream.Title = strings.TrimSpace(lineCommaSplit[1])
+		currentStream.Title = tvgNameParser(strings.TrimSpace(lineCommaSplit[1]))
 	}
 
 	return currentStream
