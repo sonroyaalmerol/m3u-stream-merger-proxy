@@ -168,6 +168,8 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 		grps = strings.Split(includeGroups, ",")
 	}
 
+	characterFilter := os.Getenv("CHARACTER_FILTER")
+
 	for i := 0; i <= maxRetries; i++ {
 		err := downloadM3UToBuffer(m3uURL, &buffer)
 		if err != nil {
@@ -187,6 +189,18 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 			line := scanner.Text()
 
 			if strings.HasPrefix(line, "#EXTINF:") && checkIncludeGroup(grps, line) {
+
+				// Apply character filter
+				if characterFilter != "" {
+					re, err := regexp.Compile(characterFilter)
+					if err != nil {
+						fmt.Println("Error compiling character filter regex:", err)
+					} else {
+						line = re.ReplaceAllString(line, "")
+					}
+
+				}
+
 				if scanner.Scan() {
 					wg.Add(2)
 					nextLine := scanner.Text()
