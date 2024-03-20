@@ -216,7 +216,6 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	<-ctx.Done()
 	log.Printf("Client (%s) disconnected.\n", r.RemoteAddr)
 	updateConcurrency(selectedUrl.M3UIndex, false)
-	return
 }
 
 func checkConcurrency(m3uIndex int) bool {
