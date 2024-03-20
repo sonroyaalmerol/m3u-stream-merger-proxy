@@ -150,7 +150,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	log.Printf("Sent MP4 stream to %s\n", r.RemoteAddr)
 
 	// Set initial timer duration
-	timerDuration := 5 * time.Second
+	timerDuration := 10 * time.Second
 	timer := time.NewTimer(timerDuration)
 
 	// Function to reset the timer
@@ -202,15 +202,13 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 
 	quit := make(chan bool)
 	go func() {
-		for {
-			select {
-			case <-quit:
-				return
-			case <-timer.C:
-				log.Println("Timeout reached, closing connection.")
-				cancel()
-				return
-			}
+		select {
+		case <-quit:
+			return
+		case <-timer.C:
+			log.Println("Timeout reached, closing connection.")
+			cancel()
+			return
 		}
 	}()
 
