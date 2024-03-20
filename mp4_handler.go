@@ -209,6 +209,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 			case <-timer.C:
 				log.Println("Timeout reached, closing connection.")
 				cancel()
+				return
 			}
 		}
 	}()
