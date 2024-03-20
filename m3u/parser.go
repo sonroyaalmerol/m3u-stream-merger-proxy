@@ -51,15 +51,7 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 			}
 		}
 
-		var pair string
-		if strings.Contains(value, `"`) || strings.Contains(value, ",") {
-			// If the value contains double quotes or commas, format it as key="value"
-			pair = fmt.Sprintf(`%s="%s"`, key, value)
-		} else {
-			// Otherwise, format it as key=value
-			pair = fmt.Sprintf(`%s=%s`, key, value)
-		}
-		lineWithoutPairs = strings.Replace(lineWithoutPairs, pair, "", 1)
+		lineWithoutPairs = strings.Replace(lineWithoutPairs, match[0], "", 1)
 	}
 
 	lineCommaSplit := strings.SplitN(lineWithoutPairs, ",", 2)
