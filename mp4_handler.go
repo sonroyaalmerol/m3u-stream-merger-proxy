@@ -190,6 +190,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 				n, err := resp.Body.Read(buffer)
 				if err != nil {
 					log.Printf("Error reading MP4 stream: %s\n", err.Error())
+					cancel()
 					break
 				}
 				if n > 0 {
@@ -197,6 +198,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 					_, err := w.Write(buffer[:n])
 					if err != nil {
 						log.Printf("Error writing to response: %s\n", err.Error())
+						cancel()
 						break
 					}
 				}
