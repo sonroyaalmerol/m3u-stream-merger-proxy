@@ -1,9 +1,8 @@
 package main
 
 import (
-	"errors"
+	"context"
 	"fmt"
-	"io"
 	"log"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/utils"
@@ -11,7 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
+	"time"
 )
 
 func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl *database.StreamURL, err error) {
@@ -100,7 +99,8 @@ func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl 
 }
 
 func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
-	ctx := r.Context()
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
 
 	// Log the incoming request
 	log.Printf("Received request from %s for URL: %s\n", r.RemoteAddr, r.URL.Path)
@@ -149,14 +149,16 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	// Log the successful response
 	log.Printf("Sent MP4 stream to %s\n", r.RemoteAddr)
 
-	// Use a channel for goroutine synchronization
-	done := make(chan struct{})
-	go func() {
-		defer func() {
-			log.Printf("Closed connection for %s\n", r.RemoteAddr)
-			close(done)
-		}()
+	// Set initial timer duration
+	timerDuration := 5 * time.Second
+	timer := time.NewTimer(timerDuration)
 
+	// Function to reset the timer
+	resetTimer := func() {
+		timer.Reset(timerDuration)
+	}
+
+	go func() {
 		updateConcurrency(selectedUrl.M3UIndex, true)
 
 		bufferMbInt := 0
@@ -173,45 +175,49 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 			}
 		}
 
+		buffer := make([]byte, 512)
 		if bufferMbInt > 0 {
 			log.Printf("Buffer is set to %dmb.\n", bufferMbInt)
-			buffer := make([]byte, 1024*bufferMbInt)
-			for {
-				n, err := resp.Body.Read(buffer)
+			buffer = make([]byte, 1024*bufferMbInt)
+		}
+		for {
+			n, err := resp.Body.Read(buffer)
+			if err != nil {
+				log.Printf("Error reading MP4 stream: %s\n", err.Error())
+				break
+			}
+			if n > 0 {
+				resetTimer()
+				_, err := w.Write(buffer[:n])
 				if err != nil {
-					if err != io.EOF {
-						log.Printf("Error reading MP4 stream: %s\n", err.Error())
-					}
+					log.Printf("Error writing to response: %s\n", err.Error())
 					break
 				}
-				if n > 0 {
-					_, err := w.Write(buffer[:n])
-					if err != nil {
-						log.Printf("Error writing to response: %s\n", err.Error())
-						break
-					}
-				}
 			}
-		} else {
-			_, err := io.Copy(w, resp.Body)
-			if err != nil {
-				// Log the error
-				if errors.Is(err, syscall.EPIPE) {
-					log.Println("Client disconnected after fetching MP4 stream")
-				} else {
-					log.Printf("Error copying MP4 stream to response: %s\n", err.Error())
-				}
+		}
+
+		log.Printf("Closed connection for %s\n", r.RemoteAddr)
+		cancel()
+	}()
+
+	quit := make(chan bool)
+	go func() {
+		for {
+			select {
+			case <-quit:
+				return
+			case <-timer.C:
+				log.Println("Timeout reached, closing connection.")
+				cancel()
+				return
 			}
 		}
 	}()
 
 	// Wait for the request context to be canceled or the stream to finish
-	select {
-	case <-ctx.Done():
-		log.Println("Client disconnected after fetching MP4 stream")
-	case <-done:
-		log.Println("MP4 source has closed the connection")
-	}
+	<-ctx.Done()
+	quit <- true
+	log.Printf("Client (%s) disconnected.\n", r.RemoteAddr)
 	updateConcurrency(selectedUrl.M3UIndex, false)
 }
 
