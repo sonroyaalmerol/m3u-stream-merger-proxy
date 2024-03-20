@@ -183,27 +183,30 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 		for {
 			select {
 			case <-timer.C:
-				log.Printf("Timer expired, closing connection for %s\n", r.RemoteAddr)
+				log.Printf("Connection timed out: %s\n", r.RemoteAddr)
+
+				log.Printf("Closing (%s) connection.\n", r.RemoteAddr)
 				cancel()
 				return
 			default:
-				n, err := resp.Body.Read(buffer)
+			}
+			n, err := resp.Body.Read(buffer)
+			if err != nil {
+				log.Printf("Error reading MP4 stream: %s\n", err.Error())
+				break
+			}
+			if n > 0 {
+				resetTimer()
+				_, err := w.Write(buffer[:n])
 				if err != nil {
-					log.Printf("Error reading MP4 stream: %s\n", err.Error())
-					cancel()
+					log.Printf("Error writing to response: %s\n", err.Error())
 					break
-				}
-				if n > 0 {
-					resetTimer()
-					_, err := w.Write(buffer[:n])
-					if err != nil {
-						log.Printf("Error writing to response: %s\n", err.Error())
-						cancel()
-						break
-					}
 				}
 			}
 		}
+
+		log.Printf("Closing (%s) connection.\n", r.RemoteAddr)
+		cancel()
 	}()
 
 	// Wait for the request context to be canceled or the stream to finish
