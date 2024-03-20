@@ -150,7 +150,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	log.Printf("Sent MP4 stream to %s\n", r.RemoteAddr)
 
 	// Set initial timer duration
-	timerDuration := 10 * time.Second
+	timerDuration := 15 * time.Second
 	timer := time.NewTimer(timerDuration)
 
 	// Function to reset the timer
@@ -181,40 +181,31 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 			buffer = make([]byte, 1024*bufferMbInt)
 		}
 		for {
-			n, err := resp.Body.Read(buffer)
-			if err != nil {
-				log.Printf("Error reading MP4 stream: %s\n", err.Error())
-				break
-			}
-			if n > 0 {
-				resetTimer()
-				_, err := w.Write(buffer[:n])
+			select {
+			case <-timer.C:
+				log.Printf("Timer expired, closing connection for %s\n", r.RemoteAddr)
+				cancel()
+				return
+			default:
+				n, err := resp.Body.Read(buffer)
 				if err != nil {
-					log.Printf("Error writing to response: %s\n", err.Error())
+					log.Printf("Error reading MP4 stream: %s\n", err.Error())
 					break
 				}
+				if n > 0 {
+					resetTimer()
+					_, err := w.Write(buffer[:n])
+					if err != nil {
+						log.Printf("Error writing to response: %s\n", err.Error())
+						break
+					}
+				}
 			}
-		}
-
-		log.Printf("Closed connection for %s\n", r.RemoteAddr)
-		cancel()
-	}()
-
-	quit := make(chan bool)
-	go func() {
-		select {
-		case <-quit:
-			return
-		case <-timer.C:
-			log.Println("Timeout reached, closing connection.")
-			cancel()
-			return
 		}
 	}()
 
 	// Wait for the request context to be canceled or the stream to finish
 	<-ctx.Done()
-	quit <- true
 	log.Printf("Client (%s) disconnected.\n", r.RemoteAddr)
 	updateConcurrency(selectedUrl.M3UIndex, false)
 }
