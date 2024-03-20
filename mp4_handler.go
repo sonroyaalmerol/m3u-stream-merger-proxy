@@ -213,12 +213,10 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	}()
 
 	// Wait for the request context to be canceled or the stream to finish
-	select {
-	case <-ctx.Done():
-		log.Printf("Client (%s) disconnected.\n", r.RemoteAddr)
-		updateConcurrency(selectedUrl.M3UIndex, false)
-		return
-	}
+	<-ctx.Done()
+	log.Printf("Client (%s) disconnected.\n", r.RemoteAddr)
+	updateConcurrency(selectedUrl.M3UIndex, false)
+	return
 }
 
 func checkConcurrency(m3uIndex int) bool {
