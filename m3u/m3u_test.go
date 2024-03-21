@@ -27,7 +27,12 @@ func TestGenerateM3UContent(t *testing.T) {
 		t.Errorf("InitializeSQLite returned error: %v", err)
 	}
 
-	_, err = db.InsertStream(stream)
+	id, err := db.InsertStream(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.InsertStreamUrl(id, stream.URLs[0])
 	if err != nil {
 		t.Fatal(err)
 	}
