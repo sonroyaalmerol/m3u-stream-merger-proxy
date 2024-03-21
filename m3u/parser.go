@@ -86,7 +86,7 @@ func insertStreamToDb(db *database.Instance, currentStream database.StreamInfo) 
 	}
 
 	if os.Getenv("DEBUG") == "true" {
-		log.Printf("Adding MP4 url entry to %s\n", currentStream.Title)
+		log.Printf("Adding stream url entry to %s\n", currentStream.Title)
 	}
 
 	for _, currentStreamUrl := range currentStream.URLs {

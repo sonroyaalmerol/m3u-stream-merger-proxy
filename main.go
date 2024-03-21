@@ -174,13 +174,13 @@ func main() {
 		m3u.GenerateM3UContent(w, r, db)
 	})
 	http.HandleFunc("/stream/", func(w http.ResponseWriter, r *http.Request) {
-		mp4Handler(w, r, db)
+		streamHandler(w, r, db)
 	})
 
 	// Start the server
 	log.Println("Server is running on port 8080...")
 	log.Println("Playlist Endpoint is running (`/playlist.m3u`)")
-	log.Println("Stream Endpoint is running (`/stream/{streamID}.mp4`)")
+	log.Println("Stream Endpoint is running (`/stream/{streamID}.{fileExt}`)")
 	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
 		log.Fatalf("HTTP server error: %v", err)

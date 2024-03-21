@@ -3,20 +3,19 @@ package main
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/m3u"
-	"m3u-stream-merger/utils"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
 
-func TestMP4Handler(t *testing.T) {
+func TestStreamHandler(t *testing.T) {
 	db, err := database.InitializeSQLite("current_streams")
 	if err != nil {
 		t.Errorf("InitializeSQLite returned error: %v", err)
@@ -60,12 +59,11 @@ func TestMP4Handler(t *testing.T) {
 		wg.Add(1)
 		go func(stream database.StreamInfo) {
 			defer wg.Done()
-			streamUid := utils.GetStreamUID(stream.Title)
-			req := httptest.NewRequest("GET", fmt.Sprintf("/stream/%s.mp4", streamUid), nil)
+			req := httptest.NewRequest("GET", strings.TrimSpace(m3u.GenerateStreamURL("", stream.Title, stream.URLs[0].Content)), nil)
 			w := httptest.NewRecorder()
 
 			// Call the handler function
-			mp4Handler(w, req, db)
+			streamHandler(w, req, db)
 
 			// Check the response status code
 			resp := w.Result()

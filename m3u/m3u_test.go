@@ -27,7 +27,12 @@ func TestGenerateM3UContent(t *testing.T) {
 		t.Errorf("InitializeSQLite returned error: %v", err)
 	}
 
-	_, err = db.InsertStream(stream)
+	id, err := db.InsertStream(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.InsertStreamUrl(id, stream.URLs[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +68,7 @@ func TestGenerateM3UContent(t *testing.T) {
 	// Check the generated M3U content
 	expectedContent := fmt.Sprintf(`#EXTM3U
 #EXTINF:-1 tvg-id="1" tvg-name="TestStream" tvg-logo="http://example.com/logo.png" group-title="TestGroup",TestStream
-%s`, generateStreamURL("http:///stream", "TestStream"))
+%s`, GenerateStreamURL("http:///stream", "TestStream", stream.URLs[0].Content))
 	if rr.Body.String() != expectedContent {
 		t.Errorf("handler returned unexpected body: got %v want %v",
 			rr.Body.String(), expectedContent)

@@ -44,7 +44,7 @@ func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl 
 			}
 
 			// Log the error
-			log.Printf("Error fetching MP4 stream (concurrency round robin mode): %s\n", err.Error())
+			log.Printf("Error fetching stream (concurrency round robin mode): %s\n", err.Error())
 
 			lastIndex = (lastIndex + 1) % len(stream.URLs) // Update the last index used
 		}
@@ -67,7 +67,7 @@ func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl 
 			}
 
 			// Log the error
-			log.Printf("Error fetching MP4 stream (concurrency brute force mode): %s\n", err.Error())
+			log.Printf("Error fetching stream (concurrency brute force mode): %s\n", err.Error())
 		}
 	default:
 		log.Printf("Invalid LOAD_BALANCING_MODE. Skipping concurrency mode...")
@@ -83,13 +83,13 @@ func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl 
 				break
 			} else {
 				// Log the error
-				log.Printf("Error fetching MP4 stream (connection check mode): %s\n", err.Error())
+				log.Printf("Error fetching stream (connection check mode): %s\n", err.Error())
 			}
 		}
 
 		if resp == nil {
 			// Log the error
-			return nil, nil, fmt.Errorf("Error fetching MP4 stream. Exhausted all streams.")
+			return nil, nil, fmt.Errorf("Error fetching stream. Exhausted all streams.")
 		}
 
 		return resp, selectedUrl, nil
@@ -98,7 +98,7 @@ func loadBalancer(stream database.StreamInfo) (resp *http.Response, selectedUrl 
 	return resp, selectedUrl, nil
 }
 
-func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
+func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
@@ -106,7 +106,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	log.Printf("Received request from %s for URL: %s\n", r.RemoteAddr, r.URL.Path)
 
 	// Extract the m3u ID from the URL path
-	m3uID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/stream/"), ".mp4")
+	m3uID := strings.Split(strings.TrimPrefix(r.URL.Path, "/stream/"), ".")[0]
 	if m3uID == "" {
 		http.NotFound(w, r)
 		return
@@ -124,11 +124,6 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 		return
 	}
 
-	// You can modify the response header as needed
-	w.Header().Set("Content-Type", "video/mp4")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-
 	var resp *http.Response
 	defer func() {
 		if resp != nil && resp.Body != nil {
@@ -141,13 +136,22 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 
 	resp, selectedUrl, err = loadBalancer(stream)
 	if err != nil {
-		http.Error(w, "Error fetching MP4 stream. Exhausted all streams.", http.StatusInternalServerError)
+		http.Error(w, "Error fetching stream. Exhausted all streams.", http.StatusInternalServerError)
 		return
 	}
 	log.Printf("Proxying %s to %s\n", r.RemoteAddr, selectedUrl.Content)
 
 	// Log the successful response
-	log.Printf("Sent MP4 stream to %s\n", r.RemoteAddr)
+	log.Printf("Sent stream to %s\n", r.RemoteAddr)
+
+	for k, v := range resp.Header {
+		for _, val := range v {
+			w.Header().Set(k, val)
+		}
+	}
+
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	// Set initial timer duration
 	timerDuration := 15 * time.Second
@@ -192,7 +196,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 			}
 			n, err := resp.Body.Read(buffer)
 			if err != nil {
-				log.Printf("Error reading MP4 stream: %s\n", err.Error())
+				log.Printf("Error reading stream: %s\n", err.Error())
 				break
 			}
 			if n > 0 {
