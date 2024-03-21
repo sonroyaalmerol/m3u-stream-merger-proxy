@@ -18,8 +18,8 @@ Currently, nested M3U files are not supported (M3U playlists inside a parent M3U
    - **Playlist Endpoint (`/playlist.m3u`):**
      - Access the merged M3U playlist containing streams from different sources.
 
-   - **Stream Endpoint (`/stream/{streamID}.mp4`):**
-     - Request MP4 streams for specific stream IDs.
+   - **Stream Endpoint (`/stream/{streamID}.{fileExt}`):**
+     - Request video streams for specific stream IDs.
 
 3. **Load Balancing:**
    - The service employs load balancing by cycling through available stream URLs.
@@ -39,7 +39,7 @@ Currently, nested M3U files are not supported (M3U playlists inside a parent M3U
 ## Prerequisites
 
 - [Docker](https://www.docker.com/) installed on your system.
-- M3U URLs containing a playlist of MP4 streams.
+- M3U URLs containing a playlist of video streams.
 
 ## Docker Compose
 
@@ -90,7 +90,7 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 
 - `/playlist.m3u`: Get the merged M3U playlist.
 
-- `/stream/{streamID}.mp4`: Stream MP4 content for specified stream IDs.
+- `/stream/{streamID}.{fileExt}`: Stream video content for specified stream IDs.
 
 ## Contributing
 
