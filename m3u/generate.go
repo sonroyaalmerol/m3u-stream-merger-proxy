@@ -61,7 +61,7 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 		}
 
 		// Write stream URL
-		_, err = fmt.Fprintf(w, "%s", generateStreamURL(baseUrl, stream.Title, stream.URLs[0]))
+		_, err = fmt.Fprintf(w, "%s", generateStreamURL(baseUrl, stream.Title, stream.URLs[0].Content))
 		if err != nil {
 			continue
 		}
