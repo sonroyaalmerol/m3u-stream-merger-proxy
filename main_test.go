@@ -3,15 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/m3u"
-	"m3u-stream-merger/utils"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -60,8 +59,7 @@ func TestStreamHandler(t *testing.T) {
 		wg.Add(1)
 		go func(stream database.StreamInfo) {
 			defer wg.Done()
-			streamUid := utils.GetStreamUID(stream.Title)
-			req := httptest.NewRequest("GET", fmt.Sprintf("/stream/%s.mp4", streamUid), nil)
+			req := httptest.NewRequest("GET", strings.TrimSpace(m3u.GenerateStreamURL("", stream.Title, stream.URLs[0].Content)), nil)
 			w := httptest.NewRecorder()
 
 			// Call the handler function
