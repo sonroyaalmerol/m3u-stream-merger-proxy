@@ -53,6 +53,10 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 	}
 
 	for _, stream := range streams {
+		if len(stream.URLs) == 0 {
+			continue
+		}
+
 		// Write #EXTINF line
 		_, err := fmt.Fprintf(w, "#EXTINF:-1 tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
 			stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title)
