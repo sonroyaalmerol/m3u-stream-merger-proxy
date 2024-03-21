@@ -1,15 +1,34 @@
 package m3u
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/utils"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
-func generateStreamURL(baseUrl string, title string) string {
-	return fmt.Sprintf("%s/%s.mp4\n", baseUrl, utils.GetStreamUID(title))
+func getFileExtensionFromUrl(rawUrl string) (string, error) {
+	u, err := url.Parse(rawUrl)
+	if err != nil {
+		return "", err
+	}
+	pos := strings.LastIndex(u.Path, ".")
+	if pos == -1 {
+		return "", errors.New("couldn't find a period to indicate a file extension")
+	}
+	return u.Path[pos+1 : len(u.Path)], nil
+}
+
+func generateStreamURL(baseUrl string, title string, sampleUrl string) string {
+	ext, err := getFileExtensionFromUrl(sampleUrl)
+	if err != nil {
+		return fmt.Sprintf("%s/%s\n", baseUrl, utils.GetStreamUID(title))
+	}
+	return fmt.Sprintf("%s/%s.%s\n", baseUrl, utils.GetStreamUID(title), ext)
 }
 
 func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Instance) {
@@ -42,7 +61,7 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 		}
 
 		// Write stream URL
-		_, err = fmt.Fprintf(w, "%s", generateStreamURL(baseUrl, stream.Title))
+		_, err = fmt.Fprintf(w, "%s", generateStreamURL(baseUrl, stream.Title, stream.URLs[0]))
 		if err != nil {
 			continue
 		}

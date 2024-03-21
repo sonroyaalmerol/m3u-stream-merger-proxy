@@ -106,7 +106,7 @@ func mp4Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	log.Printf("Received request from %s for URL: %s\n", r.RemoteAddr, r.URL.Path)
 
 	// Extract the m3u ID from the URL path
-	m3uID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/stream/"), ".mp4")
+	m3uID := strings.Split(strings.TrimPrefix(r.URL.Path, "/stream/"), ".")[0]
 	if m3uID == "" {
 		http.NotFound(w, r)
 		return
