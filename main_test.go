@@ -16,7 +16,7 @@ import (
 	"testing"
 )
 
-func TestMP4Handler(t *testing.T) {
+func TestStreamHandler(t *testing.T) {
 	db, err := database.InitializeSQLite("current_streams")
 	if err != nil {
 		t.Errorf("InitializeSQLite returned error: %v", err)
@@ -65,7 +65,7 @@ func TestMP4Handler(t *testing.T) {
 			w := httptest.NewRecorder()
 
 			// Call the handler function
-			mp4Handler(w, req, db)
+			streamHandler(w, req, db)
 
 			// Check the response status code
 			resp := w.Result()
