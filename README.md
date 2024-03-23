@@ -78,7 +78,7 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | USER_AGENT                  | Set the User-Agent of HTTP requests.                    | IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)    |  Any valid user agent        |
 | LOAD_BALANCING_MODE                | Set load balancing algorithm to a specific mode | brute-force    | brute-force/round-robin   |
 | BUFFER_MB | Set buffer size in mb. | 0 (no buffer) | Any positive integer |
-| INCLUDE_GROUPS                | Set channel groups to include | all    | Comma-separated values   |
+| INCLUDE_GROUPS_1, INCLUDE_GROUPS_2, INCLUDE_GROUPS_X    | Set channel groups to include | all    | Comma-separated values   |
 | TITLE_SUBSTR_FILTER | Sets a regex pattern used to exclude substrings from channel titles | none    | Go regexp   |
 | TZ                          | Set timezone                                           | Etc/UTC     | [TZ Identifiers](https://nodatime.org/TimeZones) |
 | SYNC_CRON                   | Set cron schedule expression of the background updates. | 0 0 * * *   |  Any valid cron expression    |
