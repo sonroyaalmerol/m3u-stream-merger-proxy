@@ -132,12 +132,10 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	streamExitCode := 1
-
 	for {
 		exitStatus := make(chan int)
 		go proxyStream(selectedUrl, resp, r, w, exitStatus)
-		streamExitCode = <-exitStatus
+		streamExitCode := <-exitStatus
 
 		if streamExitCode == 1 {
 			// Retry on server-side connection errors
