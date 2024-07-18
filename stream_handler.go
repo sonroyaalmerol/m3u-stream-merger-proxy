@@ -133,31 +133,34 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	for {
-		exitStatus := make(chan int)
-		go proxyStream(selectedUrl, resp, r, w, exitStatus)
-		streamExitCode := <-exitStatus
-
-		if streamExitCode == 1 {
-			// Retry on server-side connection errors
-			log.Printf("Server connection failed: %s\n", selectedUrl.Content)
-			log.Printf("Retrying other servers...\n")
+		select {
+		case <-ctx.Done():
+			log.Printf("Client disconnected: %s\n", r.RemoteAddr)
 			resp.Body.Close()
-			resp, selectedUrl, err = loadBalancer(stream)
-			if err != nil {
-				http.Error(w, "Error fetching stream. Exhausted all streams.", http.StatusInternalServerError)
-				return
+		default:
+			exitStatus := make(chan int)
+			go proxyStream(selectedUrl, resp, r, w, exitStatus)
+			streamExitCode := <-exitStatus
+
+			if streamExitCode == 1 {
+				// Retry on server-side connection errors
+				log.Printf("Server connection failed: %s\n", selectedUrl.Content)
+				log.Printf("Retrying other servers...\n")
+				resp.Body.Close()
+				resp, selectedUrl, err = loadBalancer(stream)
+				if err != nil {
+					http.Error(w, "Error fetching stream. Exhausted all streams.", http.StatusInternalServerError)
+					return
+				}
+				log.Printf("Reconnected to %s\n", selectedUrl.Content)
+			} else {
+				// Consider client-side connection errors as complete closure
+				log.Printf("Client has closed the stream: %s\n", r.RemoteAddr)
+				cancel()
+				break
 			}
-			log.Printf("Reconnected to %s\n", selectedUrl.Content)
-		} else {
-			// Consider client-side connection errors as complete closure
-			log.Printf("Client has closed the stream: %s\n", r.RemoteAddr)
-			break
 		}
 	}
-
-	resp.Body.Close()
-	<-ctx.Done()
-	log.Printf("Client disconnected: %s\n", r.RemoteAddr)
 }
 
 func checkConcurrency(m3uIndex int) bool {
