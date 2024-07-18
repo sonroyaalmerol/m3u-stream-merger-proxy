@@ -137,6 +137,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 		case <-ctx.Done():
 			log.Printf("Client disconnected: %s\n", r.RemoteAddr)
 			resp.Body.Close()
+			break
 		default:
 			exitStatus := make(chan int)
 			go proxyStream(selectedUrl, resp, r, w, exitStatus)
@@ -157,7 +158,6 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 				// Consider client-side connection errors as complete closure
 				log.Printf("Client has closed the stream: %s\n", r.RemoteAddr)
 				cancel()
-				break
 			}
 		}
 	}
