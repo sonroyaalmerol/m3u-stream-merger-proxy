@@ -137,7 +137,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 		case <-ctx.Done():
 			log.Printf("Client disconnected: %s\n", r.RemoteAddr)
 			resp.Body.Close()
-			break
+			return
 		default:
 			exitStatus := make(chan int)
 			go proxyStream(selectedUrl, resp, r, w, exitStatus)
