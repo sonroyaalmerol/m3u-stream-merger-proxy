@@ -67,7 +67,7 @@ func TestGenerateM3UContent(t *testing.T) {
 
 	// Check the generated M3U content
 	expectedContent := fmt.Sprintf(`#EXTM3U
-#EXTINF:-1 tvg-id="1" tvg-name="TestStream" tvg-logo="http://example.com/logo.png" group-title="TestGroup",TestStream
+#EXTINF:-1 channelID="x-ID.1" tvg-chno="1" tvg-id="1" tvg-name="TestStream" tvg-logo="http://example.com/logo.png" group-title="TestGroup",TestStream
 %s`, GenerateStreamURL("http:///stream", "TestStream", stream.URLs[0].Content))
 	if rr.Body.String() != expectedContent {
 		t.Errorf("handler returned unexpected body: got %v want %v",
@@ -89,14 +89,14 @@ func TestGenerateM3UContent(t *testing.T) {
 func TestParseM3UFromURL(t *testing.T) {
 	testM3UContent := `
 #EXTM3U
-#EXTINF:-1 tvg-id="bbc1" tvg-name="BBC One" group-title="UK",BBC One
+#EXTINF:-1 channelID="x-ID.bcc1" tvg-chno="bcc1" tvg-id="bbc1" tvg-name="BBC One" group-title="UK",BBC One
 http://example.com/bbc1
-#EXTINF:-1 tvg-id="bbc2" tvg-name="BBC Two" group-title="UK",BBC Two
+#EXTINF:-1 channelID="x-ID.bcc2" tvg-chno="bbc2" tvg-id="bbc2" tvg-name="BBC Two" group-title="UK",BBC Two
 http://example.com/bbc2
-#EXTINF:-1 tvg-id="cnn" tvg-name="CNN International" group-title="News",CNN International
+#EXTINF:-1 channelID="x-ID.cnn" tvg-chno="cnn" tvg-id="cnn" tvg-name="CNN International" group-title="News",CNN International
 http://example.com/cnn
 #EXTVLCOPT:logo=http://example.com/bbc_logo.png
-#EXTINF:-1 tvg-id="fox" tvg-name="FOX" group-title="Entertainment",FOX
+#EXTINF:-1 channelID="x-ID.fox" tvg-chno="fox" tvg-id="fox" tvg-name="FOX" group-title="Entertainment",FOX
 http://example.com/fox
 `
 	// Create a mock HTTP server
