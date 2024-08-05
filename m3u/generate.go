@@ -8,8 +8,6 @@ import (
 	"m3u-stream-merger/utils"
 	"net/http"
 	"net/url"
-	"sort"
-	"strconv"
 	"strings"
 )
 
