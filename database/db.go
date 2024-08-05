@@ -394,7 +394,7 @@ func (db *Instance) GetStreamUrlByUrlAndIndex(url string, m3u_index int) (s Stre
 }
 
 func (db *Instance) GetStreams() ([]StreamInfo, error) {
-	rows, err := db.Sql.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams")
+	rows, err := db.Sql.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams ORDER BY CAST(tvg_id AS INTEGER) ASC")
 	if err != nil {
 		return nil, fmt.Errorf("error querying streams: %v", err)
 	}

@@ -20,7 +20,7 @@ func getFileExtensionFromUrl(rawUrl string) (string, error) {
 	if pos == -1 {
 		return "", errors.New("couldn't find a period to indicate a file extension")
 	}
-	return u.Path[pos+1 : len(u.Path)], nil
+	return u.Path[pos+1:], nil
 }
 
 func GenerateStreamURL(baseUrl string, title string, sampleUrl string) string {
@@ -58,8 +58,8 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 		}
 
 		// Write #EXTINF line
-		_, err := fmt.Fprintf(w, "#EXTINF:-1 tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
-			stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title)
+		_, err := fmt.Fprintf(w, "#EXTINF:-1 channelID=\"x-ID.%s\" tvg-chno=\"%s\" tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
+			stream.TvgID, stream.TvgID, stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title)
 		if err != nil {
 			continue
 		}
