@@ -76,7 +76,7 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | M3U_URL_1, M3U_URL_2, M3U_URL_X | Set M3U URLs as environment variables.                  |   N/A            |   Any valid M3U URLs                                             |
 | M3U_MAX_CONCURRENCY_1, M3U_MAX_CONCURRENCY_2, M3U_MAX_CONCURRENCY_X | Set max concurrency.                                 |  1             |   Any integer                                             |
 | USER_AGENT                  | Set the User-Agent of HTTP requests.                    | IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)    |  Any valid user agent        |
-| LOAD_BALANCING_MODE                | Set load balancing algorithm to a specific mode | brute-force    | brute-force/round-robin   |
+| ~~LOAD_BALANCING_MODE~~ (removed on version 0.10.0)                | Set load balancing algorithm to a specific mode | brute-force    | brute-force/round-robin   |
 | BUFFER_MB | Set buffer size in mb. | 0 (no buffer) | Any positive integer |
 | INCLUDE_GROUPS_1, INCLUDE_GROUPS_2, INCLUDE_GROUPS_X    | Set channel groups to include | all    | Comma-separated values   |
 | TITLE_SUBSTR_FILTER | Sets a regex pattern used to exclude substrings from channel titles | none    | Go regexp   |
