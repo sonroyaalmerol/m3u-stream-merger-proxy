@@ -115,6 +115,9 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 
 	for k, v := range resp.Header {
 		for _, val := range v {
+			if strings.ToLower(k) == "content-length" {
+				continue
+			}
 			w.Header().Set(k, val)
 		}
 	}
