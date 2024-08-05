@@ -9,44 +9,36 @@ import (
 	"m3u-stream-merger/utils"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 )
 
 func loadBalancer(stream database.StreamInfo) (*http.Response, *database.StreamURL, error) {
-	loadBalancingMode := os.Getenv("LOAD_BALANCING_MODE")
-	if loadBalancingMode == "" {
-		loadBalancingMode = "brute-force"
-	}
+	sort.Slice(stream.URLs, func(i, j database.StreamURL) bool {
+		return concurrencyPriorityValue(i.M3UIndex) > concurrencyPriorityValue(j.M3UIndex)
+	})
 
-	var lastIndex int
+	lap := 0
+	index := 0
+	for {
+		if lap >= 5 {
+			break
+		}
 
-	for i := 0; i < len(stream.URLs); i++ {
-		index := i
-		if loadBalancingMode == "round-robin" {
-			index = (lastIndex + i) % len(stream.URLs)
+		if index >= len(stream.URLs) {
+			index = 0
+			lap++
 		}
 
 		url := stream.URLs[index]
+		index++
 
 		if checkConcurrency(url.M3UIndex) {
 			log.Printf("Concurrency limit reached for M3U_%d: %s", url.M3UIndex, url.Content)
 			continue
 		}
 
-		resp, err := utils.CustomHttpRequest("GET", url.Content)
-		if err == nil {
-			return resp, &url, nil
-		}
-		log.Printf("Error fetching stream: %s\n", err.Error())
-
-		if loadBalancingMode == "round-robin" {
-			lastIndex = (lastIndex + 1) % len(stream.URLs)
-		}
-	}
-
-	log.Printf("All concurrency limits have been reached. Falling back to connection checking mode...\n")
-	for _, url := range stream.URLs {
 		resp, err := utils.CustomHttpRequest("GET", url.Content)
 		if err == nil {
 			return resp, &url, nil
@@ -121,8 +113,6 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 		return
 	}
 
-	log.Printf("Proxying %s to %s\n", r.RemoteAddr, selectedUrl.Content)
-
 	for k, v := range resp.Header {
 		for _, val := range v {
 			w.Header().Set(k, val)
@@ -140,8 +130,11 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 			return
 		default:
 			exitStatus := make(chan int)
+
+			log.Printf("Proxying %s to %s\n", r.RemoteAddr, selectedUrl.Content)
 			go proxyStream(selectedUrl, resp, r, w, exitStatus)
 			streamExitCode := <-exitStatus
+			log.Printf("Exit code %d received from %s\n", streamExitCode, selectedUrl.Content)
 
 			if streamExitCode == 1 {
 				// Retry on server-side connection errors
@@ -153,7 +146,6 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 					http.Error(w, "Error fetching stream. Exhausted all streams.", http.StatusInternalServerError)
 					return
 				}
-				log.Printf("Reconnected to %s\n", selectedUrl.Content)
 			} else {
 				// Consider client-side connection errors as complete closure
 				log.Printf("Client has closed the stream: %s\n", r.RemoteAddr)
@@ -161,6 +153,20 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 			}
 		}
 	}
+}
+
+func concurrencyPriorityValue(m3uIndex int) int {
+	maxConcurrency, err := strconv.Atoi(os.Getenv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", m3uIndex)))
+	if err != nil {
+		maxConcurrency = 1
+	}
+
+	count, err := database.GetConcurrency(m3uIndex)
+	if err != nil {
+		count = 0
+	}
+
+	return maxConcurrency - count
 }
 
 func checkConcurrency(m3uIndex int) bool {
