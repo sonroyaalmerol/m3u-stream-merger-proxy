@@ -15,8 +15,8 @@ import (
 )
 
 func loadBalancer(stream database.StreamInfo) (*http.Response, *database.StreamURL, error) {
-	sort.Slice(stream.URLs, func(i, j database.StreamURL) bool {
-		return concurrencyPriorityValue(i.M3UIndex) > concurrencyPriorityValue(j.M3UIndex)
+	sort.Slice(stream.URLs, func(i, j int) bool {
+		return concurrencyPriorityValue(stream.URLs[i].M3UIndex) > concurrencyPriorityValue(stream.URLs[j].M3UIndex)
 	})
 
 	lap := 0
