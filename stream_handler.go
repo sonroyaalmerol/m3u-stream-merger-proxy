@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-func loadBalancer(stream database.StreamInfo) (*http.Response, *database.StreamURL, error) {
+func loadBalancer(stream database.StreamInfo, prevUrl *database.StreamURL) (*http.Response, *database.StreamURL, error) {
 	sort.Slice(stream.URLs, func(i, j int) bool {
 		return concurrencyPriorityValue(stream.URLs[i].M3UIndex) > concurrencyPriorityValue(stream.URLs[j].M3UIndex)
 	})
@@ -33,6 +33,12 @@ func loadBalancer(stream database.StreamInfo) (*http.Response, *database.StreamU
 
 		url := stream.URLs[index]
 		index++
+
+		if prevUrl != nil {
+			if prevUrl.M3UIndex == url.M3UIndex {
+				continue
+			}
+		}
 
 		if checkConcurrency(url.M3UIndex) {
 			log.Printf("Concurrency limit reached for M3U_%d: %s", url.M3UIndex, url.Content)
@@ -107,7 +113,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 		return
 	}
 
-	resp, selectedUrl, err := loadBalancer(stream)
+	resp, selectedUrl, err := loadBalancer(stream, nil)
 	if err != nil {
 		http.Error(w, "Error fetching stream. Exhausted all streams.", http.StatusInternalServerError)
 		return
@@ -144,7 +150,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 				log.Printf("Server connection failed: %s\n", selectedUrl.Content)
 				log.Printf("Retrying other servers...\n")
 				resp.Body.Close()
-				resp, selectedUrl, err = loadBalancer(stream)
+				resp, selectedUrl, err = loadBalancer(stream, selectedUrl)
 				if err != nil {
 					http.Error(w, "Error fetching stream. Exhausted all streams.", http.StatusInternalServerError)
 					return
