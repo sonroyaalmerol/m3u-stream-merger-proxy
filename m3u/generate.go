@@ -13,7 +13,6 @@ import (
 	"strings"
 )
 
-// getFileExtensionFromUrl
 func getFileExtensionFromUrl(rawUrl string) (string, error) {
 	u, err := url.Parse(rawUrl)
 	if err != nil {
@@ -26,7 +25,6 @@ func getFileExtensionFromUrl(rawUrl string) (string, error) {
 	return u.Path[pos+1:], nil
 }
 
-// GenerateStreamURL
 func GenerateStreamURL(baseUrl string, title string, sampleUrl string) string {
 	ext, err := getFileExtensionFromUrl(sampleUrl)
 	if err != nil {
@@ -35,7 +33,6 @@ func GenerateStreamURL(baseUrl string, title string, sampleUrl string) string {
 	return fmt.Sprintf("%s/%s.%s\n", baseUrl, utils.GetStreamUID(title), ext)
 }
 
-// GenerateM3UContent
 func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	streams, err := db.GetStreams()
 	if err != nil {
@@ -56,17 +53,6 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 	if err != nil {
 		log.Println(fmt.Errorf("Fprintf error: %v", err))
 	}
-
-	// Sort the streams by TVG ID, interpret the IDs as numbers
-	sort.Slice(streams, func(i, j int) bool {
-		id1, err1 := strconv.Atoi(streams[i].TvgID)
-		id2, err2 := strconv.Atoi(streams[j].TvgID)
-		if err1 != nil || err2 != nil {
-			// If any of the conversions fail, compare as strings
-			return streams[i].TvgID < streams[j].TvgID
-		}
-		return id1 < id2
-	})
 
 	for _, stream := range streams {
 		if len(stream.URLs) == 0 {
