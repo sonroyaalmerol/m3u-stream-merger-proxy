@@ -16,7 +16,7 @@ import (
 
 func loadBalancer(stream database.StreamInfo, prevUrl *database.StreamURL) (*http.Response, *database.StreamURL, error) {
 	sort.Slice(stream.URLs, func(i, j int) bool {
-		return concurrencyPriorityValue(stream.URLs[i].M3UIndex) > concurrencyPriorityValue(stream.URLs[j].M3UIndex)
+		return db.ConcurrencyPriorityValue(stream.URLs[i].M3UIndex) > db.ConcurrencyPriorityValue(stream.URLs[j].M3UIndex)
 	})
 
 	lap := 0
@@ -40,7 +40,7 @@ func loadBalancer(stream database.StreamInfo, prevUrl *database.StreamURL) (*htt
 			}
 		}
 
-		if checkConcurrency(url.M3UIndex) {
+		if db.CheckConcurrency(url.M3UIndex) {
 			log.Printf("Concurrency limit reached for M3U_%d: %s", url.M3UIndex, url.Content)
 			continue
 		}
@@ -56,8 +56,8 @@ func loadBalancer(stream database.StreamInfo, prevUrl *database.StreamURL) (*htt
 }
 
 func proxyStream(selectedUrl *database.StreamURL, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
-	updateConcurrency(selectedUrl.M3UIndex, true)
-	defer updateConcurrency(selectedUrl.M3UIndex, false)
+	db.UpdateConcurrency(selectedUrl.M3UIndex, true)
+	defer db.UpdateConcurrency(selectedUrl.M3UIndex, false)
 
 	bufferMbInt, _ := strconv.Atoi(os.Getenv("BUFFER_MB"))
 	if bufferMbInt < 0 {
@@ -162,52 +162,4 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 			}
 		}
 	}
-}
-
-func concurrencyPriorityValue(m3uIndex int) int {
-	maxConcurrency, err := strconv.Atoi(os.Getenv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", m3uIndex)))
-	if err != nil {
-		maxConcurrency = 1
-	}
-
-	count, err := database.GetConcurrency(m3uIndex)
-	if err != nil {
-		count = 0
-	}
-
-	return maxConcurrency - count
-}
-
-func checkConcurrency(m3uIndex int) bool {
-	maxConcurrency, err := strconv.Atoi(os.Getenv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", m3uIndex)))
-	if err != nil {
-		maxConcurrency = 1
-	}
-
-	count, err := database.GetConcurrency(m3uIndex)
-	if err != nil {
-		log.Printf("Error checking concurrency: %s\n", err.Error())
-		return false
-	}
-
-	log.Printf("Current number of connections for M3U_%d: %d", m3uIndex, count)
-	return count >= maxConcurrency
-}
-
-func updateConcurrency(m3uIndex int, incr bool) {
-	var err error
-	if incr {
-		err = database.IncrementConcurrency(m3uIndex)
-	} else {
-		err = database.DecrementConcurrency(m3uIndex)
-	}
-	if err != nil {
-		log.Printf("Error updating concurrency: %s\n", err.Error())
-	}
-
-	count, err := database.GetConcurrency(m3uIndex)
-	if err != nil {
-		log.Printf("Error checking concurrency: %s\n", err.Error())
-	}
-	log.Printf("Current number of connections for M3U_%d: %d", m3uIndex, count)
 }

@@ -17,50 +17,6 @@ import (
 
 var db *database.Instance
 var cronMutex sync.Mutex
-var swappingLock sync.Mutex
-
-func swapDb(newInstance *database.Instance) error {
-	swappingLock.Lock()
-	defer swappingLock.Unlock()
-
-	if db == nil {
-		err := newInstance.RenameSQLite("current_streams")
-		if err != nil {
-			return fmt.Errorf("Error renaming next_streams to current_streams: %v\n", err)
-		}
-
-		db = newInstance
-		newInstance = nil
-
-		return nil
-	}
-
-	tempName := fmt.Sprintf("temp_%d", time.Now().UnixNano())
-
-	err := db.RenameSQLite(tempName)
-	if err != nil {
-		return fmt.Errorf("Error renaming current_streams to temp: %v\n", err)
-	}
-
-	err = newInstance.RenameSQLite("current_streams")
-	if err != nil {
-		revertErr := db.RenameSQLite("current_streams")
-		if revertErr != nil {
-			return fmt.Errorf("Error renaming back to current_streams: %v\n", revertErr)
-		}
-		return fmt.Errorf("Error renaming next_streams to current_streams: %v\n", err)
-	}
-
-	err = db.DeleteSQLite()
-	if err != nil {
-		fmt.Printf("Error deleting temp database: %v\n", err)
-	}
-
-	db = newInstance
-	newInstance = nil
-
-	return nil
-}
 
 func updateSource(nextDb *database.Instance, m3uUrl string, index int) {
 	log.Printf("Background process: Updating M3U #%d from %s\n", index, m3uUrl)
@@ -81,12 +37,6 @@ func updateSources(ctx context.Context) {
 	case <-ctx.Done():
 		return
 	default:
-		var err error
-		nextDb, err := database.InitializeSQLite("next_streams")
-		if err != nil {
-			log.Fatalf("Error initializing next SQLite database: %v", err)
-		}
-
 		log.Println("Background process: Checking M3U_URLs...")
 		var wg sync.WaitGroup
 		index := 1
@@ -99,19 +49,15 @@ func updateSources(ctx context.Context) {
 			log.Printf("Background process: Fetching M3U_URL_%d...\n", index)
 			wg.Add(1)
 			// Start the goroutine for periodic updates
-			go func(nextDb *database.Instance, m3uUrl string, index int) {
+			go func(currDb *database.Instance, m3uUrl string, index int) {
 				defer wg.Done()
-				updateSource(nextDb, m3uUrl, index)
-			}(nextDb, m3uUrl, index)
+				updateSource(currDb, m3uUrl, index)
+			}(db, m3uUrl, index)
 
 			index++
 		}
 		wg.Wait()
 
-		err = swapDb(nextDb)
-		if err != nil {
-			log.Fatalf("swapDb: %v", err)
-		}
 		log.Println("Background process: Updated M3U database.")
 	}
 }
@@ -131,14 +77,14 @@ func main() {
 	}
 
 	var err error
-	db, err = database.InitializeSQLite("current_streams")
+	db, err = database.InitializeDb("current_streams")
 	if err != nil {
 		log.Fatalf("Error initializing current SQLite database: %v", err)
 	}
 
-	err = database.InitializeMemDB()
+	err = db.ClearConcurrencies()
 	if err != nil {
-		log.Fatalf("Error initializing current memory database: %v", err)
+		log.Fatalf("Error clearing concurrency database: %v", err)
 	}
 
 	cronSched := os.Getenv("SYNC_CRON")
@@ -168,9 +114,6 @@ func main() {
 
 	// HTTP handlers
 	http.HandleFunc("/playlist.m3u", func(w http.ResponseWriter, r *http.Request) {
-		swappingLock.Lock()
-		defer swappingLock.Unlock()
-
 		m3u.GenerateM3UContent(w, r, db)
 	})
 	http.HandleFunc("/stream/", func(w http.ResponseWriter, r *http.Request) {

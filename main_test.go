@@ -9,22 +9,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 )
 
 func TestStreamHandler(t *testing.T) {
-	db, err := database.InitializeSQLite("current_streams")
+	db, err := database.InitializeDb("current_streams")
 	if err != nil {
-		t.Errorf("InitializeSQLite returned error: %v", err)
+		t.Errorf("InitializeDb returned error: %v", err)
 	}
 
-	err = database.InitializeMemDB()
-	if err != nil {
-		t.Errorf("Error initializing current memory database: %v", err)
-	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -43,9 +38,6 @@ func TestStreamHandler(t *testing.T) {
 	m3uW := httptest.NewRecorder()
 
 	func() {
-		swappingLock.Lock()
-		defer swappingLock.Unlock()
-
 		m3u.GenerateM3UContent(m3uW, m3uReq, db)
 	}()
 
@@ -87,15 +79,4 @@ func TestStreamHandler(t *testing.T) {
 	}
 
 	wg.Wait()
-
-	err = db.DeleteSQLite()
-	if err != nil {
-		t.Errorf("DeleteSQLite returned error: %v", err)
-	}
-
-	foldername := filepath.Join(".", "data")
-	err = os.RemoveAll(foldername)
-	if err != nil {
-		t.Errorf("Error deleting data folder: %v\n", err)
-	}
 }
