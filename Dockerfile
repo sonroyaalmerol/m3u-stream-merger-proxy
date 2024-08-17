@@ -6,9 +6,7 @@ RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive \
     apt-get install --assume-yes --no-install-recommends \
       build-essential \
-      musl-tools \
-      redis-tools \
-      redis
+      musl-tools
 
 # Set the Current Working Directory inside the container
 WORKDIR /app
@@ -17,9 +15,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 
 # Download all dependencies. Dependencies will be cached if the go.mod and go.sum files are not changed
-RUN go mod download \
-  && redis-server --daemonize yes \
-  && until redis-cli ping | grep -q PONG; do echo "Waiting for Redis..."; sleep 1; done
+RUN go mod download
 
 # Copy the source code from the current directory to the Working Directory inside the container
 COPY . .
