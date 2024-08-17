@@ -7,6 +7,7 @@ RUN apt-get update \
     apt-get install --assume-yes --no-install-recommends \
       build-essential \
       musl-tools \
+      redis-tools \
       redis
 
 # Set the Current Working Directory inside the container
@@ -17,7 +18,8 @@ COPY go.mod go.sum ./
 
 # Download all dependencies. Dependencies will be cached if the go.mod and go.sum files are not changed
 RUN go mod download \
-  && redis-server --daemonize yes 
+  && redis-server --daemonize yes \
+  && until redis-cli ping | grep -q PONG; do echo "Waiting for Redis..."; sleep 1; done
 
 # Copy the source code from the current directory to the Working Directory inside the container
 COPY . .
