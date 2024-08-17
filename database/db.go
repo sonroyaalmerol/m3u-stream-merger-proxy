@@ -17,11 +17,20 @@ type Instance struct {
 }
 
 func InitializeDb(addr string, password string, db int) (*Instance, error) {
-	redisInstance := redis.NewClient(&redis.Options{
-		Addr:     addr,
-		Password: password,
-		DB:       db,
-	})
+	var redisInstance *redis.Client
+
+	if password == "" {
+		redisInstance = redis.NewClient(&redis.Options{
+			Addr: addr,
+			DB:   db,
+		})
+	} else {
+		redisInstance = redis.NewClient(&redis.Options{
+			Addr:     addr,
+			Password: password,
+			DB:       db,
+		})
+	}
 
 	if err := redisInstance.Ping(context.Background()).Err(); err != nil {
 		return nil, fmt.Errorf("error connecting to Redis: %v", err)
