@@ -30,6 +30,14 @@ func InitializeDb(addr string, password string, db int) (*Instance, error) {
 	return &Instance{Redis: redisInstance, Ctx: context.Background()}, nil
 }
 
+func (db *Instance) ClearDb() error {
+	if err := db.Redis.FlushDB(db.Ctx).Err(); err != nil {
+		return fmt.Errorf("error clearing Redis: %v", err)
+	}
+
+	return nil
+}
+
 func (db *Instance) SaveToDb(streams []StreamInfo) error {
 	for _, s := range streams {
 		streamKey := fmt.Sprintf("stream:%s", s.Title)

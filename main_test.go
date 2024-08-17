@@ -15,9 +15,18 @@ import (
 )
 
 func TestStreamHandler(t *testing.T) {
-	db, err := database.InitializeDb("current_streams")
+	REDIS_ADDR := "localhost:6379"
+	REDIS_PASS := ""
+	REDIS_DB := 0
+
+	db, err := database.InitializeDb(REDIS_ADDR, REDIS_PASS, REDIS_DB)
 	if err != nil {
 		t.Errorf("InitializeDb returned error: %v", err)
+	}
+
+	err = db.ClearDb()
+	if err != nil {
+		t.Errorf("ClearDb returned error: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

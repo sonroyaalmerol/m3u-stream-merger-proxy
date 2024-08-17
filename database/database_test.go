@@ -6,9 +6,18 @@ import (
 
 func TestSaveAndLoadFromDb(t *testing.T) {
 	// Test InitializeDb and check if the database file exists
-	db, err := InitializeDb("test")
+	REDIS_ADDR := "localhost:6379"
+	REDIS_PASS := ""
+	REDIS_DB := 0
+
+	db, err := InitializeDb(REDIS_ADDR, REDIS_PASS, REDIS_DB)
 	if err != nil {
 		t.Errorf("InitializeDb returned error: %v", err)
+	}
+
+	err = db.ClearDb()
+	if err != nil {
+		t.Errorf("ClearDb returned error: %v", err)
 	}
 
 	// Test LoadFromDb with existing data in the database

@@ -8,6 +8,7 @@ import (
 	"m3u-stream-merger/m3u"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -76,10 +77,17 @@ func main() {
 		}
 	}
 
+	REDIS_ADDR := os.Getenv("REDIS_ADDR")
+	REDIS_PASS := os.Getenv("REDIS_PASS")
+	REDIS_DB := 0
+	if i, err := strconv.Atoi(os.Getenv("REDIS_DB")); err == nil {
+		REDIS_DB = i
+	}
+
 	var err error
-	db, err = database.InitializeDb("current_streams")
+	db, err = database.InitializeDb(REDIS_ADDR, REDIS_PASS, REDIS_DB)
 	if err != nil {
-		log.Fatalf("Error initializing current SQLite database: %v", err)
+		log.Fatalf("Error initializing Redis database: %v", err)
 	}
 
 	err = db.ClearConcurrencies()
@@ -110,6 +118,18 @@ func main() {
 	if syncOnBoot == "true" {
 		log.Println("SYNC_ON_BOOT enabled. Starting initial M3U update.")
 		go updateSources(ctx)
+	}
+
+	clearOnBoot := os.Getenv("CLEAR_ON_BOOT")
+	if len(strings.TrimSpace(clearOnBoot)) == 0 {
+		clearOnBoot = "false"
+	}
+
+	if clearOnBoot == "true" {
+		log.Println("CLEAR_ON_BOOT enabled. Clearing current database.")
+		if err := db.ClearDb(); err != nil {
+			log.Fatalf("Error clearing database: %v", err)
+		}
 	}
 
 	// HTTP handlers
