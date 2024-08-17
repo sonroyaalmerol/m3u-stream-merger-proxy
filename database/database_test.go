@@ -6,7 +6,7 @@ import (
 
 func TestSaveAndLoadFromDb(t *testing.T) {
 	// Test InitializeDb and check if the database file exists
-	REDIS_ADDR := "127.0.0.1:6379"
+	REDIS_ADDR := "host.docker.internal:6379"
 	REDIS_PASS := ""
 	REDIS_DB := 0
 

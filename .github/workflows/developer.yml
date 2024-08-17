@@ -15,7 +15,7 @@ jobs:
 
       - uses: shogo82148/actions-setup-redis@v1
         with:
-          redis-version: "7.x"
+          redis-version: "latest"
 
       - name: Docker - Login
         uses: docker/login-action@v3

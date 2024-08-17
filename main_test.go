@@ -15,7 +15,7 @@ import (
 )
 
 func TestStreamHandler(t *testing.T) {
-	REDIS_ADDR := "127.0.0.1:6379"
+	REDIS_ADDR := "host.docker.internal:6379"
 	REDIS_PASS := ""
 	REDIS_DB := 0
 

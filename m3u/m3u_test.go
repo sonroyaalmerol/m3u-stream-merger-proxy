@@ -20,7 +20,7 @@ func TestGenerateM3UContent(t *testing.T) {
 	}
 
 	// Test InitializeSQLite and check if the database file exists
-	REDIS_ADDR := "127.0.0.1:6379"
+	REDIS_ADDR := "host.docker.internal:6379"
 	REDIS_PASS := ""
 	REDIS_DB := 0
 
@@ -103,7 +103,7 @@ http://example.com/fox
 	defer mockServer.Close()
 
 	// Test InitializeSQLite and check if the database file exists
-	REDIS_ADDR := "127.0.0.1:6379"
+	REDIS_ADDR := "host.docker.internal:6379"
 	REDIS_PASS := ""
 	REDIS_DB := 0
 
