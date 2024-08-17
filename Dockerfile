@@ -6,7 +6,7 @@ RUN apt-get update \
     apt-get install --assume-yes --no-install-recommends \
       build-essential=12.9 \
       musl-tools=1.2.3-1 \
-      redis-server=7.0.15-1~deb12u1
+      redis-server=7.0.15-1
 
 # Set the Current Working Directory inside the container
 WORKDIR /app
@@ -15,9 +15,8 @@ WORKDIR /app
 COPY go.mod go.sum ./
 
 # Download all dependencies. Dependencies will be cached if the go.mod and go.sum files are not changed
-RUN go mod download
-
-RUN redis-server --daemonize yes
+RUN go mod download \
+  && redis-server --daemonize yes 
 
 # Copy the source code from the current directory to the Working Directory inside the container
 COPY . .
