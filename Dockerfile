@@ -6,7 +6,7 @@ RUN apt-get update \
     apt-get install --assume-yes --no-install-recommends \
       build-essential=12.9 \
       musl-tools=1.2.3-1 \
-      redis-server=7.0.15-1
+      redis=7.0.15-1~deb12u1
 
 # Set the Current Working Directory inside the container
 WORKDIR /app
