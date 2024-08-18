@@ -98,7 +98,7 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 	maxRetries := 10
 	var err error
 	maxRetriesStr, maxRetriesExists := os.LookupEnv("MAX_RETRIES")
-	if !maxRetriesExists {
+	if maxRetriesExists {
 		maxRetries, err = strconv.Atoi(maxRetriesStr)
 		if err != nil {
 			maxRetries = 10
@@ -125,48 +125,60 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 		scanner := bufio.NewScanner(&buffer)
 		var wg sync.WaitGroup
 
+		// Create channels for workers
+		parserWorkers := os.Getenv("PARSER_WORKERS")
+		if parserWorkers != "" {
+			parserWorkers = "5"
+		}
 		streamInfoCh := make(chan database.StreamInfo)
 		errCh := make(chan error)
+		numWorkers, err := strconv.Atoi(parserWorkers)
+		if err != nil {
+			numWorkers = 5
+		}
 
+		// Worker pool
+		for w := 0; w < numWorkers; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for streamInfo := range streamInfoCh {
+					if err := db.SaveToDb([]database.StreamInfo{streamInfo}); err != nil {
+						errCh <- err
+					}
+				}
+			}()
+		}
+
+		// Error handler
+		go func() {
+			for err := range errCh {
+				log.Printf("M3U Parser error: %v", err)
+			}
+		}()
+
+		// Parse lines and send to worker pool
 		for scanner.Scan() {
 			line := scanner.Text()
 
 			if strings.HasPrefix(line, "#EXTINF:") && checkIncludeGroup(grps, line) {
 				if scanner.Scan() {
-					wg.Add(2)
 					nextLine := scanner.Text()
 
-					// Insert parsed stream to database
-					go func(c chan database.StreamInfo) {
-						defer wg.Done()
-						errCh <- db.SaveToDb([]database.StreamInfo{<-c})
-					}(streamInfoCh)
-
-					// Parse stream lines
-					go func(l string, nl string) {
-						defer wg.Done()
-						streamInfoCh <- parseLine(l, nl, m3uIndex)
-					}(line, nextLine)
-
-					// Error handler
-					go func() {
-						err := <-errCh
-						if err != nil {
-							log.Printf("M3U Parser error: %v", err)
-						}
-					}()
+					streamInfo := parseLine(line, nextLine, m3uIndex)
+					streamInfoCh <- streamInfo
 				}
-				//}
 			}
 		}
+
+		// Close channels after processing
+		close(streamInfoCh)
+		wg.Wait()
+		close(errCh)
 
 		if err := scanner.Err(); err != nil {
 			return fmt.Errorf("scanner error: %v", err)
 		}
-
-		wg.Wait()
-		close(streamInfoCh)
-		close(errCh)
 
 		// Free up memory used by buffer
 		buffer.Reset()
