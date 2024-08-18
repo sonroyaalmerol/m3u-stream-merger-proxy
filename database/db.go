@@ -164,6 +164,7 @@ func (db *Instance) GetStreamBySlug(slug string) (StreamInfo, error) {
 	}
 
 	s := StreamInfo{
+		Slug:    slug,
 		Title:   streamData["title"],
 		TvgID:   streamData["tvg_id"],
 		TvgChNo: streamData["tvg_chno"],
