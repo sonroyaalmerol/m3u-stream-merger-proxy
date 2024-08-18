@@ -23,12 +23,12 @@ func getFileExtensionFromUrl(rawUrl string) (string, error) {
 	return u.Path[pos+1:], nil
 }
 
-func GenerateStreamURL(baseUrl string, title string, sampleUrl string) string {
+func GenerateStreamURL(baseUrl string, slug string, sampleUrl string) string {
 	ext, err := getFileExtensionFromUrl(sampleUrl)
 	if err != nil {
-		return fmt.Sprintf("%s/%s\n", baseUrl, utils.GetStreamUID(title))
+		return fmt.Sprintf("%s/%s\n", baseUrl, utils.GetStreamUrl(slug))
 	}
-	return fmt.Sprintf("%s/%s.%s\n", baseUrl, utils.GetStreamUID(title), ext)
+	return fmt.Sprintf("%s/%s.%s\n", baseUrl, utils.GetStreamUrl(slug), ext)
 }
 
 func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Instance) {
@@ -65,7 +65,7 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 		}
 
 		// Write stream URL
-		_, err = fmt.Fprintf(w, "%s", GenerateStreamURL(baseUrl, stream.Title, stream.URLs[0].Content))
+		_, err = fmt.Fprintf(w, "%s", GenerateStreamURL(baseUrl, stream.Slug, stream.URLs[0].Content))
 		if err != nil {
 			continue
 		}

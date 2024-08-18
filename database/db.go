@@ -48,86 +48,66 @@ func (db *Instance) ClearDb() error {
 }
 
 func (db *Instance) SaveToDb(streams []StreamInfo) error {
+	pipeline := db.Redis.Pipeline()
+
 	for _, s := range streams {
-		if err := db.InsertStream(s); err != nil {
-			return fmt.Errorf("SaveToDb error: %v", err)
+		streamKey := fmt.Sprintf("stream:%s", s.Slug)
+		streamData := map[string]interface{}{
+			"title":      s.Title,
+			"tvg_id":     s.TvgID,
+			"tvg_chno":   s.TvgChNo,
+			"logo_url":   s.LogoURL,
+			"group_name": s.Group,
 		}
+		pipeline.HSet(db.Ctx, streamKey, streamData)
 
 		for _, u := range s.URLs {
-			if err := db.InsertStreamUrl(s, u); err != nil {
-				return fmt.Errorf("SaveToDb error: %v", err)
+			streamURLKey := fmt.Sprintf("stream:%s:url:%d", s.Slug, u.M3UIndex)
+			urlData := map[string]interface{}{
+				"content":   u.Content,
+				"m3u_index": u.M3UIndex,
 			}
+			pipeline.HSet(db.Ctx, streamURLKey, urlData)
+		}
+
+		// Add to the sorted set
+		sortScore := calculateSortScore(s)
+		pipeline.ZAdd(db.Ctx, "streams_sorted", redis.Z{
+			Score:  sortScore,
+			Member: streamKey,
+		})
+	}
+
+	if len(streams) > 0 {
+		_, err := pipeline.Exec(db.Ctx)
+		if err != nil {
+			return fmt.Errorf("SaveToDb error: %v", err)
 		}
 	}
 
 	return nil
 }
 
-func (db *Instance) InsertStream(s StreamInfo) error {
-	streamKey := fmt.Sprintf("stream:%s", s.Title)
-	streamData := map[string]interface{}{
-		"title":      s.Title,
-		"tvg_id":     s.TvgID,
-		"tvg_chno":   s.TvgChNo,
-		"logo_url":   s.LogoURL,
-		"group_name": s.Group,
-	}
-
-	if err := db.Redis.HSet(db.Ctx, streamKey, streamData).Err(); err != nil {
-		return fmt.Errorf("error inserting stream to Redis: %v", err)
-	}
-
-	// Add to the sorted set with tvg_id as the score
-	maxLen := 20
-	base := float64(256)
-
-	// Normalize length by padding the string
-	paddedString := strings.ToLower(getSortingValue(s))
-	if len(paddedString) < maxLen {
-		paddedString = paddedString + strings.Repeat("\x00", maxLen-len(paddedString))
-	}
-
-	sortScore := 0.0
-	for i := 0; i < len(paddedString); i++ {
-		charValue := float64(paddedString[i])
-		sortScore += charValue / math.Pow(base, float64(i+1))
-	}
-
-	if err := db.Redis.ZAdd(db.Ctx, "streams_sorted", redis.Z{
-		Score:  sortScore,
-		Member: streamKey,
-	}).Err(); err != nil {
-		return fmt.Errorf("error adding stream to sorted set: %v", err)
-	}
-
-	return nil
-}
-
-func (db *Instance) InsertStreamUrl(s StreamInfo, url StreamURL) error {
-	streamKey := fmt.Sprintf("stream:%s:url:%d", s.Title, url.M3UIndex)
-	urlData := map[string]interface{}{
-		"content":   url.Content,
-		"m3u_index": url.M3UIndex,
-	}
-
-	if err := db.Redis.HSet(db.Ctx, streamKey, urlData).Err(); err != nil {
-		return fmt.Errorf("error inserting stream URL to Redis: %v", err)
-	}
-
-	return nil
-}
-
-func (db *Instance) DeleteStreamByTitle(title string) error {
-	streamKey := fmt.Sprintf("stream:%s", title)
+func (db *Instance) DeleteStreamBySlug(slug string) error {
+	streamKey := fmt.Sprintf("stream:%s", slug)
 
 	// Delete associated URLs
-	keys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", streamKey)).Result()
-	if err != nil {
-		return fmt.Errorf("error finding associated URLs: %v", err)
-	}
-	for _, key := range keys {
-		if err := db.Redis.Del(db.Ctx, key).Err(); err != nil {
-			return fmt.Errorf("error deleting stream URL from Redis: %v", err)
+	cursor := uint64(0)
+	for {
+		keys, newCursor, err := db.Redis.Scan(db.Ctx, cursor, fmt.Sprintf("%s:url:*", streamKey), 10).Result()
+		if err != nil {
+			return fmt.Errorf("error scanning associated URLs: %v", err)
+		}
+
+		for _, key := range keys {
+			if err := db.Redis.Del(db.Ctx, key).Err(); err != nil {
+				return fmt.Errorf("error deleting stream URL from Redis: %v", err)
+			}
+		}
+
+		cursor = newCursor
+		if cursor == 0 {
+			break
 		}
 	}
 
@@ -145,25 +125,26 @@ func (db *Instance) DeleteStreamByTitle(title string) error {
 }
 
 func (db *Instance) DeleteStreamURL(s StreamInfo, m3uIndex int) error {
-	if err := db.Redis.Del(db.Ctx, fmt.Sprintf("stream:%s:url:%d", s.Title, m3uIndex)).Err(); err != nil {
+	if err := db.Redis.Del(db.Ctx, fmt.Sprintf("stream:%s:url:%d", s.Slug, m3uIndex)).Err(); err != nil {
 		return fmt.Errorf("error deleting stream URL from Redis: %v", err)
 	}
 
 	return nil
 }
 
-func (db *Instance) GetStreamByTitle(title string) (StreamInfo, error) {
-	streamKey := fmt.Sprintf("stream:%s", title)
+func (db *Instance) GetStreamBySlug(slug string) (StreamInfo, error) {
+	streamKey := fmt.Sprintf("stream:%s", slug)
 	streamData, err := db.Redis.HGetAll(db.Ctx, streamKey).Result()
 	if err != nil {
 		return StreamInfo{}, fmt.Errorf("error getting stream from Redis: %v", err)
 	}
 
 	if len(streamData) == 0 {
-		return StreamInfo{}, fmt.Errorf("stream not found: %s", title)
+		return StreamInfo{}, fmt.Errorf("stream not found: %s", slug)
 	}
 
 	s := StreamInfo{
+		Slug:    slug,
 		Title:   streamData["title"],
 		TvgID:   streamData["tvg_id"],
 		TvgChNo: streamData["tvg_chno"],
@@ -171,51 +152,42 @@ func (db *Instance) GetStreamByTitle(title string) (StreamInfo, error) {
 		Group:   streamData["group_name"],
 	}
 
-	// Fetch URLs
-	keys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", streamKey)).Result()
-	if err != nil {
-		return s, fmt.Errorf("error finding URLs for stream: %v", err)
-	}
-
-	for _, key := range keys {
-		urlData, err := db.Redis.HGetAll(db.Ctx, key).Result()
+	cursor := uint64(0)
+	for {
+		keys, newCursor, err := db.Redis.Scan(db.Ctx, cursor, fmt.Sprintf("%s:url:*", streamKey), 10).Result()
 		if err != nil {
-			return s, fmt.Errorf("error getting URL data from Redis: %v", err)
+			return s, fmt.Errorf("error finding URLs for stream: %v", err)
 		}
 
-		m3uIndex, _ := strconv.Atoi(urlData["m3u_index"])
-		u := StreamURL{
-			Content:  urlData["content"],
-			M3UIndex: m3uIndex,
+		if len(keys) > 0 {
+			results, err := db.Redis.Pipelined(db.Ctx, func(pipe redis.Pipeliner) error {
+				for _, key := range keys {
+					pipe.HGetAll(db.Ctx, key)
+				}
+				return nil
+			})
+			if err != nil {
+				return s, fmt.Errorf("error getting URL data from Redis: %v", err)
+			}
+
+			for _, result := range results {
+				urlData := result.(*redis.MapStringStringCmd).Val()
+				m3uIndex, _ := strconv.Atoi(urlData["m3u_index"])
+				u := StreamURL{
+					Content:  urlData["content"],
+					M3UIndex: m3uIndex,
+				}
+				s.URLs = append(s.URLs, u)
+			}
 		}
-		s.URLs = append(s.URLs, u)
+
+		cursor = newCursor
+		if cursor == 0 {
+			break
+		}
 	}
 
 	return s, nil
-}
-
-func (db *Instance) GetStreamUrlByUrlAndIndex(url string, m3u_index int) (StreamURL, error) {
-	keys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("stream:*:url:%d", m3u_index)).Result()
-	if err != nil {
-		return StreamURL{}, fmt.Errorf("error finding URL by index: %v", err)
-	}
-
-	for _, key := range keys {
-		urlData, err := db.Redis.HGetAll(db.Ctx, key).Result()
-		if err != nil {
-			return StreamURL{}, fmt.Errorf("error getting URL data from Redis: %v", err)
-		}
-
-		if urlData["content"] == url {
-			m3uIndex, _ := strconv.Atoi(urlData["m3u_index"])
-			return StreamURL{
-				Content:  urlData["content"],
-				M3UIndex: m3uIndex,
-			}, nil
-		}
-	}
-
-	return StreamURL{}, fmt.Errorf("stream URL not found: %s, index: %d", url, m3u_index)
 }
 
 func (db *Instance) GetStreams() ([]StreamInfo, error) {
@@ -224,15 +196,68 @@ func (db *Instance) GetStreams() ([]StreamInfo, error) {
 		return nil, fmt.Errorf("error retrieving streams: %v", err)
 	}
 
+	// Create a slice to hold the final stream data
 	var streams []StreamInfo
+	streamKeys := make([]string, 0, len(keys))
+
+	// Filter out URL keys
 	for _, key := range keys {
-		if !strings.Contains(key, ":url:") { // Exclude URL keys
-			s, err := db.GetStreamByTitle(extractTitle(key))
-			if err != nil {
-				return nil, err
-			}
-			streams = append(streams, s)
+		if !strings.Contains(key, ":url:") {
+			streamKeys = append(streamKeys, key)
 		}
+	}
+
+	// Use a pipeline to fetch all stream data in one go
+	pipe := db.Redis.Pipeline()
+	cmds := make([]*redis.MapStringStringCmd, len(streamKeys))
+
+	for i, key := range streamKeys {
+		cmds[i] = pipe.HGetAll(db.Ctx, key)
+	}
+
+	// Execute the pipeline
+	_, err = pipe.Exec(db.Ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error executing Redis pipeline: %v", err)
+	}
+
+	// Process the results
+	for i, cmd := range cmds {
+		streamData := cmd.Val()
+		if len(streamData) == 0 {
+			continue
+		}
+
+		slug := extractSlug(streamKeys[i])
+		stream := StreamInfo{
+			Slug:    slug,
+			Title:   streamData["title"],
+			TvgID:   streamData["tvg_id"],
+			TvgChNo: streamData["tvg_chno"],
+			LogoURL: streamData["logo_url"],
+			Group:   streamData["group_name"],
+		}
+
+		urlKeys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", streamKeys[i])).Result()
+		if err != nil {
+			return nil, fmt.Errorf("error finding URLs for stream: %v", err)
+		}
+
+		for _, urlKey := range urlKeys {
+			urlData, err := db.Redis.HGetAll(db.Ctx, urlKey).Result()
+			if err != nil {
+				return nil, fmt.Errorf("error getting URL data from Redis: %v", err)
+			}
+
+			m3uIndex, _ := strconv.Atoi(urlData["m3u_index"])
+			u := StreamURL{
+				Content:  urlData["content"],
+				M3UIndex: m3uIndex,
+			}
+			stream.URLs = append(stream.URLs, u)
+		}
+
+		streams = append(streams, stream)
 	}
 
 	return streams, nil
@@ -276,7 +301,7 @@ func (db *Instance) ClearConcurrencies() error {
 	return nil
 }
 
-func extractTitle(key string) string {
+func extractSlug(key string) string {
 	parts := strings.Split(key, ":")
 	if len(parts) > 1 {
 		return parts[1]
@@ -295,4 +320,24 @@ func getSortingValue(s StreamInfo) string {
 	}
 
 	return s.TvgID + s.Title
+}
+
+func calculateSortScore(s StreamInfo) float64 {
+	// Add to the sorted set with tvg_id as the score
+	maxLen := 20
+	base := float64(256)
+
+	// Normalize length by padding the string
+	paddedString := strings.ToLower(getSortingValue(s))
+	if len(paddedString) < maxLen {
+		paddedString = paddedString + strings.Repeat("\x00", maxLen-len(paddedString))
+	}
+
+	sortScore := 0.0
+	for i := 0; i < len(paddedString); i++ {
+		charValue := float64(paddedString[i])
+		sortScore += charValue / math.Pow(base, float64(i+1))
+	}
+
+	return sortScore
 }

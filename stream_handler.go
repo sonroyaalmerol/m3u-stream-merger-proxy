@@ -94,30 +94,30 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 
 	log.Printf("Received request from %s for URL: %s\n", r.RemoteAddr, r.URL.Path)
 
-	m3uID := strings.Split(strings.TrimPrefix(r.URL.Path, "/stream/"), ".")[0]
-	if m3uID == "" {
+	streamUrl := strings.Split(strings.TrimPrefix(r.URL.Path, "/stream/"), ".")[0]
+	if streamUrl == "" {
 		log.Printf("Invalid m3uID for request from %s: %s\n", r.RemoteAddr, r.URL.Path)
 		http.NotFound(w, r)
 		return
 	}
 
-	streamName := utils.GetStreamName(m3uID)
-	if streamName == "" {
-		log.Printf("No stream found for m3uID %s from %s\n", m3uID, r.RemoteAddr)
+	streamSlug := utils.GetStreamSlugFromUrl(streamUrl)
+	if streamSlug == "" {
+		log.Printf("No stream found for streamUrl %s from %s\n", streamUrl, r.RemoteAddr)
 		http.NotFound(w, r)
 		return
 	}
 
-	stream, err := db.GetStreamByTitle(streamName)
+	stream, err := db.GetStreamBySlug(streamSlug)
 	if err != nil {
-		log.Printf("Error retrieving stream for title %s: %v\n", streamName, err)
+		log.Printf("Error retrieving stream for slug %s: %v\n", streamSlug, err)
 		http.NotFound(w, r)
 		return
 	}
 
 	resp, selectedUrl, err := loadBalancer(stream)
 	if err != nil {
-		log.Printf("Error fetching initial stream for %s: %v\n", streamName, err)
+		log.Printf("Error fetching initial stream for %s: %v\n", streamSlug, err)
 		http.Error(w, "Error fetching stream. Exhausted all streams.", http.StatusInternalServerError)
 		return
 	}
@@ -160,7 +160,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 				currentResp.Body.Close()
 				resp, selectedUrl, err = loadBalancer(stream)
 				if err != nil {
-					log.Printf("Error reloading stream for %s: %v\n", streamName, err)
+					log.Printf("Error reloading stream for %s: %v\n", streamSlug, err)
 					http.Error(w, "Error fetching stream. Exhausted all streams.", http.StatusInternalServerError)
 					return
 				}

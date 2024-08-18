@@ -12,6 +12,7 @@ import (
 func TestGenerateM3UContent(t *testing.T) {
 	// Define a sample stream for testing
 	stream := database.StreamInfo{
+		Slug:    "test-stream",
 		TvgID:   "1",
 		Title:   "TestStream",
 		LogoURL: "http://example.com/logo.png",
@@ -34,12 +35,7 @@ func TestGenerateM3UContent(t *testing.T) {
 		t.Errorf("ClearDb returned error: %v", err)
 	}
 
-	err = db.InsertStream(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = db.InsertStreamUrl(stream, stream.URLs[0])
+	err = db.SaveToDb([]database.StreamInfo{stream})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +71,7 @@ func TestGenerateM3UContent(t *testing.T) {
 	// Check the generated M3U content
 	expectedContent := fmt.Sprintf(`#EXTM3U
 #EXTINF:-1 channelID="x-ID.1" tvg-chno="" tvg-id="1" tvg-name="TestStream" tvg-logo="http://example.com/logo.png" group-title="TestGroup",TestStream
-%s`, GenerateStreamURL("http:///stream", "TestStream", stream.URLs[0].Content))
+%s`, GenerateStreamURL("http:///stream", "test-stream", stream.URLs[0].Content))
 	if rr.Body.String() != expectedContent {
 		t.Errorf("handler returned unexpected body: got %v want %v",
 			rr.Body.String(), expectedContent)
@@ -125,22 +121,22 @@ http://example.com/fox
 
 	// Verify expected values
 	expectedStreams := []database.StreamInfo{
-		{Title: "BBC One", TvgChNo: "0.0", TvgID: "bbc1", Group: "UK", URLs: []database.StreamURL{
+		{Slug: "bbc-one", Title: "BBC One", TvgChNo: "0.0", TvgID: "bbc1", Group: "UK", URLs: []database.StreamURL{
 			{
 				Content: "http://example.com/bbc1",
 			},
 		}},
-		{Title: "BBC Two", TvgChNo: "0.0", TvgID: "bbc2", Group: "UK", URLs: []database.StreamURL{
+		{Slug: "bbc-two", Title: "BBC Two", TvgChNo: "0.0", TvgID: "bbc2", Group: "UK", URLs: []database.StreamURL{
 			{
 				Content: "http://example.com/bbc2",
 			},
 		}},
-		{Title: "CNN International", TvgChNo: "0.0", TvgID: "cnn", Group: "News", URLs: []database.StreamURL{
+		{Slug: "cnn-international", Title: "CNN International", TvgChNo: "0.0", TvgID: "cnn", Group: "News", URLs: []database.StreamURL{
 			{
 				Content: "http://example.com/cnn",
 			},
 		}},
-		{Title: "FOX", TvgChNo: "0.0", Group: "Entertainment", URLs: []database.StreamURL{
+		{Slug: "fox", Title: "FOX", TvgChNo: "0.0", Group: "Entertainment", URLs: []database.StreamURL{
 			{
 				Content: "http://example.com/fox",
 			},
@@ -178,7 +174,7 @@ http://example.com/fox
 
 // streamInfoEqual checks if two StreamInfo objects are equal.
 func streamInfoEqual(a, b database.StreamInfo) bool {
-	if a.TvgID != b.TvgID || a.TvgChNo != b.TvgChNo || a.Title != b.Title || a.Group != b.Group || a.LogoURL != b.LogoURL || len(a.URLs) != len(b.URLs) {
+	if a.Slug != b.Slug || a.TvgID != b.TvgID || a.TvgChNo != b.TvgChNo || a.Title != b.Title || a.Group != b.Group || a.LogoURL != b.LogoURL || len(a.URLs) != len(b.URLs) {
 		return false
 	}
 

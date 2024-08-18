@@ -15,6 +15,8 @@ import (
 
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/utils"
+
+	"github.com/gosimple/slug"
 )
 
 func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
@@ -27,7 +29,8 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 	lineWithoutPairs := line
 
 	// Define a regular expression to capture key-value pairs
-	regex := regexp.MustCompile(`([a-zA-Z0-9_-]+)=("[^"]+"|[^",]+)`)
+	// regex := regexp.MustCompile(`([a-zA-Z0-9_-]+)=("[^"]+"|[^",]+)`)
+	regex := regexp.MustCompile(`([a-zA-Z0-9_-]+)="([^"]+)"`)
 
 	// Find all key-value pairs in the line
 	matches := regex.FindAllStringSubmatch(line, -1)
@@ -61,6 +64,8 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 	if len(lineCommaSplit) > 1 {
 		currentStream.Title = tvgNameParser(strings.TrimSpace(lineCommaSplit[1]))
 	}
+
+	currentStream.Slug = slug.Make(currentStream.Title)
 
 	return currentStream
 }
@@ -139,15 +144,20 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 			numWorkers = 5
 		}
 
-		// Worker pool
+		// Shared slice to collect parsed data
+		var streamInfos []database.StreamInfo
+		var mu sync.Mutex
+
+		// Worker pool for parsing
 		for w := 0; w < numWorkers; w++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				for streamInfo := range streamInfoCh {
-					if err := db.SaveToDb([]database.StreamInfo{streamInfo}); err != nil {
-						errCh <- err
-					}
+					// Collect parsed data
+					mu.Lock()
+					streamInfos = append(streamInfos, streamInfo)
+					mu.Unlock()
 				}
 			}()
 		}
@@ -180,6 +190,12 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 
 		if err := scanner.Err(); err != nil {
 			return fmt.Errorf("scanner error: %v", err)
+		}
+
+		if len(streamInfos) > 0 {
+			if err := db.SaveToDb(streamInfos); err != nil {
+				return fmt.Errorf("failed to save data to database: %v", err)
+			}
 		}
 
 		// Free up memory used by buffer
