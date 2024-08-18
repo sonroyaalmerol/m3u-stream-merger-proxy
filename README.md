@@ -7,6 +7,10 @@ Uses the channel title or `tvg-name` (as fallback) to merge multiple identical c
 
 Currently, nested M3U files are not supported (M3U playlists inside a parent M3U playlist).
 
+> [!IMPORTANT]  
+> All versions after `0.10.0` will require an external Redis/Valkey instance. The SQLite database within the data folder will not be used going forward. For data persistence, refer to the [Redis](https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/) docs. The sample `docker-compose.yml` below has also been modified to include Redis.
+> To see the README of a specific version, navigate to the specific tag of the desired version (e.g. [`0.10.0`](https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/tree/0.10.0)).
+
 ## How It Works
 
 1. **Initialization and M3U Playlist Consolidation:**
