@@ -63,49 +63,6 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 	return currentStream
 }
 
-func insertStreamToDb(db *database.Instance, currentStream database.StreamInfo) error {
-	existingStream, err := db.GetStreamByTitle(currentStream.Title)
-	if err != nil {
-		return fmt.Errorf("GetStreamByTitle error (title: %s): %v", currentStream.Title, err)
-	}
-
-	var dbId int64
-	if existingStream.Title != currentStream.Title {
-		if os.Getenv("DEBUG") == "true" {
-			log.Printf("Creating new database entry: %s\n", currentStream.Title)
-		}
-		dbId, err = db.InsertStream(currentStream)
-		if err != nil {
-			return fmt.Errorf("InsertStream error (title: %s): %v", currentStream.Title, err)
-		}
-	} else {
-		if os.Getenv("DEBUG") == "true" {
-			log.Printf("Using existing database entry: %s\n", existingStream.Title)
-		}
-		dbId = existingStream.DbId
-	}
-
-	if os.Getenv("DEBUG") == "true" {
-		log.Printf("Adding stream url entry to %s\n", currentStream.Title)
-	}
-
-	for _, currentStreamUrl := range currentStream.URLs {
-		existingUrl, err := db.GetStreamUrlByUrlAndIndex(currentStreamUrl.Content, currentStreamUrl.M3UIndex)
-		if err != nil {
-			return fmt.Errorf("GetStreamUrlByUrlAndIndex error (url: %s): %v", currentStreamUrl.Content, err)
-		}
-
-		if existingUrl.Content != currentStreamUrl.Content || existingUrl.M3UIndex != currentStreamUrl.M3UIndex {
-			_, err = db.InsertStreamUrl(dbId, currentStreamUrl)
-			if err != nil {
-				return fmt.Errorf("InsertStreamUrl error (title: %s): %v", currentStream.Title, err)
-			}
-		}
-	}
-
-	return nil
-}
-
 func checkIncludeGroup(groups []string, line string) bool {
 	if len(groups) == 0 {
 		return true
@@ -182,7 +139,7 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 					// Insert parsed stream to database
 					go func(c chan database.StreamInfo) {
 						defer wg.Done()
-						errCh <- insertStreamToDb(db, <-c)
+						errCh <- db.SaveToDb([]database.StreamInfo{<-c})
 					}(streamInfoCh)
 
 					// Parse stream lines

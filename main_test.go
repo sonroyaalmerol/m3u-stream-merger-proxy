@@ -4,27 +4,32 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/m3u"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 )
 
 func TestStreamHandler(t *testing.T) {
-	db, err := database.InitializeSQLite("current_streams")
+	REDIS_ADDR := "127.0.0.1:6379"
+	REDIS_PASS := ""
+	REDIS_DB := 0
+
+	db, err := database.InitializeDb(REDIS_ADDR, REDIS_PASS, REDIS_DB)
 	if err != nil {
-		t.Errorf("InitializeSQLite returned error: %v", err)
+		t.Errorf("InitializeDb returned error: %v", err)
 	}
 
-	err = database.InitializeMemDB()
+	err = db.ClearDb()
 	if err != nil {
-		t.Errorf("Error initializing current memory database: %v", err)
+		t.Errorf("ClearDb returned error: %v", err)
 	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -43,9 +48,6 @@ func TestStreamHandler(t *testing.T) {
 	m3uW := httptest.NewRecorder()
 
 	func() {
-		swappingLock.Lock()
-		defer swappingLock.Unlock()
-
 		m3u.GenerateM3UContent(m3uW, m3uReq, db)
 	}()
 
@@ -59,6 +61,7 @@ func TestStreamHandler(t *testing.T) {
 		wg.Add(1)
 		go func(stream database.StreamInfo) {
 			defer wg.Done()
+			log.Printf("Stream (%s): %v", stream.Title, stream)
 			req := httptest.NewRequest("GET", strings.TrimSpace(m3u.GenerateStreamURL("", stream.Title, stream.URLs[0].Content)), nil)
 			w := httptest.NewRecorder()
 
@@ -87,15 +90,4 @@ func TestStreamHandler(t *testing.T) {
 	}
 
 	wg.Wait()
-
-	err = db.DeleteSQLite()
-	if err != nil {
-		t.Errorf("DeleteSQLite returned error: %v", err)
-	}
-
-	foldername := filepath.Join(".", "data")
-	err = os.RemoveAll(foldername)
-	if err != nil {
-		t.Errorf("Error deleting data folder: %v\n", err)
-	}
 }

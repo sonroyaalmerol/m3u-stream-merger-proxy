@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"m3u-stream-merger/database"
@@ -22,17 +20,26 @@ func TestGenerateM3UContent(t *testing.T) {
 	}
 
 	// Test InitializeSQLite and check if the database file exists
-	db, err := database.InitializeSQLite("test")
+	REDIS_ADDR := "127.0.0.1:6379"
+	REDIS_PASS := ""
+	REDIS_DB := 2
+
+	db, err := database.InitializeDb(REDIS_ADDR, REDIS_PASS, REDIS_DB)
 	if err != nil {
-		t.Errorf("InitializeSQLite returned error: %v", err)
+		t.Errorf("InitializeDb returned error: %v", err)
 	}
 
-	id, err := db.InsertStream(stream)
+	err = db.ClearDb()
+	if err != nil {
+		t.Errorf("ClearDb returned error: %v", err)
+	}
+
+	err = db.InsertStream(stream)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = db.InsertStreamUrl(id, stream.URLs[0])
+	err = db.InsertStreamUrl(stream, stream.URLs[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,17 +80,6 @@ func TestGenerateM3UContent(t *testing.T) {
 		t.Errorf("handler returned unexpected body: got %v want %v",
 			rr.Body.String(), expectedContent)
 	}
-
-	err = db.DeleteSQLite()
-	if err != nil {
-		t.Errorf("DeleteSQLite returned error: %v", err)
-	}
-
-	foldername := filepath.Join(".", "data")
-	err = os.RemoveAll(foldername)
-	if err != nil {
-		t.Errorf("Error deleting data folder: %v\n", err)
-	}
 }
 
 func TestParseM3UFromURL(t *testing.T) {
@@ -107,9 +103,18 @@ http://example.com/fox
 	defer mockServer.Close()
 
 	// Test InitializeSQLite and check if the database file exists
-	db, err := database.InitializeSQLite("test")
+	REDIS_ADDR := "127.0.0.1:6379"
+	REDIS_PASS := ""
+	REDIS_DB := 3
+
+	db, err := database.InitializeDb(REDIS_ADDR, REDIS_PASS, REDIS_DB)
 	if err != nil {
-		t.Errorf("InitializeSQLite returned error: %v", err)
+		t.Errorf("InitializeDb returned error: %v", err)
+	}
+
+	err = db.ClearDb()
+	if err != nil {
+		t.Errorf("ClearDb returned error: %v", err)
 	}
 
 	// Test the parseM3UFromURL function with the mock server URL
@@ -168,17 +173,6 @@ http://example.com/fox
 			t.Errorf("Stream with Title %s does not match expected content", stored.Title)
 			t.Errorf("Stored: %#v, Expected: %#v", stored, expected)
 		}
-	}
-
-	err = db.DeleteSQLite()
-	if err != nil {
-		t.Errorf("DeleteSQLite returned error: %v", err)
-	}
-
-	foldername := filepath.Join(".", "data")
-	err = os.RemoveAll(foldername)
-	if err != nil {
-		t.Errorf("Error deleting data folder: %v\n", err)
 	}
 }
 

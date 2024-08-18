@@ -1,11 +1,12 @@
 # Start from the official Golang image
 FROM golang:bookworm AS build
 
+# hadolint ignore=DL3008
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive \
     apt-get install --assume-yes --no-install-recommends \
-      build-essential=12.9 \
-      musl-tools=1.2.3-1
+      build-essential \
+      musl-tools
 
 # Set the Current Working Directory inside the container
 WORKDIR /app

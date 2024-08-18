@@ -1,438 +1,273 @@
 package database
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"sync"
+	"hash/fnv"
+	"math"
+	"strconv"
+	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/redis/go-redis/v9"
 )
 
 type Instance struct {
-	Sql       *sql.DB
-	FileName  string
-	FileLock  sync.Mutex
-	WriteLock sync.Mutex
+	Redis *redis.Client
+	Ctx   context.Context
 }
 
-func InitializeSQLite(name string) (db *Instance, err error) {
-	db = new(Instance)
+func InitializeDb(addr string, password string, db int) (*Instance, error) {
+	var redisInstance *redis.Client
 
-	db.FileLock.Lock()
-	db.WriteLock.Lock()
-	defer db.FileLock.Unlock()
-	defer db.WriteLock.Unlock()
-
-	foldername := filepath.Join(".", "data")
-	db.FileName = filepath.Join(foldername, fmt.Sprintf("%s.db", name))
-
-	err = os.MkdirAll(foldername, 0755)
-	if err != nil {
-		return nil, fmt.Errorf("error creating data folder: %v\n", err)
+	if password == "" {
+		redisInstance = redis.NewClient(&redis.Options{
+			Addr: addr,
+			DB:   db,
+		})
+	} else {
+		redisInstance = redis.NewClient(&redis.Options{
+			Addr:     addr,
+			Password: password,
+			DB:       db,
+		})
 	}
 
-	file, err := os.OpenFile(db.FileName, os.O_RDWR|os.O_CREATE, 0666)
-	if err != nil {
-		return nil, fmt.Errorf("error creating database file: %v\n", err)
-	}
-	file.Close()
-
-	db.Sql, err = sql.Open("sqlite3", db.FileName)
-	if err != nil {
-		return nil, fmt.Errorf("error opening SQLite database: %v\n", err)
+	if err := redisInstance.Ping(context.Background()).Err(); err != nil {
+		return nil, fmt.Errorf("error connecting to Redis: %v", err)
 	}
 
-	_, err = db.Sql.Exec("PRAGMA journal_mode=WAL;")
-	if err != nil {
-		return nil, fmt.Errorf("error enabling wal mode: %v\n", err)
-	}
-
-	_, err = db.Sql.Exec("PRAGMA synchronous=normal;")
-	if err != nil {
-		return nil, fmt.Errorf("error enabling wal mode: %v\n", err)
-	}
-
-	_, err = db.Sql.Exec("PRAGMA journal_size_limit=6144000;")
-	if err != nil {
-		return nil, fmt.Errorf("error enabling wal mode: %v\n", err)
-	}
-
-	// Create table if not exists
-	_, err = db.Sql.Exec(`
-		CREATE TABLE IF NOT EXISTS streams (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			title TEXT UNIQUE,
-			tvg_id TEXT,
-			logo_url TEXT,
-			group_name TEXT
-		)
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("error creating table: %v\n", err)
-	}
-
-	_, err = db.Sql.Exec(`
-		CREATE TABLE IF NOT EXISTS stream_urls (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			stream_id INTEGER,
-			content TEXT,
-			m3u_index INTEGER,
-			FOREIGN KEY(stream_id) REFERENCES streams(id)
-		)
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("error creating table: %v\n", err)
-	}
-
-	return
+	return &Instance{Redis: redisInstance, Ctx: context.Background()}, nil
 }
 
-// DeleteSQLite deletes the SQLite database file.
-func (db *Instance) DeleteSQLite() error {
-	db.FileLock.Lock()
-	db.WriteLock.Lock()
-	defer db.FileLock.Unlock()
-	defer db.WriteLock.Unlock()
-
-	_ = db.Sql.Close()
-
-	err := os.Remove(db.FileName)
-	if err != nil {
-		return fmt.Errorf("error deleting database file: %v\n", err)
+func (db *Instance) ClearDb() error {
+	if err := db.Redis.FlushDB(db.Ctx).Err(); err != nil {
+		return fmt.Errorf("error clearing Redis: %v", err)
 	}
-
-	db.Sql = nil
 
 	return nil
 }
 
-func (db *Instance) RenameSQLite(newName string) error {
-	db.FileLock.Lock()
-	db.WriteLock.Lock()
-	defer db.FileLock.Unlock()
-	defer db.WriteLock.Unlock()
-
-	_ = db.Sql.Close()
-
-	foldername := filepath.Join(".", "data")
-	nextFileName := filepath.Join(foldername, fmt.Sprintf("%s.db", newName))
-
-	err := os.Rename(db.FileName, nextFileName)
-	if err != nil {
-		return fmt.Errorf("error renaming database file: %v\n", err)
-	}
-
-	db.FileName = nextFileName
-	db.Sql, err = sql.Open("sqlite3", db.FileName)
-	if err != nil {
-		return fmt.Errorf("error opening SQLite database: %v\n", err)
-	}
-
-	return err
-}
-
-func (db *Instance) SaveToSQLite(streams []StreamInfo) (err error) {
-	db.WriteLock.Lock()
-	defer db.WriteLock.Unlock()
-
-	tx, err := db.Sql.Begin()
-	if err != nil {
-		return fmt.Errorf("error beginning transaction: %v", err)
-	}
-	defer func() {
-		if err != nil {
-			err = tx.Rollback()
-		}
-	}()
-
-	stmt, err := tx.Prepare("INSERT INTO streams(title, tvg_id, logo_url, group_name) VALUES(?, ?, ?, ?)")
-	if err != nil {
-		return fmt.Errorf("error preparing statement: %v", err)
-	}
-	defer stmt.Close()
-
+func (db *Instance) SaveToDb(streams []StreamInfo) error {
 	for _, s := range streams {
-		res, err := stmt.Exec(s.Title, s.TvgID, s.LogoURL, s.Group)
-		if err != nil {
-			return fmt.Errorf("error inserting stream: %v", err)
+		if err := db.InsertStream(s); err != nil {
+			return fmt.Errorf("SaveToDb error: %v", err)
 		}
-
-		streamID, err := res.LastInsertId()
-		if err != nil {
-			return fmt.Errorf("error getting last inserted ID: %v", err)
-		}
-
-		urlStmt, err := tx.Prepare("INSERT INTO stream_urls(stream_id, content, m3u_index) VALUES(?, ?, ?)")
-		if err != nil {
-			return fmt.Errorf("error preparing statement: %v", err)
-		}
-		defer urlStmt.Close()
 
 		for _, u := range s.URLs {
-			_, err := urlStmt.Exec(streamID, u.Content, u.M3UIndex)
-			if err != nil {
-				return fmt.Errorf("error inserting stream URL: %v", err)
+			if err := db.InsertStreamUrl(s, u); err != nil {
+				return fmt.Errorf("SaveToDb error: %v", err)
 			}
 		}
 	}
 
-	err = tx.Commit()
-	if err != nil {
-		return fmt.Errorf("error committing transaction: %v", err)
-	}
-
-	return
+	return nil
 }
 
-func (db *Instance) InsertStream(s StreamInfo) (i int64, err error) {
-	db.WriteLock.Lock()
-	defer db.WriteLock.Unlock()
-
-	tx, err := db.Sql.Begin()
-	if err != nil {
-		return -1, fmt.Errorf("error beginning transaction: %v", err)
-	}
-	defer func() {
-		if err != nil {
-			err = tx.Rollback()
-		}
-	}()
-
-	stmt, err := tx.Prepare("INSERT INTO streams(title, tvg_id, logo_url, group_name) VALUES(?, ?, ?, ?)")
-	if err != nil {
-		return -1, fmt.Errorf("error preparing statement: %v", err)
-	}
-	defer stmt.Close()
-
-	res, err := stmt.Exec(s.Title, s.TvgID, s.LogoURL, s.Group)
-	if err != nil {
-		return -1, fmt.Errorf("error inserting stream: %v", err)
+func (db *Instance) InsertStream(s StreamInfo) error {
+	streamKey := fmt.Sprintf("stream:%s", s.Title)
+	streamData := map[string]interface{}{
+		"title":      s.Title,
+		"tvg_id":     s.TvgID,
+		"logo_url":   s.LogoURL,
+		"group_name": s.Group,
 	}
 
-	streamID, err := res.LastInsertId()
-	if err != nil {
-		return -1, fmt.Errorf("error getting last inserted ID: %v", err)
+	if err := db.Redis.HSet(db.Ctx, streamKey, streamData).Err(); err != nil {
+		return fmt.Errorf("error inserting stream to Redis: %v", err)
 	}
 
-	err = tx.Commit()
-	if err != nil {
-		return -1, fmt.Errorf("error committing transaction: %v", err)
+	// Add to the sorted set with tvg_id as the score
+	h := fnv.New64a()
+	h.Write([]byte(s.TvgID))
+	hash := h.Sum64()
+	tvgIDScore := float64(hash) / math.MaxUint64
+
+	if err := db.Redis.ZAdd(db.Ctx, "streams_sorted_by_tvg_id", redis.Z{
+		Score:  tvgIDScore,
+		Member: streamKey,
+	}).Err(); err != nil {
+		return fmt.Errorf("error adding stream to sorted set: %v", err)
 	}
-	return streamID, err
+
+	return nil
 }
 
-func (db *Instance) InsertStreamUrl(id int64, url StreamURL) (i int64, err error) {
-	db.WriteLock.Lock()
-	defer db.WriteLock.Unlock()
-
-	tx, err := db.Sql.Begin()
-	if err != nil {
-		return -1, fmt.Errorf("error beginning transaction: %v", err)
-	}
-	defer func() {
-		if err != nil {
-			err = tx.Rollback()
-		}
-	}()
-
-	urlStmt, err := tx.Prepare("INSERT INTO stream_urls(stream_id, content, m3u_index) VALUES(?, ?, ?)")
-	if err != nil {
-		return -1, fmt.Errorf("error preparing statement: %v", err)
-	}
-	defer urlStmt.Close()
-
-	res, err := urlStmt.Exec(id, url.Content, url.M3UIndex)
-	if err != nil {
-		return -1, fmt.Errorf("error inserting stream URL: %v", err)
+func (db *Instance) InsertStreamUrl(s StreamInfo, url StreamURL) error {
+	streamKey := fmt.Sprintf("stream:%s:url:%d", s.Title, url.M3UIndex)
+	urlData := map[string]interface{}{
+		"content":   url.Content,
+		"m3u_index": url.M3UIndex,
 	}
 
-	insertedId, err := res.LastInsertId()
-	if err != nil {
-		return -1, fmt.Errorf("error getting last inserted ID: %v", err)
+	if err := db.Redis.HSet(db.Ctx, streamKey, urlData).Err(); err != nil {
+		return fmt.Errorf("error inserting stream URL to Redis: %v", err)
 	}
 
-	err = tx.Commit()
-	if err != nil {
-		return -1, fmt.Errorf("error committing transaction: %v", err)
-	}
-
-	return insertedId, err
+	return nil
 }
 
 func (db *Instance) DeleteStreamByTitle(title string) error {
-	db.WriteLock.Lock()
-	defer db.WriteLock.Unlock()
+	streamKey := fmt.Sprintf("stream:%s", title)
 
-	tx, err := db.Sql.Begin()
+	// Delete associated URLs
+	keys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", streamKey)).Result()
 	if err != nil {
-		return fmt.Errorf("error beginning transaction: %v", err)
+		return fmt.Errorf("error finding associated URLs: %v", err)
 	}
-	defer func() {
-		if err != nil {
-			err = tx.Rollback()
+	for _, key := range keys {
+		if err := db.Redis.Del(db.Ctx, key).Err(); err != nil {
+			return fmt.Errorf("error deleting stream URL from Redis: %v", err)
 		}
-	}()
-
-	stmt, err := tx.Prepare("DELETE FROM streams WHERE title = ?")
-	if err != nil {
-		return fmt.Errorf("error preparing statement: %v", err)
-	}
-	defer stmt.Close()
-
-	_, err = stmt.Exec(title)
-	if err != nil {
-		return fmt.Errorf("error deleting stream: %v", err)
 	}
 
-	err = tx.Commit()
-	if err != nil {
-		return fmt.Errorf("error committing transaction: %v", err)
+	// Delete from the sorted set
+	if err := db.Redis.ZRem(db.Ctx, "streams_sorted_by_tvg_id", streamKey).Err(); err != nil {
+		return fmt.Errorf("error removing stream from sorted set: %v", err)
+	}
+
+	// Delete the stream itself
+	if err := db.Redis.Del(db.Ctx, streamKey).Err(); err != nil {
+		return fmt.Errorf("error deleting stream from Redis: %v", err)
 	}
 
 	return nil
 }
 
-func (db *Instance) DeleteStreamURL(streamURLID int64) error {
-	db.WriteLock.Lock()
-	defer db.WriteLock.Unlock()
-
-	tx, err := db.Sql.Begin()
-	if err != nil {
-		return fmt.Errorf("error beginning transaction: %v", err)
-	}
-	defer func() {
-		if err != nil {
-			err = tx.Rollback()
-		}
-	}()
-
-	stmt, err := tx.Prepare("DELETE FROM stream_urls WHERE id = ?")
-	if err != nil {
-		return fmt.Errorf("error preparing statement: %v", err)
-	}
-	defer stmt.Close()
-
-	_, err = stmt.Exec(streamURLID)
-	if err != nil {
-		return fmt.Errorf("error deleting stream URL: %v", err)
-	}
-
-	err = tx.Commit()
-	if err != nil {
-		return fmt.Errorf("error committing transaction: %v", err)
+func (db *Instance) DeleteStreamURL(s StreamInfo, m3uIndex int) error {
+	if err := db.Redis.Del(db.Ctx, fmt.Sprintf("stream:%s:url:%d", s.Title, m3uIndex)).Err(); err != nil {
+		return fmt.Errorf("error deleting stream URL from Redis: %v", err)
 	}
 
 	return nil
 }
 
-func (db *Instance) GetStreamByTitle(title string) (s StreamInfo, err error) {
-	rows, err := db.Sql.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams WHERE title = ?", title)
+func (db *Instance) GetStreamByTitle(title string) (StreamInfo, error) {
+	streamKey := fmt.Sprintf("stream:%s", title)
+	streamData, err := db.Redis.HGetAll(db.Ctx, streamKey).Result()
 	if err != nil {
-		return s, fmt.Errorf("error querying streams: %v", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		err = rows.Scan(&s.DbId, &s.Title, &s.TvgID, &s.LogoURL, &s.Group)
-		if err != nil {
-			return s, fmt.Errorf("error scanning stream: %v", err)
-		}
-
-		urlRows, err := db.Sql.Query("SELECT id, content, m3u_index FROM stream_urls WHERE stream_id = ? ORDER BY m3u_index ASC", s.DbId)
-		if err != nil {
-			return s, fmt.Errorf("error querying stream URLs: %v", err)
-		}
-		defer urlRows.Close()
-
-		var urls []StreamURL
-		for urlRows.Next() {
-			var u StreamURL
-			err := urlRows.Scan(&u.DbId, &u.Content, &u.M3UIndex)
-			if err != nil {
-				return s, fmt.Errorf("error scanning stream URL: %v", err)
-			}
-			urls = append(urls, u)
-		}
-		if err := urlRows.Err(); err != nil {
-			return s, fmt.Errorf("error iterating over URL rows: %v", err)
-		}
-
-		s.URLs = urls
-		if err := rows.Err(); err != nil {
-			return s, fmt.Errorf("error iterating over rows: %v", err)
-		}
+		return StreamInfo{}, fmt.Errorf("error getting stream from Redis: %v", err)
 	}
 
-	if err := rows.Err(); err != nil {
-		return s, fmt.Errorf("error iterating over rows: %v", err)
+	if len(streamData) == 0 {
+		return StreamInfo{}, fmt.Errorf("stream not found: %s", title)
+	}
+
+	s := StreamInfo{
+		Title:   streamData["title"],
+		TvgID:   streamData["tvg_id"],
+		LogoURL: streamData["logo_url"],
+		Group:   streamData["group_name"],
+	}
+
+	// Fetch URLs
+	keys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", streamKey)).Result()
+	if err != nil {
+		return s, fmt.Errorf("error finding URLs for stream: %v", err)
+	}
+
+	for _, key := range keys {
+		urlData, err := db.Redis.HGetAll(db.Ctx, key).Result()
+		if err != nil {
+			return s, fmt.Errorf("error getting URL data from Redis: %v", err)
+		}
+
+		m3uIndex, _ := strconv.Atoi(urlData["m3u_index"])
+		u := StreamURL{
+			Content:  urlData["content"],
+			M3UIndex: m3uIndex,
+		}
+		s.URLs = append(s.URLs, u)
 	}
 
 	return s, nil
 }
 
-func (db *Instance) GetStreamUrlByUrlAndIndex(url string, m3u_index int) (s StreamURL, err error) {
-	rows, err := db.Sql.Query("SELECT id, content, m3u_index FROM stream_urls WHERE content = ? AND m3u_index = ? ORDER BY m3u_index ASC", url, m3u_index)
+func (db *Instance) GetStreamUrlByUrlAndIndex(url string, m3u_index int) (StreamURL, error) {
+	keys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("stream:*:url:%d", m3u_index)).Result()
 	if err != nil {
-		return s, fmt.Errorf("error querying streams: %v", err)
+		return StreamURL{}, fmt.Errorf("error finding URL by index: %v", err)
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		err = rows.Scan(&s.DbId, &s.Content, &s.M3UIndex)
+	for _, key := range keys {
+		urlData, err := db.Redis.HGetAll(db.Ctx, key).Result()
 		if err != nil {
-			return s, fmt.Errorf("error scanning stream: %v", err)
+			return StreamURL{}, fmt.Errorf("error getting URL data from Redis: %v", err)
+		}
+
+		if urlData["content"] == url {
+			m3uIndex, _ := strconv.Atoi(urlData["m3u_index"])
+			return StreamURL{
+				Content:  urlData["content"],
+				M3UIndex: m3uIndex,
+			}, nil
 		}
 	}
 
-	if err := rows.Err(); err != nil {
-		return s, fmt.Errorf("error iterating over rows: %v", err)
-	}
-
-	return s, nil
+	return StreamURL{}, fmt.Errorf("stream URL not found: %s, index: %d", url, m3u_index)
 }
 
 func (db *Instance) GetStreams() ([]StreamInfo, error) {
-	rows, err := db.Sql.Query("SELECT id, title, tvg_id, logo_url, group_name FROM streams ORDER BY CAST(tvg_id AS INTEGER) ASC")
+	keys, err := db.Redis.ZRange(db.Ctx, "streams_sorted_by_tvg_id", 0, -1).Result()
 	if err != nil {
-		return nil, fmt.Errorf("error querying streams: %v", err)
+		return nil, fmt.Errorf("error retrieving streams: %v", err)
 	}
-	defer rows.Close()
 
 	var streams []StreamInfo
-	for rows.Next() {
-		var s StreamInfo
-		err := rows.Scan(&s.DbId, &s.Title, &s.TvgID, &s.LogoURL, &s.Group)
-		if err != nil {
-			return nil, fmt.Errorf("error scanning stream: %v", err)
-		}
-
-		urlRows, err := db.Sql.Query("SELECT id, content, m3u_index FROM stream_urls WHERE stream_id = ? ORDER BY m3u_index ASC", s.DbId)
-		if err != nil {
-			return nil, fmt.Errorf("error querying stream URLs: %v", err)
-		}
-		defer urlRows.Close()
-
-		var urls []StreamURL
-		for urlRows.Next() {
-			var u StreamURL
-			err := urlRows.Scan(&u.DbId, &u.Content, &u.M3UIndex)
+	for _, key := range keys {
+		if !strings.Contains(key, ":url:") { // Exclude URL keys
+			s, err := db.GetStreamByTitle(extractTitle(key))
 			if err != nil {
-				return nil, fmt.Errorf("error scanning stream URL: %v", err)
+				return nil, err
 			}
-			urls = append(urls, u)
+			streams = append(streams, s)
 		}
-		if err := urlRows.Err(); err != nil {
-			return nil, fmt.Errorf("error iterating over URL rows: %v", err)
-		}
-
-		s.URLs = urls
-		streams = append(streams, s)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating over rows: %v", err)
 	}
 
 	return streams, nil
+}
+
+// GetConcurrency retrieves the concurrency count for the given m3uIndex
+func (db *Instance) GetConcurrency(m3uIndex int) (int, error) {
+	key := "concurrency:" + strconv.Itoa(m3uIndex)
+	countStr, err := db.Redis.Get(db.Ctx, key).Result()
+	if err == redis.Nil {
+		return 0, nil // Key does not exist
+	} else if err != nil {
+		return 0, err
+	}
+
+	count, err := strconv.Atoi(countStr)
+	if err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
+// IncrementConcurrency increments the concurrency count for the given m3uIndex
+func (db *Instance) IncrementConcurrency(m3uIndex int) error {
+	key := "concurrency:" + strconv.Itoa(m3uIndex)
+	return db.Redis.Incr(db.Ctx, key).Err()
+}
+
+// DecrementConcurrency decrements the concurrency count for the given m3uIndex
+func (db *Instance) DecrementConcurrency(m3uIndex int) error {
+	key := "concurrency:" + strconv.Itoa(m3uIndex)
+	return db.Redis.Decr(db.Ctx, key).Err()
+}
+
+func (db *Instance) ClearConcurrencies() error {
+	if err := db.Redis.Del(db.Ctx, "concurrency:*").Err(); err != nil {
+		return fmt.Errorf("error clear concurrencies from Redis: %v", err)
+	}
+
+	return nil
+}
+
+func extractTitle(key string) string {
+	parts := strings.Split(key, ":")
+	if len(parts) > 1 {
+		return parts[1]
+	}
+	return ""
 }
