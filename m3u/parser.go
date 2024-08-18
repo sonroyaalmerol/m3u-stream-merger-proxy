@@ -64,40 +64,14 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 }
 
 func insertStreamToDb(db *database.Instance, currentStream database.StreamInfo) error {
-	existingStream, err := db.GetStreamByTitle(currentStream.Title)
-	if err != nil {
-		return fmt.Errorf("GetStreamByTitle error (title: %s): %v", currentStream.Title, err)
-	}
-
-	if existingStream.Title != currentStream.Title {
-		if os.Getenv("DEBUG") == "true" {
-			log.Printf("Creating new database entry: %s\n", currentStream.Title)
-		}
-		err = db.InsertStream(currentStream)
-		if err != nil {
-			return fmt.Errorf("InsertStream error (title: %s): %v", currentStream.Title, err)
-		}
-	} else {
-		if os.Getenv("DEBUG") == "true" {
-			log.Printf("Using existing database entry: %s\n", existingStream.Title)
-		}
-	}
-
 	if os.Getenv("DEBUG") == "true" {
 		log.Printf("Adding stream url entry to %s\n", currentStream.Title)
 	}
 
 	for _, currentStreamUrl := range currentStream.URLs {
-		existingUrl, err := db.GetStreamUrlByUrlAndIndex(currentStreamUrl.Content, currentStreamUrl.M3UIndex)
+		err := db.InsertStreamUrl(currentStream, currentStreamUrl)
 		if err != nil {
-			return fmt.Errorf("GetStreamUrlByUrlAndIndex error (url: %s): %v", currentStreamUrl.Content, err)
-		}
-
-		if existingUrl.Content != currentStreamUrl.Content || existingUrl.M3UIndex != currentStreamUrl.M3UIndex {
-			err = db.InsertStreamUrl(currentStream, currentStreamUrl)
-			if err != nil {
-				return fmt.Errorf("InsertStreamUrl error (title: %s): %v", currentStream.Title, err)
-			}
+			return fmt.Errorf("InsertStreamUrl error (title: %s): %v", currentStream.Title, err)
 		}
 	}
 
