@@ -19,16 +19,16 @@ func loadBalancer(stream database.StreamInfo) (*http.Response, *database.StreamU
 		return db.ConcurrencyPriorityValue(stream.URLs[i].M3UIndex) > db.ConcurrencyPriorityValue(stream.URLs[j].M3UIndex)
 	})
 
+	const maxLaps = 5
 	lap := 0
 	index := 0
-	for {
-		if lap >= 5 {
-			break
-		}
-
+	for lap < maxLaps {
 		if index >= len(stream.URLs) {
 			index = 0
 			lap++
+			if lap >= maxLaps {
+				break
+			}
 		}
 
 		url := stream.URLs[index]
