@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-func loadBalancer(stream database.StreamInfo, prevUrl *database.StreamURL) (*http.Response, *database.StreamURL, error) {
+func loadBalancer(stream database.StreamInfo) (*http.Response, *database.StreamURL, error) {
 	sort.Slice(stream.URLs, func(i, j int) bool {
 		return db.ConcurrencyPriorityValue(stream.URLs[i].M3UIndex) > db.ConcurrencyPriorityValue(stream.URLs[j].M3UIndex)
 	})
@@ -33,12 +33,6 @@ func loadBalancer(stream database.StreamInfo, prevUrl *database.StreamURL) (*htt
 
 		url := stream.URLs[index]
 		index++
-
-		if prevUrl != nil {
-			if prevUrl.M3UIndex == url.M3UIndex {
-				continue
-			}
-		}
 
 		if db.CheckConcurrency(url.M3UIndex) {
 			log.Printf("Concurrency limit reached for M3U_%d: %s", url.M3UIndex+1, url.Content)
@@ -113,7 +107,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 		return
 	}
 
-	resp, selectedUrl, err := loadBalancer(stream, nil)
+	resp, selectedUrl, err := loadBalancer(stream)
 	if err != nil {
 		http.Error(w, "Error fetching stream. Exhausted all streams.", http.StatusInternalServerError)
 		return
@@ -140,8 +134,14 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 		default:
 			exitStatus := make(chan int)
 
+			currentUrl := selectedUrl
+			currentResp := resp
+
 			log.Printf("Proxying %s to %s\n", r.RemoteAddr, selectedUrl.Content)
-			go proxyStream(selectedUrl, resp, r, w, exitStatus)
+			go func(url *database.StreamURL, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan int) {
+				proxyStream(url, resp, r, w, exitStatus)
+			}(currentUrl, currentResp, r, w, exitStatus)
+
 			streamExitCode := <-exitStatus
 			log.Printf("Exit code %d received from %s\n", streamExitCode, selectedUrl.Content)
 
@@ -149,8 +149,8 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 				// Retry on server-side connection errors
 				log.Printf("Server connection failed: %s\n", selectedUrl.Content)
 				log.Printf("Retrying other servers...\n")
-				resp.Body.Close()
-				resp, selectedUrl, err = loadBalancer(stream, selectedUrl)
+				currentResp.Body.Close()
+				resp, selectedUrl, err = loadBalancer(stream)
 				if err != nil {
 					http.Error(w, "Error fetching stream. Exhausted all streams.", http.StatusInternalServerError)
 					return
