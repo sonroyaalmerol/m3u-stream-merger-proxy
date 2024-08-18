@@ -29,7 +29,8 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 	lineWithoutPairs := line
 
 	// Define a regular expression to capture key-value pairs
-	regex := regexp.MustCompile(`([a-zA-Z0-9_-]+)=("[^"]+"|[^",]+)`)
+	// regex := regexp.MustCompile(`([a-zA-Z0-9_-]+)=("[^"]+"|[^",]+)`)
+	regex := regexp.MustCompile(`([a-zA-Z0-9_-]+)="([^"]+)"`)
 
 	// Find all key-value pairs in the line
 	matches := regex.FindAllStringSubmatch(line, -1)
