@@ -71,10 +71,10 @@ services:
   redis:
     image: redis
     restart: always
-    # command to enable redis persistence
-    command: redis-server --save 60 1
-    volumes:
-      - ./data:/data # should be included for redis persistence
+    # Redis persistence is OPTIONAL. This will allow you to reuse the database across restarts.
+    # command: redis-server --save 60 1
+    # volumes:
+    #   - ./data:/data
 ```
 
 Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
