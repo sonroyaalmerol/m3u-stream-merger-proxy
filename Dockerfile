@@ -1,13 +1,6 @@
 # Start from the official Golang image
 FROM golang:bookworm AS build
 
-# hadolint ignore=DL3008
-RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive \
-    apt-get install --assume-yes --no-install-recommends \
-      build-essential \
-      musl-tools
-
 # Set the Current Working Directory inside the container
 WORKDIR /app
 
@@ -21,7 +14,7 @@ RUN go mod download
 COPY . .
 
 RUN go test ./... \
-  && CGO_ENABLED=1 CC=musl-gcc go build -ldflags='-s -w -extldflags "-static"' -o main .
+  && go build -ldflags='-s -w -extldflags "-static"' -o main .
 
 ####################
 
