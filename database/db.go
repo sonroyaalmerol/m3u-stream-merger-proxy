@@ -117,21 +117,25 @@ func (db *Instance) InsertStream(s StreamInfo) (int64, error) {
 		return -1, fmt.Errorf("error adding stream to sorted set: %v", err)
 	}
 
+	for _, url := range s.URLs {
+		db.InsertStreamUrl(s, url)
+	}
+
 	return s.DbId, nil
 }
 
-func (db *Instance) InsertStreamUrl(id int64, url StreamURL) (int64, error) {
-	streamKey := fmt.Sprintf("stream:%d:url:%d", id, url.M3UIndex)
+func (db *Instance) InsertStreamUrl(s StreamInfo, url StreamURL) (string, error) {
+	streamKey := fmt.Sprintf("stream:%s:url:%d", s.Title, url.M3UIndex)
 	urlData := map[string]interface{}{
 		"content":   url.Content,
 		"m3u_index": url.M3UIndex,
 	}
 
 	if err := db.Redis.HSet(db.Ctx, streamKey, urlData).Err(); err != nil {
-		return -1, fmt.Errorf("error inserting stream URL to Redis: %v", err)
+		return "", fmt.Errorf("error inserting stream URL to Redis: %v", err)
 	}
 
-	return id, nil
+	return streamKey, nil
 }
 
 func (db *Instance) DeleteStreamByTitle(title string) error {
