@@ -39,6 +39,8 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 		switch strings.ToLower(key) {
 		case "tvg-id":
 			currentStream.TvgID = tvgIdParser(value)
+		case "tvg-chno":
+			currentStream.TvgChNo = tvgChNoParser(value)
 		case "tvg-name":
 			currentStream.Title = tvgNameParser(value)
 		case "group-title":

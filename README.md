@@ -88,6 +88,7 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | REDIS_ADDR | Set Redis server address | N/A | e.g. localhost:6379 |
 | REDIS_PASS | Set Redis server password | N/A | Any string |
 | REDIS_DB | Set Redis server database to be used | 0 | 0 to 15 |
+| SORTING_KEY | Set tag to be used for sorting the stream list | tvg-id | tvg-id, tvg-chno |
 | USER_AGENT                  | Set the User-Agent of HTTP requests.                    | IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)    |  Any valid user agent        |
 | ~~LOAD_BALANCING_MODE~~ (removed on version 0.10.0)                | Set load balancing algorithm to a specific mode | brute-force    | brute-force/round-robin   |
 | PARSER_WORKERS | Set number of workers to spawn for M3U parsing. | 5 | Any positive integer |

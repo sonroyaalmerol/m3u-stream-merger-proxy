@@ -34,6 +34,10 @@ func tvgIdParser(value string) string {
 	return generalParser(value)
 }
 
+func tvgChNoParser(value string) string {
+	return generalParser(value)
+}
+
 func groupTitleParser(value string) string {
 	return generalParser(value)
 }
