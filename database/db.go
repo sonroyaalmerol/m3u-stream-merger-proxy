@@ -12,8 +12,9 @@ import (
 )
 
 type Instance struct {
-	Redis *redis.Client
-	Ctx   context.Context
+	Redis       *redis.Client
+	Ctx         context.Context
+	TvgIdExists int
 }
 
 func InitializeDb(addr string, password string, db int) (*Instance, error) {
@@ -36,7 +37,7 @@ func InitializeDb(addr string, password string, db int) (*Instance, error) {
 		return nil, fmt.Errorf("error connecting to Redis: %v", err)
 	}
 
-	return &Instance{Redis: redisInstance, Ctx: context.Background()}, nil
+	return &Instance{Redis: redisInstance, Ctx: context.Background(), TvgIdExists: -1}, nil
 }
 
 func (db *Instance) ClearDb() error {
@@ -72,21 +73,31 @@ func (db *Instance) InsertStream(s StreamInfo) error {
 		"group_name": s.Group,
 	}
 
+	if db.TvgIdExists == -1 {
+		if s.TvgID != "" {
+			db.TvgIdExists = 1
+		} else {
+			db.TvgIdExists = 0
+		}
+	}
+
 	if err := db.Redis.HSet(db.Ctx, streamKey, streamData).Err(); err != nil {
 		return fmt.Errorf("error inserting stream to Redis: %v", err)
 	}
 
-	// Add to the sorted set with tvg_id as the score
-	h := fnv.New64a()
-	h.Write([]byte(s.TvgID))
-	hash := h.Sum64()
-	tvgIDScore := float64(hash) / math.MaxUint64
+	if db.TvgIdExists == 1 {
+		// Add to the sorted set with tvg_id as the score
+		h := fnv.New64a()
+		h.Write([]byte(s.TvgID))
+		hash := h.Sum64()
+		tvgIDScore := float64(hash) / math.MaxUint64
 
-	if err := db.Redis.ZAdd(db.Ctx, "streams_sorted_by_tvg_id", redis.Z{
-		Score:  tvgIDScore,
-		Member: streamKey,
-	}).Err(); err != nil {
-		return fmt.Errorf("error adding stream to sorted set: %v", err)
+		if err := db.Redis.ZAdd(db.Ctx, "streams_sorted_by_tvg_id", redis.Z{
+			Score:  tvgIDScore,
+			Member: streamKey,
+		}).Err(); err != nil {
+			return fmt.Errorf("error adding stream to sorted set: %v", err)
+		}
 	}
 
 	return nil
@@ -207,9 +218,19 @@ func (db *Instance) GetStreamUrlByUrlAndIndex(url string, m3u_index int) (Stream
 }
 
 func (db *Instance) GetStreams() ([]StreamInfo, error) {
-	keys, err := db.Redis.ZRange(db.Ctx, "streams_sorted_by_tvg_id", 0, -1).Result()
-	if err != nil {
-		return nil, fmt.Errorf("error retrieving streams: %v", err)
+	var keys []string
+	var err error
+
+	if db.TvgIdExists == 1 {
+		keys, err = db.Redis.ZRange(db.Ctx, "streams_sorted_by_tvg_id", 0, -1).Result()
+		if err != nil {
+			return nil, fmt.Errorf("error retrieving streams: %v", err)
+		}
+	} else {
+		keys, err = db.Redis.Keys(db.Ctx, "stream:*").Result()
+		if err != nil {
+			return nil, fmt.Errorf("error retrieving streams: %v", err)
+		}
 	}
 
 	var streams []StreamInfo
