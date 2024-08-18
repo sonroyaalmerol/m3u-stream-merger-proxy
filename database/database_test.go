@@ -22,6 +22,7 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 
 	// Test LoadFromDb with existing data in the database
 	expected := []StreamInfo{{
+		Slug:    "stream1",
 		Title:   "stream1",
 		TvgID:   "test1",
 		LogoURL: "http://test.com/image.png",
@@ -31,6 +32,7 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 			M3UIndex: 1,
 		}},
 	}, {
+		Slug:    "stream1",
 		Title:   "stream2",
 		TvgID:   "test2",
 		LogoURL: "http://test2.com/image.png",
