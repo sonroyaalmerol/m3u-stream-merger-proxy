@@ -59,7 +59,7 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 
 		// Write #EXTINF line
 		_, err := fmt.Fprintf(w, "#EXTINF:-1 channelID=\"x-ID.%s\" tvg-chno=\"%s\" tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
-			stream.TvgID, stream.TvgID, stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title)
+			stream.TvgID, stream.TvgChNo, stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title)
 		if err != nil {
 			continue
 		}

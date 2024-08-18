@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 
@@ -68,6 +69,7 @@ func (db *Instance) InsertStream(s StreamInfo) error {
 	streamData := map[string]interface{}{
 		"title":      s.Title,
 		"tvg_id":     s.TvgID,
+		"tvg_chno":   s.TvgChNo,
 		"logo_url":   s.LogoURL,
 		"group_name": s.Group,
 	}
@@ -78,12 +80,12 @@ func (db *Instance) InsertStream(s StreamInfo) error {
 
 	// Add to the sorted set with tvg_id as the score
 	h := fnv.New64a()
-	h.Write([]byte(s.TvgID))
+	h.Write([]byte(getSortingValue(s)))
 	hash := h.Sum64()
-	tvgIDScore := float64(hash) / math.MaxUint64
+	sortScore := float64(hash) / math.MaxUint64
 
-	if err := db.Redis.ZAdd(db.Ctx, "streams_sorted_by_tvg_id", redis.Z{
-		Score:  tvgIDScore,
+	if err := db.Redis.ZAdd(db.Ctx, "streams_sorted", redis.Z{
+		Score:  sortScore,
 		Member: streamKey,
 	}).Err(); err != nil {
 		return fmt.Errorf("error adding stream to sorted set: %v", err)
@@ -121,7 +123,7 @@ func (db *Instance) DeleteStreamByTitle(title string) error {
 	}
 
 	// Delete from the sorted set
-	if err := db.Redis.ZRem(db.Ctx, "streams_sorted_by_tvg_id", streamKey).Err(); err != nil {
+	if err := db.Redis.ZRem(db.Ctx, "streams_sorted", streamKey).Err(); err != nil {
 		return fmt.Errorf("error removing stream from sorted set: %v", err)
 	}
 
@@ -155,6 +157,7 @@ func (db *Instance) GetStreamByTitle(title string) (StreamInfo, error) {
 	s := StreamInfo{
 		Title:   streamData["title"],
 		TvgID:   streamData["tvg_id"],
+		TvgChNo: streamData["tvg_chno"],
 		LogoURL: streamData["logo_url"],
 		Group:   streamData["group_name"],
 	}
@@ -207,7 +210,7 @@ func (db *Instance) GetStreamUrlByUrlAndIndex(url string, m3u_index int) (Stream
 }
 
 func (db *Instance) GetStreams() ([]StreamInfo, error) {
-	keys, err := db.Redis.ZRange(db.Ctx, "streams_sorted_by_tvg_id", 0, -1).Result()
+	keys, err := db.Redis.ZRange(db.Ctx, "streams_sorted", 0, -1).Result()
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving streams: %v", err)
 	}
@@ -270,4 +273,17 @@ func extractTitle(key string) string {
 		return parts[1]
 	}
 	return ""
+}
+
+func getSortingValue(s StreamInfo) string {
+	key := os.Getenv("SORTING_KEY")
+
+	switch key {
+	case "tvg-id":
+		return s.TvgID + s.Title
+	case "tvg-chno":
+		return s.TvgChNo + s.Title
+	}
+
+	return s.TvgID + s.Title
 }
