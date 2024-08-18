@@ -13,9 +13,8 @@ import (
 )
 
 type Instance struct {
-	Redis      *redis.Client
-	Ctx        context.Context
-	SortingKey string
+	Redis *redis.Client
+	Ctx   context.Context
 }
 
 func InitializeDb(addr string, password string, db int) (*Instance, error) {
@@ -38,7 +37,7 @@ func InitializeDb(addr string, password string, db int) (*Instance, error) {
 		return nil, fmt.Errorf("error connecting to Redis: %v", err)
 	}
 
-	return &Instance{Redis: redisInstance, Ctx: context.Background(), SortingKey: "tvg-id"}, nil
+	return &Instance{Redis: redisInstance, Ctx: context.Background()}, nil
 }
 
 func (db *Instance) ClearDb() error {
