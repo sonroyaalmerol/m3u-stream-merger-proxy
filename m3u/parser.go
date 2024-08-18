@@ -108,7 +108,7 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 	var buffer bytes.Buffer
 	var grps []string
 
-	includeGroups := os.Getenv(fmt.Sprintf("INCLUDE_GROUPS_%d", m3uIndex))
+	includeGroups := os.Getenv(fmt.Sprintf("INCLUDE_GROUPS_%d", m3uIndex+1))
 	if includeGroups != "" {
 		grps = strings.Split(includeGroups, ",")
 	}
