@@ -13,6 +13,7 @@ RUN go mod download
 # Copy the source code from the current directory to the Working Directory inside the container
 COPY . .
 
-RUN go build -ldflags='-s -w' -o main .
+RUN go test ./... \
+  && go build -ldflags='-s -w' -o main .
 
 ENTRYPOINT ["/app/main"]

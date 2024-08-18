@@ -3,7 +3,6 @@ package database
 import (
 	"context"
 	"fmt"
-	"hash/fnv"
 	"math"
 	"os"
 	"strconv"
@@ -79,10 +78,20 @@ func (db *Instance) InsertStream(s StreamInfo) error {
 	}
 
 	// Add to the sorted set with tvg_id as the score
-	h := fnv.New64a()
-	h.Write([]byte(getSortingValue(s)))
-	hash := h.Sum64()
-	sortScore := float64(hash) / math.MaxUint64
+	maxLen := 20
+	base := float64(256)
+
+	// Normalize length by padding the string
+	paddedString := strings.ToLower(getSortingValue(s))
+	if len(paddedString) < maxLen {
+		paddedString = paddedString + strings.Repeat("\x00", maxLen-len(paddedString))
+	}
+
+	sortScore := 0.0
+	for i := 0; i < len(paddedString); i++ {
+		charValue := float64(paddedString[i])
+		sortScore += charValue / math.Pow(base, float64(i+1))
+	}
 
 	if err := db.Redis.ZAdd(db.Ctx, "streams_sorted", redis.Z{
 		Score:  sortScore,
