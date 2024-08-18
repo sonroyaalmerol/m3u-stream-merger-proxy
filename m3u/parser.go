@@ -144,15 +144,20 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 			numWorkers = 5
 		}
 
-		streams := []database.StreamInfo{}
+		// Shared slice to collect parsed data
+		var streamInfos []database.StreamInfo
+		var mu sync.Mutex
 
-		// Worker pool
+		// Worker pool for parsing
 		for w := 0; w < numWorkers; w++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				for streamInfo := range streamInfoCh {
-					streams = append(streams, streamInfo)
+					// Collect parsed data
+					mu.Lock()
+					streamInfos = append(streamInfos, streamInfo)
+					mu.Unlock()
 				}
 			}()
 		}
@@ -187,9 +192,10 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 			return fmt.Errorf("scanner error: %v", err)
 		}
 
-		log.Printf("%v", streams)
-		if err := db.SaveToDb(streams); err != nil {
-			log.Printf("M3U Parser error: %v", err)
+		if len(streamInfos) > 0 {
+			if err := db.SaveToDb(streamInfos); err != nil {
+				return fmt.Errorf("failed to save data to database: %v", err)
+			}
 		}
 
 		// Free up memory used by buffer

@@ -78,9 +78,11 @@ func (db *Instance) SaveToDb(streams []StreamInfo) error {
 		})
 	}
 
-	_, err := pipeline.Exec(db.Ctx)
-	if err != nil {
-		return fmt.Errorf("SaveToDb error: %v", err)
+	if len(streams) > 0 {
+		_, err := pipeline.Exec(db.Ctx)
+		if err != nil {
+			return fmt.Errorf("SaveToDb error: %v", err)
+		}
 	}
 
 	return nil
