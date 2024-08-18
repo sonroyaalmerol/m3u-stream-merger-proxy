@@ -22,7 +22,7 @@ func TestGenerateM3UContent(t *testing.T) {
 	// Test InitializeSQLite and check if the database file exists
 	REDIS_ADDR := "127.0.0.1:6379"
 	REDIS_PASS := ""
-	REDIS_DB := 0
+	REDIS_DB := 2
 
 	db, err := database.InitializeDb(REDIS_ADDR, REDIS_PASS, REDIS_DB)
 	if err != nil {
@@ -105,7 +105,7 @@ http://example.com/fox
 	// Test InitializeSQLite and check if the database file exists
 	REDIS_ADDR := "127.0.0.1:6379"
 	REDIS_PASS := ""
-	REDIS_DB := 0
+	REDIS_DB := 3
 
 	db, err := database.InitializeDb(REDIS_ADDR, REDIS_PASS, REDIS_DB)
 	if err != nil {
