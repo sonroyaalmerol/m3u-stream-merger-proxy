@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gosimple/slug"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -64,7 +65,7 @@ func (db *Instance) SaveToDb(streams []StreamInfo) error {
 }
 
 func (db *Instance) InsertStream(s StreamInfo) error {
-	streamKey := fmt.Sprintf("stream:%s", s.Title)
+	streamKey := fmt.Sprintf("stream:%s", s.Slug)
 	streamData := map[string]interface{}{
 		"title":      s.Title,
 		"tvg_id":     s.TvgID,
@@ -104,7 +105,7 @@ func (db *Instance) InsertStream(s StreamInfo) error {
 }
 
 func (db *Instance) InsertStreamUrl(s StreamInfo, url StreamURL) error {
-	streamKey := fmt.Sprintf("stream:%s:url:%d", s.Title, url.M3UIndex)
+	streamKey := fmt.Sprintf("stream:%s:url:%d", s.Slug, url.M3UIndex)
 	urlData := map[string]interface{}{
 		"content":   url.Content,
 		"m3u_index": url.M3UIndex,
@@ -118,7 +119,7 @@ func (db *Instance) InsertStreamUrl(s StreamInfo, url StreamURL) error {
 }
 
 func (db *Instance) DeleteStreamByTitle(title string) error {
-	streamKey := fmt.Sprintf("stream:%s", title)
+	streamKey := fmt.Sprintf("stream:%s", slug.Make(title))
 
 	// Delete associated URLs
 	keys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", streamKey)).Result()
@@ -145,7 +146,7 @@ func (db *Instance) DeleteStreamByTitle(title string) error {
 }
 
 func (db *Instance) DeleteStreamURL(s StreamInfo, m3uIndex int) error {
-	if err := db.Redis.Del(db.Ctx, fmt.Sprintf("stream:%s:url:%d", s.Title, m3uIndex)).Err(); err != nil {
+	if err := db.Redis.Del(db.Ctx, fmt.Sprintf("stream:%s:url:%d", s.Slug, m3uIndex)).Err(); err != nil {
 		return fmt.Errorf("error deleting stream URL from Redis: %v", err)
 	}
 
@@ -153,7 +154,7 @@ func (db *Instance) DeleteStreamURL(s StreamInfo, m3uIndex int) error {
 }
 
 func (db *Instance) GetStreamByTitle(title string) (StreamInfo, error) {
-	streamKey := fmt.Sprintf("stream:%s", title)
+	streamKey := fmt.Sprintf("stream:%s", slug.Make(title))
 	streamData, err := db.Redis.HGetAll(db.Ctx, streamKey).Result()
 	if err != nil {
 		return StreamInfo{}, fmt.Errorf("error getting stream from Redis: %v", err)

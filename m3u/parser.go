@@ -15,6 +15,8 @@ import (
 
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/utils"
+
+	"github.com/gosimple/slug"
 )
 
 func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
@@ -61,6 +63,8 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 	if len(lineCommaSplit) > 1 {
 		currentStream.Title = tvgNameParser(strings.TrimSpace(lineCommaSplit[1]))
 	}
+
+	currentStream.Slug = slug.Make(currentStream.Title)
 
 	return currentStream
 }
