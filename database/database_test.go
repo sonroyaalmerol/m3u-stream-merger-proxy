@@ -22,24 +22,20 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 
 	// Test LoadFromDb with existing data in the database
 	expected := []StreamInfo{{
-		DbId:    1,
 		Title:   "stream1",
 		TvgID:   "test1",
 		LogoURL: "http://test.com/image.png",
 		Group:   "test",
 		URLs: []StreamURL{{
-			DbId:     1,
 			Content:  "testing",
 			M3UIndex: 1,
 		}},
 	}, {
-		DbId:    2,
 		Title:   "stream2",
 		TvgID:   "test2",
 		LogoURL: "http://test2.com/image.png",
 		Group:   "test2",
 		URLs: []StreamURL{{
-			DbId:     2,
 			Content:  "testing2",
 			M3UIndex: 2,
 		}},
@@ -70,7 +66,7 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 		t.Errorf("DeleteStreamByTitle returned error: %v", err)
 	}
 
-	err = db.DeleteStreamURL(expected[0].URLs[0].DbId)
+	err = db.DeleteStreamURL(expected[0], expected[0].URLs[0].M3UIndex)
 	if err != nil {
 		t.Errorf("DeleteStreamURL returned error: %v", err)
 	}

@@ -49,41 +49,13 @@ func (db *Instance) ClearDb() error {
 
 func (db *Instance) SaveToDb(streams []StreamInfo) error {
 	for _, s := range streams {
-		streamKey := fmt.Sprintf("stream:%s", s.Title)
-		streamData := map[string]interface{}{
-			"id":         s.DbId,
-			"title":      s.Title,
-			"tvg_id":     s.TvgID,
-			"logo_url":   s.LogoURL,
-			"group_name": s.Group,
-		}
-
-		if err := db.Redis.HSet(db.Ctx, streamKey, streamData).Err(); err != nil {
-			return fmt.Errorf("error saving stream to Redis: %v", err)
-		}
-
-		// Add to the sorted set with tvg_id as the score
-		h := fnv.New64a()
-		h.Write([]byte(s.TvgID))
-		hash := h.Sum64()
-		tvgIDScore := float64(hash) / math.MaxUint64
-
-		if err := db.Redis.ZAdd(db.Ctx, "streams_sorted_by_tvg_id", redis.Z{
-			Score:  tvgIDScore,
-			Member: streamKey,
-		}).Err(); err != nil {
-			return fmt.Errorf("error adding stream to sorted set: %v", err)
+		if err := db.InsertStream(s); err != nil {
+			return fmt.Errorf("SaveToDb error: %v", err)
 		}
 
 		for _, u := range s.URLs {
-			urlKey := fmt.Sprintf("%s:url:%d", streamKey, u.M3UIndex)
-			urlData := map[string]interface{}{
-				"content":   u.Content,
-				"m3u_index": u.M3UIndex,
-			}
-
-			if err := db.Redis.HSet(db.Ctx, urlKey, urlData).Err(); err != nil {
-				return fmt.Errorf("error saving stream URL to Redis: %v", err)
+			if err := db.InsertStreamUrl(s, u); err != nil {
+				return fmt.Errorf("SaveToDb error: %v", err)
 			}
 		}
 	}
@@ -91,7 +63,7 @@ func (db *Instance) SaveToDb(streams []StreamInfo) error {
 	return nil
 }
 
-func (db *Instance) InsertStream(s StreamInfo) (int64, error) {
+func (db *Instance) InsertStream(s StreamInfo) error {
 	streamKey := fmt.Sprintf("stream:%s", s.Title)
 	streamData := map[string]interface{}{
 		"title":      s.Title,
@@ -101,7 +73,7 @@ func (db *Instance) InsertStream(s StreamInfo) (int64, error) {
 	}
 
 	if err := db.Redis.HSet(db.Ctx, streamKey, streamData).Err(); err != nil {
-		return -1, fmt.Errorf("error inserting stream to Redis: %v", err)
+		return fmt.Errorf("error inserting stream to Redis: %v", err)
 	}
 
 	// Add to the sorted set with tvg_id as the score
@@ -114,17 +86,13 @@ func (db *Instance) InsertStream(s StreamInfo) (int64, error) {
 		Score:  tvgIDScore,
 		Member: streamKey,
 	}).Err(); err != nil {
-		return -1, fmt.Errorf("error adding stream to sorted set: %v", err)
+		return fmt.Errorf("error adding stream to sorted set: %v", err)
 	}
 
-	for _, url := range s.URLs {
-		db.InsertStreamUrl(s, url)
-	}
-
-	return s.DbId, nil
+	return nil
 }
 
-func (db *Instance) InsertStreamUrl(s StreamInfo, url StreamURL) (string, error) {
+func (db *Instance) InsertStreamUrl(s StreamInfo, url StreamURL) error {
 	streamKey := fmt.Sprintf("stream:%s:url:%d", s.Title, url.M3UIndex)
 	urlData := map[string]interface{}{
 		"content":   url.Content,
@@ -132,10 +100,10 @@ func (db *Instance) InsertStreamUrl(s StreamInfo, url StreamURL) (string, error)
 	}
 
 	if err := db.Redis.HSet(db.Ctx, streamKey, urlData).Err(); err != nil {
-		return "", fmt.Errorf("error inserting stream URL to Redis: %v", err)
+		return fmt.Errorf("error inserting stream URL to Redis: %v", err)
 	}
 
-	return streamKey, nil
+	return nil
 }
 
 func (db *Instance) DeleteStreamByTitle(title string) error {
@@ -165,9 +133,8 @@ func (db *Instance) DeleteStreamByTitle(title string) error {
 	return nil
 }
 
-func (db *Instance) DeleteStreamURL(streamURLID int64) error {
-	// Assuming `streamURLID` is actually a composite key, e.g., "stream:<id>:url:<m3u_index>"
-	if err := db.Redis.Del(db.Ctx, fmt.Sprintf("stream:url:%d", streamURLID)).Err(); err != nil {
+func (db *Instance) DeleteStreamURL(s StreamInfo, m3uIndex int) error {
+	if err := db.Redis.Del(db.Ctx, fmt.Sprintf("stream:%s:url:%d", s.Title, m3uIndex)).Err(); err != nil {
 		return fmt.Errorf("error deleting stream URL from Redis: %v", err)
 	}
 
@@ -185,10 +152,7 @@ func (db *Instance) GetStreamByTitle(title string) (StreamInfo, error) {
 		return StreamInfo{}, fmt.Errorf("stream not found: %s", title)
 	}
 
-	id, _ := strconv.ParseInt(streamData["id"], 10, 64)
-
 	s := StreamInfo{
-		DbId:    id,
 		Title:   streamData["title"],
 		TvgID:   streamData["tvg_id"],
 		LogoURL: streamData["logo_url"],
@@ -233,7 +197,6 @@ func (db *Instance) GetStreamUrlByUrlAndIndex(url string, m3u_index int) (Stream
 		if urlData["content"] == url {
 			m3uIndex, _ := strconv.Atoi(urlData["m3u_index"])
 			return StreamURL{
-				DbId:     extractStreamID(key),
 				Content:  urlData["content"],
 				M3UIndex: m3uIndex,
 			}, nil
@@ -299,16 +262,6 @@ func (db *Instance) ClearConcurrencies() error {
 	}
 
 	return nil
-}
-
-// Helper functions to extract parts of the keys
-func extractStreamID(key string) int64 {
-	parts := strings.Split(key, ":")
-	if len(parts) > 1 {
-		id, _ := strconv.ParseInt(parts[1], 10, 64)
-		return id
-	}
-	return -1
 }
 
 func extractTitle(key string) string {

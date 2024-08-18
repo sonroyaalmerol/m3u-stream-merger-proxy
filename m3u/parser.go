@@ -69,12 +69,11 @@ func insertStreamToDb(db *database.Instance, currentStream database.StreamInfo) 
 		return fmt.Errorf("GetStreamByTitle error (title: %s): %v", currentStream.Title, err)
 	}
 
-	var dbId int64
 	if existingStream.Title != currentStream.Title {
 		if os.Getenv("DEBUG") == "true" {
 			log.Printf("Creating new database entry: %s\n", currentStream.Title)
 		}
-		dbId, err = db.InsertStream(currentStream)
+		err = db.InsertStream(currentStream)
 		if err != nil {
 			return fmt.Errorf("InsertStream error (title: %s): %v", currentStream.Title, err)
 		}
@@ -82,7 +81,6 @@ func insertStreamToDb(db *database.Instance, currentStream database.StreamInfo) 
 		if os.Getenv("DEBUG") == "true" {
 			log.Printf("Using existing database entry: %s\n", existingStream.Title)
 		}
-		dbId = existingStream.DbId
 	}
 
 	if os.Getenv("DEBUG") == "true" {
@@ -96,7 +94,7 @@ func insertStreamToDb(db *database.Instance, currentStream database.StreamInfo) 
 		}
 
 		if existingUrl.Content != currentStreamUrl.Content || existingUrl.M3UIndex != currentStreamUrl.M3UIndex {
-			_, err = db.InsertStreamUrl(dbId, currentStreamUrl)
+			err = db.InsertStreamUrl(currentStream, currentStreamUrl)
 			if err != nil {
 				return fmt.Errorf("InsertStreamUrl error (title: %s): %v", currentStream.Title, err)
 			}
