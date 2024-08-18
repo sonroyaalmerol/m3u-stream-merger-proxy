@@ -8,7 +8,7 @@ import (
 )
 
 func (db *Instance) ConcurrencyPriorityValue(m3uIndex int) int {
-	maxConcurrency, err := strconv.Atoi(os.Getenv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", m3uIndex)))
+	maxConcurrency, err := strconv.Atoi(os.Getenv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", m3uIndex+1)))
 	if err != nil {
 		maxConcurrency = 1
 	}
@@ -22,7 +22,7 @@ func (db *Instance) ConcurrencyPriorityValue(m3uIndex int) int {
 }
 
 func (db *Instance) CheckConcurrency(m3uIndex int) bool {
-	maxConcurrency, err := strconv.Atoi(os.Getenv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", m3uIndex)))
+	maxConcurrency, err := strconv.Atoi(os.Getenv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%d", m3uIndex+1)))
 	if err != nil {
 		maxConcurrency = 1
 	}
@@ -33,7 +33,7 @@ func (db *Instance) CheckConcurrency(m3uIndex int) bool {
 		return false
 	}
 
-	log.Printf("Current number of connections for M3U_%d: %d", m3uIndex, count)
+	log.Printf("Current number of connections for M3U_%d: %d", m3uIndex+1, count)
 	return count >= maxConcurrency
 }
 
@@ -52,5 +52,5 @@ func (db *Instance) UpdateConcurrency(m3uIndex int, incr bool) {
 	if err != nil {
 		log.Printf("Error checking concurrency: %s\n", err.Error())
 	}
-	log.Printf("Current number of connections for M3U_%d: %d", m3uIndex, count)
+	log.Printf("Current number of connections for M3U_%d: %d", m3uIndex+1, count)
 }

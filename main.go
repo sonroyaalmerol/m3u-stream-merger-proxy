@@ -20,12 +20,12 @@ var db *database.Instance
 var cronMutex sync.Mutex
 
 func updateSource(nextDb *database.Instance, m3uUrl string, index int) {
-	log.Printf("Background process: Updating M3U #%d from %s\n", index, m3uUrl)
+	log.Printf("Background process: Updating M3U #%d from %s\n", index+1, m3uUrl)
 	err := m3u.ParseM3UFromURL(nextDb, m3uUrl, index)
 	if err != nil {
 		log.Printf("Background process: Error updating M3U: %v\n", err)
 	} else {
-		log.Printf("Background process: Updated M3U #%d from %s\n", index, m3uUrl)
+		log.Printf("Background process: Updated M3U #%d from %s\n", index+1, m3uUrl)
 	}
 }
 
@@ -40,14 +40,14 @@ func updateSources(ctx context.Context) {
 	default:
 		log.Println("Background process: Checking M3U_URLs...")
 		var wg sync.WaitGroup
-		index := 1
+		index := 0
 		for {
-			m3uUrl, m3uExists := os.LookupEnv(fmt.Sprintf("M3U_URL_%d", index))
+			m3uUrl, m3uExists := os.LookupEnv(fmt.Sprintf("M3U_URL_%d", index+1))
 			if !m3uExists {
 				break
 			}
 
-			log.Printf("Background process: Fetching M3U_URL_%d...\n", index)
+			log.Printf("Background process: Fetching M3U_URL_%d...\n", index+1)
 			wg.Add(1)
 			// Start the goroutine for periodic updates
 			go func(currDb *database.Instance, m3uUrl string, index int) {

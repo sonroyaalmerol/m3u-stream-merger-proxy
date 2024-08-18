@@ -41,7 +41,7 @@ func loadBalancer(stream database.StreamInfo, prevUrl *database.StreamURL) (*htt
 		}
 
 		if db.CheckConcurrency(url.M3UIndex) {
-			log.Printf("Concurrency limit reached for M3U_%d: %s", url.M3UIndex, url.Content)
+			log.Printf("Concurrency limit reached for M3U_%d: %s", url.M3UIndex+1, url.Content)
 			continue
 		}
 
