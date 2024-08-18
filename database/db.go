@@ -238,7 +238,6 @@ func (db *Instance) GetStreams() ([]StreamInfo, error) {
 			Group:   streamData["group_name"],
 		}
 
-		// Fetch URLs (you may want to optimize URL fetching similarly)
 		urlKeys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", streamKeys[i])).Result()
 		if err != nil {
 			return nil, fmt.Errorf("error finding URLs for stream: %v", err)
