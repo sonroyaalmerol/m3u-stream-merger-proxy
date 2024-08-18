@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gosimple/slug"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -118,8 +117,8 @@ func (db *Instance) InsertStreamUrl(s StreamInfo, url StreamURL) error {
 	return nil
 }
 
-func (db *Instance) DeleteStreamByTitle(title string) error {
-	streamKey := fmt.Sprintf("stream:%s", slug.Make(title))
+func (db *Instance) DeleteStreamBySlug(slug string) error {
+	streamKey := fmt.Sprintf("stream:%s", slug)
 
 	// Delete associated URLs
 	keys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", streamKey)).Result()

@@ -63,9 +63,9 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 		}
 	}
 
-	err = db.DeleteStreamByTitle(expected[1].Title)
+	err = db.DeleteStreamBySlug(expected[1].Slug)
 	if err != nil {
-		t.Errorf("DeleteStreamByTitle returned error: %v", err)
+		t.Errorf("DeleteStreamBySlug returned error: %v", err)
 	}
 
 	err = db.DeleteStreamURL(expected[0], expected[0].URLs[0].M3UIndex)
@@ -95,7 +95,7 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 
 // streamInfoEqual checks if two StreamInfo objects are equal.
 func streamInfoEqual(a, b StreamInfo) bool {
-	if a.TvgID != b.TvgID || a.Title != b.Title || a.Group != b.Group || a.LogoURL != b.LogoURL || len(a.URLs) != len(b.URLs) {
+	if a.Slug != b.Slug || a.TvgID != b.TvgID || a.Title != b.Title || a.Group != b.Group || a.LogoURL != b.LogoURL || len(a.URLs) != len(b.URLs) {
 		return false
 	}
 
