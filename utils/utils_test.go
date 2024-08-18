@@ -4,47 +4,47 @@ import (
 	"testing"
 )
 
-func TestGetStreamUID(t *testing.T) {
+func TestGetStreamUrl(t *testing.T) {
 	testCases := []struct {
-		streamName string
-		expected   string
+		slug     string
+		expected string
 	}{
-		{"testStreamName", "dGVzdFN0cmVhbU5hbWU="},
+		{"test-stream-name", "dGVzdC1zdHJlYW0tbmFtZQ=="},
 		// Add more test cases as needed
 	}
 
 	for _, tc := range testCases {
-		actual := GetStreamUID(tc.streamName)
+		actual := GetStreamUrl(tc.slug)
 		if actual != tc.expected {
-			t.Errorf("GetStreamUID(%s) = %s; expected %s", tc.streamName, actual, tc.expected)
+			t.Errorf("GetStreamUrl(%s) = %s; expected %s", tc.slug, actual, tc.expected)
 		}
 	}
 }
 
-func TestGetStreamName(t *testing.T) {
+func TestGetStreamSlugFromUrl(t *testing.T) {
 	testCases := []struct {
 		streamUID string
 		expected  string
 	}{
-		{"dGVzdFN0cmVhbU5hbWU=", "testStreamName"},
+		{"dGVzdC1zdHJlYW0tbmFtZQ==", "test-stream-name"},
 		// Add more test cases as needed
 	}
 
 	for _, tc := range testCases {
-		actual := GetStreamName(tc.streamUID)
+		actual := GetStreamSlugFromUrl(tc.streamUID)
 		if actual != tc.expected {
-			t.Errorf("GetStreamName(%s) = %s; expected %s", tc.streamUID, actual, tc.expected)
+			t.Errorf("GetStreamSlugFromUrl(%s) = %s; expected %s", tc.streamUID, actual, tc.expected)
 		}
 	}
 }
 
-func TestGetStreamName_ErrorCase(t *testing.T) {
+func TestGetStreamSlugFromUrl_ErrorCase(t *testing.T) {
 	// Test case for error handling when decoding fails
 	invalidStreamUID := "invalidBase64"
 	expected := ""
 
-	actual := GetStreamName(invalidStreamUID)
+	actual := GetStreamSlugFromUrl(invalidStreamUID)
 	if actual != expected {
-		t.Errorf("GetStreamName(%s) = %s; expected %s", invalidStreamUID, actual, expected)
+		t.Errorf("GetStreamSlugFromUrl(%s) = %s; expected %s", invalidStreamUID, actual, expected)
 	}
 }

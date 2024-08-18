@@ -62,7 +62,7 @@ func TestStreamHandler(t *testing.T) {
 		go func(stream database.StreamInfo) {
 			defer wg.Done()
 			log.Printf("Stream (%s): %v", stream.Title, stream)
-			req := httptest.NewRequest("GET", strings.TrimSpace(m3u.GenerateStreamURL("", stream.Title, stream.URLs[0].Content)), nil)
+			req := httptest.NewRequest("GET", strings.TrimSpace(m3u.GenerateStreamURL("", stream.Slug, stream.URLs[0].Content)), nil)
 			w := httptest.NewRecorder()
 
 			// Call the handler function

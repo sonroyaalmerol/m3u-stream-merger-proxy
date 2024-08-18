@@ -153,15 +153,15 @@ func (db *Instance) DeleteStreamURL(s StreamInfo, m3uIndex int) error {
 	return nil
 }
 
-func (db *Instance) GetStreamByTitle(title string) (StreamInfo, error) {
-	streamKey := fmt.Sprintf("stream:%s", slug.Make(title))
+func (db *Instance) GetStreamBySlug(slug string) (StreamInfo, error) {
+	streamKey := fmt.Sprintf("stream:%s", slug)
 	streamData, err := db.Redis.HGetAll(db.Ctx, streamKey).Result()
 	if err != nil {
 		return StreamInfo{}, fmt.Errorf("error getting stream from Redis: %v", err)
 	}
 
 	if len(streamData) == 0 {
-		return StreamInfo{}, fmt.Errorf("stream not found: %s", title)
+		return StreamInfo{}, fmt.Errorf("stream not found: %s", slug)
 	}
 
 	s := StreamInfo{
@@ -228,7 +228,7 @@ func (db *Instance) GetStreams() ([]StreamInfo, error) {
 	var streams []StreamInfo
 	for _, key := range keys {
 		if !strings.Contains(key, ":url:") { // Exclude URL keys
-			s, err := db.GetStreamByTitle(extractTitle(key))
+			s, err := db.GetStreamBySlug(extractSlug(key))
 			if err != nil {
 				return nil, err
 			}
@@ -277,7 +277,7 @@ func (db *Instance) ClearConcurrencies() error {
 	return nil
 }
 
-func extractTitle(key string) string {
+func extractSlug(key string) string {
 	parts := strings.Split(key, ":")
 	if len(parts) > 1 {
 		return parts[1]

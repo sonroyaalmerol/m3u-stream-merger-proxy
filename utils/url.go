@@ -2,11 +2,11 @@ package utils
 
 import "encoding/base64"
 
-func GetStreamUID(streamName string) string {
-	return base64.URLEncoding.EncodeToString([]byte(streamName))
+func GetStreamUrl(slug string) string {
+	return base64.URLEncoding.EncodeToString([]byte(slug))
 }
 
-func GetStreamName(streamUID string) string {
+func GetStreamSlugFromUrl(streamUID string) string {
 	decoded, err := base64.URLEncoding.DecodeString(streamUID)
 	if err != nil {
 		return ""
