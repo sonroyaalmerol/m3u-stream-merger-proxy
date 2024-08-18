@@ -187,6 +187,7 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 			return fmt.Errorf("scanner error: %v", err)
 		}
 
+		log.Printf("%v", streams)
 		if err := db.SaveToDb(streams); err != nil {
 			log.Printf("M3U Parser error: %v", err)
 		}
