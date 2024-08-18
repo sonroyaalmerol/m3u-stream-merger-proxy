@@ -210,10 +210,7 @@ func (db *Instance) GetStreamUrlByUrlAndIndex(url string, m3u_index int) (Stream
 }
 
 func (db *Instance) GetStreams() ([]StreamInfo, error) {
-	var keys []string
-	var err error
-
-	keys, err = db.Redis.ZRange(db.Ctx, "streams_sorted", 0, -1).Result()
+	keys, err := db.Redis.ZRange(db.Ctx, "streams_sorted", 0, -1).Result()
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving streams: %v", err)
 	}
