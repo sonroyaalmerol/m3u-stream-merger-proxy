@@ -53,9 +53,9 @@ func proxyStream(selectedUrl *database.StreamURL, resp *http.Response, r *http.R
 	db.UpdateConcurrency(selectedUrl.M3UIndex, true)
 	defer db.UpdateConcurrency(selectedUrl.M3UIndex, false)
 
-	bufferMbInt, _ := strconv.Atoi(os.Getenv("BUFFER_MB"))
-	if bufferMbInt < 0 {
-		log.Printf("Invalid BUFFER_MB value: negative integer is not allowed\n")
+	bufferMbInt, err := strconv.Atoi(os.Getenv("BUFFER_MB"))
+	if err != nil || bufferMbInt < 0 {
+		log.Printf("Invalid BUFFER_MB value: %v. Defaulting to 1KB buffer\n", err)
 		bufferMbInt = 0
 	}
 	buffer := make([]byte, 1024)
@@ -75,10 +75,15 @@ func proxyStream(selectedUrl *database.StreamURL, resp *http.Response, r *http.R
 			statusChan <- 1
 			return
 		}
+
 		if _, err := w.Write(buffer[:n]); err != nil {
 			log.Printf("Error writing to response: %s\n", err.Error())
 			statusChan <- 0
 			return
+		}
+
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
 		}
 	}
 }
@@ -91,34 +96,37 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 
 	m3uID := strings.Split(strings.TrimPrefix(r.URL.Path, "/stream/"), ".")[0]
 	if m3uID == "" {
+		log.Printf("Invalid m3uID for request from %s: %s\n", r.RemoteAddr, r.URL.Path)
 		http.NotFound(w, r)
 		return
 	}
 
 	streamName := utils.GetStreamName(m3uID)
 	if streamName == "" {
+		log.Printf("No stream found for m3uID %s from %s\n", m3uID, r.RemoteAddr)
 		http.NotFound(w, r)
 		return
 	}
 
 	stream, err := db.GetStreamByTitle(streamName)
 	if err != nil {
+		log.Printf("Error retrieving stream for title %s: %v\n", streamName, err)
 		http.NotFound(w, r)
 		return
 	}
 
 	resp, selectedUrl, err := loadBalancer(stream)
 	if err != nil {
+		log.Printf("Error fetching initial stream for %s: %v\n", streamName, err)
 		http.Error(w, "Error fetching stream. Exhausted all streams.", http.StatusInternalServerError)
 		return
 	}
 
 	for k, v := range resp.Header {
-		for _, val := range v {
-			if strings.ToLower(k) == "content-length" {
-				break
+		if strings.ToLower(k) != "content-length" {
+			for _, val := range v {
+				w.Header().Set(k, val)
 			}
-			w.Header().Set(k, val)
 		}
 	}
 
@@ -152,6 +160,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 				currentResp.Body.Close()
 				resp, selectedUrl, err = loadBalancer(stream)
 				if err != nil {
+					log.Printf("Error reloading stream for %s: %v\n", streamName, err)
 					http.Error(w, "Error fetching stream. Exhausted all streams.", http.StatusInternalServerError)
 					return
 				}
