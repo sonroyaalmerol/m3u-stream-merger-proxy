@@ -63,21 +63,6 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 	return currentStream
 }
 
-func insertStreamToDb(db *database.Instance, currentStream database.StreamInfo) error {
-	if os.Getenv("DEBUG") == "true" {
-		log.Printf("Adding stream url entry to %s\n", currentStream.Title)
-	}
-
-	for _, currentStreamUrl := range currentStream.URLs {
-		err := db.InsertStreamUrl(currentStream, currentStreamUrl)
-		if err != nil {
-			return fmt.Errorf("InsertStreamUrl error (title: %s): %v", currentStream.Title, err)
-		}
-	}
-
-	return nil
-}
-
 func checkIncludeGroup(groups []string, line string) bool {
 	if len(groups) == 0 {
 		return true
@@ -154,7 +139,7 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 					// Insert parsed stream to database
 					go func(c chan database.StreamInfo) {
 						defer wg.Done()
-						errCh <- insertStreamToDb(db, <-c)
+						errCh <- db.SaveToDb([]database.StreamInfo{<-c})
 					}(streamInfoCh)
 
 					// Parse stream lines
