@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/m3u"
 	"net/http"
@@ -60,6 +61,7 @@ func TestStreamHandler(t *testing.T) {
 		wg.Add(1)
 		go func(stream database.StreamInfo) {
 			defer wg.Done()
+			log.Printf("Stream (%s): %v", stream.Title, stream)
 			req := httptest.NewRequest("GET", strings.TrimSpace(m3u.GenerateStreamURL("", stream.Title, stream.URLs[0].Content)), nil)
 			w := httptest.NewRecorder()
 
