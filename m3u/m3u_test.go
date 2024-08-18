@@ -35,12 +35,7 @@ func TestGenerateM3UContent(t *testing.T) {
 		t.Errorf("ClearDb returned error: %v", err)
 	}
 
-	err = db.InsertStream(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = db.InsertStreamUrl(stream, stream.URLs[0])
+	err = db.SaveToDb([]database.StreamInfo{stream})
 	if err != nil {
 		t.Fatal(err)
 	}
