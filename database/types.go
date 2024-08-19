@@ -7,10 +7,5 @@ type StreamInfo struct {
 	TvgChNo string
 	LogoURL string
 	Group   string
-	URLs    []StreamURL
-}
-
-type StreamURL struct {
-	Content  string
-	M3UIndex int
+	URLs    map[int]string
 }

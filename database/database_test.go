@@ -27,20 +27,14 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 		TvgID:   "test1",
 		LogoURL: "http://test.com/image.png",
 		Group:   "test",
-		URLs: []StreamURL{{
-			Content:  "testing",
-			M3UIndex: 1,
-		}},
+		URLs:    map[int]string{0: "testing"},
 	}, {
 		Slug:    "stream2",
 		Title:   "stream2",
 		TvgID:   "test2",
 		LogoURL: "http://test2.com/image.png",
 		Group:   "test2",
-		URLs: []StreamURL{{
-			Content:  "testing2",
-			M3UIndex: 2,
-		}},
+		URLs:    map[int]string{0: "testing2"},
 	}}
 
 	err = db.SaveToDb(expected) // Insert test data into the database
@@ -68,7 +62,7 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 		t.Errorf("DeleteStreamBySlug returned error: %v", err)
 	}
 
-	err = db.DeleteStreamURL(expected[0], expected[0].URLs[0].M3UIndex)
+	err = db.DeleteStreamURL(expected[0], 0)
 	if err != nil {
 		t.Errorf("DeleteStreamURL returned error: %v", err)
 	}
@@ -79,7 +73,7 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 	}
 
 	expected = expected[:1]
-	expected[0].URLs = make([]StreamURL, 0)
+	expected[0].URLs = map[int]string{}
 
 	if len(result) != len(expected) {
 		t.Errorf("GetStreams returned %+v, expected %+v", result, expected)
@@ -100,7 +94,7 @@ func streamInfoEqual(a, b StreamInfo) bool {
 	}
 
 	for i, url := range a.URLs {
-		if url.Content != b.URLs[i].Content || url.M3UIndex != b.URLs[i].M3UIndex {
+		if url != b.URLs[i] {
 			return false
 		}
 	}

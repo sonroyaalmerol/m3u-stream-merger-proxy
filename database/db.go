@@ -17,20 +17,22 @@ type Instance struct {
 }
 
 func InitializeDb(addr string, password string, db int) (*Instance, error) {
-	var redisInstance *redis.Client
+	var redisOptions *redis.Options
 
 	if password == "" {
-		redisInstance = redis.NewClient(&redis.Options{
+		redisOptions = &redis.Options{
 			Addr: addr,
 			DB:   db,
-		})
+		}
 	} else {
-		redisInstance = redis.NewClient(&redis.Options{
+		redisOptions = &redis.Options{
 			Addr:     addr,
 			Password: password,
 			DB:       db,
-		})
+		}
 	}
+
+	redisInstance := redis.NewClient(redisOptions)
 
 	if err := redisInstance.Ping(context.Background()).Err(); err != nil {
 		return nil, fmt.Errorf("error connecting to Redis: %v", err)
@@ -61,13 +63,9 @@ func (db *Instance) SaveToDb(streams []StreamInfo) error {
 		}
 		pipeline.HSet(db.Ctx, streamKey, streamData)
 
-		for _, u := range s.URLs {
-			streamURLKey := fmt.Sprintf("stream:%s:url:%d", s.Slug, u.M3UIndex)
-			urlData := map[string]interface{}{
-				"content":   u.Content,
-				"m3u_index": u.M3UIndex,
-			}
-			pipeline.HSet(db.Ctx, streamURLKey, urlData)
+		for index, u := range s.URLs {
+			streamURLKey := fmt.Sprintf("stream:%s:url:%d", s.Slug, index)
+			pipeline.Set(db.Ctx, streamURLKey, u, 0)
 		}
 
 		// Add to the sorted set
@@ -170,14 +168,14 @@ func (db *Instance) GetStreamBySlug(slug string) (StreamInfo, error) {
 				return s, fmt.Errorf("error getting URL data from Redis: %v", err)
 			}
 
-			for _, result := range results {
-				urlData := result.(*redis.MapStringStringCmd).Val()
-				m3uIndex, _ := strconv.Atoi(urlData["m3u_index"])
-				u := StreamURL{
-					Content:  urlData["content"],
-					M3UIndex: m3uIndex,
+			for i, result := range results {
+				urlData := result.(*redis.StringCmd).Val()
+
+				m3uIndex, err := strconv.Atoi(extractM3UIndex(keys[i]))
+				if err != nil {
+					return s, fmt.Errorf("m3u index is not an integer: %v", err)
 				}
-				s.URLs = append(s.URLs, u)
+				s.URLs[m3uIndex] = urlData
 			}
 		}
 
@@ -244,17 +242,16 @@ func (db *Instance) GetStreams() ([]StreamInfo, error) {
 		}
 
 		for _, urlKey := range urlKeys {
-			urlData, err := db.Redis.HGetAll(db.Ctx, urlKey).Result()
+			urlData, err := db.Redis.Get(db.Ctx, urlKey).Result()
 			if err != nil {
 				return nil, fmt.Errorf("error getting URL data from Redis: %v", err)
 			}
 
-			m3uIndex, _ := strconv.Atoi(urlData["m3u_index"])
-			u := StreamURL{
-				Content:  urlData["content"],
-				M3UIndex: m3uIndex,
+			m3uIndex, err := strconv.Atoi(extractM3UIndex(urlKey))
+			if err != nil {
+				return nil, fmt.Errorf("m3u index is not an integer: %v", err)
 			}
-			stream.URLs = append(stream.URLs, u)
+			stream.URLs[m3uIndex] = urlData
 		}
 
 		streams = append(streams, stream)
@@ -305,6 +302,14 @@ func extractSlug(key string) string {
 	parts := strings.Split(key, ":")
 	if len(parts) > 1 {
 		return parts[1]
+	}
+	return ""
+}
+
+func extractM3UIndex(key string) string {
+	parts := strings.Split(key, ":")
+	if len(parts) > 1 {
+		return parts[3]
 	}
 	return ""
 }

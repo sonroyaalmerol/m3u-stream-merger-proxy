@@ -21,10 +21,7 @@ import (
 
 func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 	var currentStream database.StreamInfo
-	currentStream.URLs = []database.StreamURL{{
-		Content:  strings.TrimSpace(nextLine),
-		M3UIndex: m3uIndex,
-	}}
+	currentStream.URLs = map[int]string{m3uIndex: strings.TrimSpace(nextLine)}
 
 	lineWithoutPairs := line
 
