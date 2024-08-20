@@ -27,6 +27,8 @@ func updateSource(nextDb *database.Instance, m3uUrl string, index int) {
 	} else {
 		log.Printf("Background process: Updated M3U #%d from %s\n", index+1, m3uUrl)
 	}
+
+	nextDb.Cache.Clear("streams_sorted_cache")
 }
 
 func updateSources(ctx context.Context) {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -15,6 +16,7 @@ import (
 type Instance struct {
 	Redis *redis.Client
 	Ctx   context.Context
+	Cache *Cache
 }
 
 func InitializeDb(addr string, password string, db int) (*Instance, error) {
@@ -45,13 +47,15 @@ func InitializeDb(addr string, password string, db int) (*Instance, error) {
 		return nil, fmt.Errorf("error connecting to Redis: %v", err)
 	}
 
-	return &Instance{Redis: redisInstance, Ctx: context.Background()}, nil
+	return &Instance{Redis: redisInstance, Ctx: context.Background(), Cache: NewCache()}, nil
 }
 
 func (db *Instance) ClearDb() error {
 	if err := db.Redis.FlushDB(db.Ctx).Err(); err != nil {
 		return fmt.Errorf("error clearing Redis: %v", err)
 	}
+
+	db.Cache.Clear("streams_sorted_cache")
 
 	return nil
 }
@@ -197,74 +201,146 @@ func (db *Instance) GetStreamBySlug(slug string) (StreamInfo, error) {
 }
 
 func (db *Instance) GetStreams() ([]StreamInfo, error) {
+	// Check if the data is in the cache
+	cacheKey := "streams_sorted_cache"
+	if data, found := db.Cache.Get(cacheKey); found {
+		return data, nil
+	}
+
 	keys, err := db.Redis.ZRange(db.Ctx, "streams_sorted", 0, -1).Result()
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving streams: %v", err)
 	}
 
-	// Create a slice to hold the final stream data
-	var streams []StreamInfo
-	streamKeys := make([]string, 0, len(keys))
-
 	// Filter out URL keys
+	var streamKeys []string
 	for _, key := range keys {
 		if !strings.Contains(key, ":url:") {
 			streamKeys = append(streamKeys, key)
 		}
 	}
 
-	// Use a pipeline to fetch all stream data in one go
-	pipe := db.Redis.Pipeline()
-	cmds := make([]*redis.MapStringStringCmd, len(streamKeys))
-
-	for i, key := range streamKeys {
-		cmds[i] = pipe.HGetAll(db.Ctx, key)
+	// Split the stream keys into chunks
+	chunkSize := 100
+	var chunks [][]string
+	for i := 0; i < len(streamKeys); i += chunkSize {
+		end := i + chunkSize
+		if end > len(streamKeys) {
+			end = len(streamKeys)
+		}
+		chunks = append(chunks, streamKeys[i:end])
 	}
 
-	// Execute the pipeline
-	_, err = pipe.Exec(db.Ctx)
+	// Create channels for work distribution and results collection
+	workChan := make(chan []string, len(chunks))
+	resultChan := make(chan []StreamInfo, len(chunks))
+	errChan := make(chan error, len(chunks))
+
+	// Define the number of workers
+	parserWorkers := os.Getenv("PARSER_WORKERS")
+	if parserWorkers != "" {
+		parserWorkers = "5"
+	}
+	numWorkers, err := strconv.Atoi(parserWorkers)
 	if err != nil {
-		return nil, fmt.Errorf("error executing Redis pipeline: %v", err)
+		numWorkers = 5
 	}
 
-	// Process the results
-	for i, cmd := range cmds {
-		streamData := cmd.Val()
-		if len(streamData) == 0 {
-			continue
-		}
+	var wg sync.WaitGroup
 
-		slug := extractSlug(streamKeys[i])
-		stream := StreamInfo{
-			Slug:    slug,
-			Title:   streamData["title"],
-			TvgID:   streamData["tvg_id"],
-			TvgChNo: streamData["tvg_chno"],
-			LogoURL: streamData["logo_url"],
-			Group:   streamData["group_name"],
-			URLs:    map[int]string{},
-		}
+	// Start the worker pool
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for chunk := range workChan {
+				pipe := db.Redis.Pipeline()
+				cmds := make([]*redis.MapStringStringCmd, len(chunk))
 
-		urlKeys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", streamKeys[i])).Result()
-		if err != nil {
-			return nil, fmt.Errorf("error finding URLs for stream: %v", err)
-		}
+				for i, key := range chunk {
+					cmds[i] = pipe.HGetAll(db.Ctx, key)
+				}
 
-		for _, urlKey := range urlKeys {
-			urlData, err := db.Redis.Get(db.Ctx, urlKey).Result()
-			if err != nil {
-				return nil, fmt.Errorf("error getting URL data from Redis: %v", err)
+				_, err := pipe.Exec(db.Ctx)
+				if err != nil {
+					errChan <- fmt.Errorf("error executing Redis pipeline: %v", err)
+					return
+				}
+
+				var chunkStreams []StreamInfo
+				for i, cmd := range cmds {
+					streamData := cmd.Val()
+					if len(streamData) == 0 {
+						continue
+					}
+
+					slug := extractSlug(chunk[i])
+					stream := StreamInfo{
+						Slug:    slug,
+						Title:   streamData["title"],
+						TvgID:   streamData["tvg_id"],
+						TvgChNo: streamData["tvg_chno"],
+						LogoURL: streamData["logo_url"],
+						Group:   streamData["group_name"],
+						URLs:    map[int]string{},
+					}
+
+					urlKeys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", chunk[i])).Result()
+					if err != nil {
+						errChan <- fmt.Errorf("error finding URLs for stream: %v", err)
+						return
+					}
+
+					for _, urlKey := range urlKeys {
+						urlData, err := db.Redis.Get(db.Ctx, urlKey).Result()
+						if err != nil {
+							errChan <- fmt.Errorf("error getting URL data from Redis: %v", err)
+							return
+						}
+
+						m3uIndex, err := strconv.Atoi(extractM3UIndex(urlKey))
+						if err != nil {
+							errChan <- fmt.Errorf("m3u index is not an integer: %v", err)
+							return
+						}
+						stream.URLs[m3uIndex] = urlData
+					}
+
+					chunkStreams = append(chunkStreams, stream)
+				}
+
+				resultChan <- chunkStreams
 			}
-
-			m3uIndex, err := strconv.Atoi(extractM3UIndex(urlKey))
-			if err != nil {
-				return nil, fmt.Errorf("m3u index is not an integer: %v", err)
-			}
-			stream.URLs[m3uIndex] = urlData
-		}
-
-		streams = append(streams, stream)
+		}()
 	}
+
+	// Send work to the workers
+	go func() {
+		for _, chunk := range chunks {
+			workChan <- chunk
+		}
+		close(workChan)
+	}()
+
+	// Wait for all workers to finish
+	go func() {
+		wg.Wait()
+		close(resultChan)
+		close(errChan)
+	}()
+
+	// Collect all streams and check for errors
+	var streams []StreamInfo
+	for chunkStreams := range resultChan {
+		streams = append(streams, chunkStreams...)
+	}
+
+	if len(errChan) > 0 {
+		return nil, <-errChan
+	}
+
+	// Store the result in the cache before returning
+	db.Cache.Set(cacheKey, streams)
 
 	return streams, nil
 }
