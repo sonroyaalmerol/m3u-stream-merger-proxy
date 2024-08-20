@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"strconv"
@@ -61,6 +62,8 @@ func (db *Instance) ClearDb() error {
 }
 
 func (db *Instance) SaveToDb(streams []StreamInfo) error {
+	var debug = os.Getenv("DEBUG") == "true"
+
 	pipeline := db.Redis.Pipeline()
 
 	for _, s := range streams {
@@ -72,15 +75,30 @@ func (db *Instance) SaveToDb(streams []StreamInfo) error {
 			"logo_url":   s.LogoURL,
 			"group_name": s.Group,
 		}
+
+		if debug {
+			log.Printf("[DEBUG] Preparing to set data for stream key %s: %v\n", streamKey, streamData)
+		}
+
 		pipeline.HSet(db.Ctx, streamKey, streamData)
 
 		for index, u := range s.URLs {
 			streamURLKey := fmt.Sprintf("stream:%s:url:%d", s.Slug, index)
+
+			if debug {
+				log.Printf("[DEBUG] Preparing to set URL for key %s: %s\n", streamURLKey, u)
+			}
+
 			pipeline.Set(db.Ctx, streamURLKey, u, 0)
 		}
 
 		// Add to the sorted set
 		sortScore := calculateSortScore(s)
+
+		if debug {
+			log.Printf("[DEBUG] Adding to sorted set with score %f and member %s\n", sortScore, streamKey)
+		}
+
 		pipeline.ZAdd(db.Ctx, "streams_sorted", redis.Z{
 			Score:  sortScore,
 			Member: streamKey,
@@ -88,16 +106,28 @@ func (db *Instance) SaveToDb(streams []StreamInfo) error {
 	}
 
 	if len(streams) > 0 {
+		if debug {
+			log.Println("[DEBUG] Executing pipeline...")
+		}
+
 		_, err := pipeline.Exec(db.Ctx)
 		if err != nil {
 			return fmt.Errorf("SaveToDb error: %v", err)
 		}
+
+		if debug {
+			log.Println("[DEBUG] Pipeline executed successfully.")
+		}
 	}
 
 	db.Cache.Clear("streams_sorted_cache")
+
+	if debug {
+		log.Println("[DEBUG] Cache cleared.")
+	}
+
 	return nil
 }
-
 func (db *Instance) DeleteStreamBySlug(slug string) error {
 	streamKey := fmt.Sprintf("stream:%s", slug)
 
@@ -204,10 +234,19 @@ func (db *Instance) GetStreamBySlug(slug string) (StreamInfo, error) {
 }
 
 func (db *Instance) GetStreams() ([]StreamInfo, error) {
+	var debug = os.Getenv("DEBUG") == "true"
+
 	// Check if the data is in the cache
 	cacheKey := "streams_sorted_cache"
 	if data, found := db.Cache.Get(cacheKey); found {
+		if debug {
+			log.Printf("[DEBUG] Cache hit for key %s\n", cacheKey)
+		}
 		return data, nil
+	}
+
+	if debug {
+		log.Println("[DEBUG] Cache miss. Retrieving streams from Redis...")
 	}
 
 	keys, err := db.Redis.ZRange(db.Ctx, "streams_sorted", 0, -1).Result()
@@ -223,6 +262,10 @@ func (db *Instance) GetStreams() ([]StreamInfo, error) {
 		}
 	}
 
+	if debug {
+		log.Printf("[DEBUG] Filtered stream keys: %v\n", streamKeys)
+	}
+
 	// Split the stream keys into chunks
 	chunkSize := 100
 	var chunks [][]string
@@ -234,6 +277,10 @@ func (db *Instance) GetStreams() ([]StreamInfo, error) {
 		chunks = append(chunks, streamKeys[i:end])
 	}
 
+	if debug {
+		log.Printf("[DEBUG] Chunks created: %d chunks\n", len(chunks))
+	}
+
 	// Create channels for work distribution and results collection
 	workChan := make(chan []string, len(chunks))
 	resultChan := make(chan []StreamInfo, len(chunks))
@@ -241,7 +288,7 @@ func (db *Instance) GetStreams() ([]StreamInfo, error) {
 
 	// Define the number of workers
 	parserWorkers := os.Getenv("PARSER_WORKERS")
-	if parserWorkers != "" {
+	if parserWorkers == "" {
 		parserWorkers = "5"
 	}
 	numWorkers, err := strconv.Atoi(parserWorkers)
@@ -249,19 +296,30 @@ func (db *Instance) GetStreams() ([]StreamInfo, error) {
 		numWorkers = 5
 	}
 
+	if debug {
+		log.Printf("[DEBUG] Number of workers: %d\n", numWorkers)
+	}
+
 	var wg sync.WaitGroup
 
 	// Start the worker pool
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
-		go func() {
+		go func(workerID int) {
 			defer wg.Done()
+			if debug {
+				log.Printf("[DEBUG] Worker %d started\n", workerID)
+			}
 			for chunk := range workChan {
 				pipe := db.Redis.Pipeline()
 				cmds := make([]*redis.MapStringStringCmd, len(chunk))
 
 				for i, key := range chunk {
 					cmds[i] = pipe.HGetAll(db.Ctx, key)
+				}
+
+				if debug {
+					log.Printf("[DEBUG] Executing pipeline for chunk: %v\n", chunk)
 				}
 
 				_, err := pipe.Exec(db.Ctx)
@@ -286,6 +344,10 @@ func (db *Instance) GetStreams() ([]StreamInfo, error) {
 						LogoURL: streamData["logo_url"],
 						Group:   streamData["group_name"],
 						URLs:    map[int]string{},
+					}
+
+					if debug {
+						log.Printf("[DEBUG] Processing stream: %v\n", stream)
 					}
 
 					urlKeys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", chunk[i])).Result()
@@ -314,7 +376,7 @@ func (db *Instance) GetStreams() ([]StreamInfo, error) {
 
 				resultChan <- chunkStreams
 			}
-		}()
+		}(i)
 	}
 
 	// Send work to the workers
@@ -344,6 +406,10 @@ func (db *Instance) GetStreams() ([]StreamInfo, error) {
 
 	// Store the result in the cache before returning
 	db.Cache.Set(cacheKey, streams)
+
+	if debug {
+		log.Println("[DEBUG] Streams retrieved and cached successfully.")
+	}
 
 	return streams, nil
 }
