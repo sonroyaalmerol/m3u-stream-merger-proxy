@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -23,20 +24,18 @@ func InitializeDb(addr string, password string, db int) (*Instance, error) {
 		redisOptions = &redis.Options{
 			Addr:         addr,
 			DB:           db,
-			MaxRetries:   30,
-			DialTimeout:  30,
-			ReadTimeout:  30,
-			WriteTimeout: 30,
+			DialTimeout:  1 * time.Minute,
+			ReadTimeout:  1 * time.Minute,
+			WriteTimeout: 1 * time.Minute,
 		}
 	} else {
 		redisOptions = &redis.Options{
 			Addr:         addr,
 			Password:     password,
 			DB:           db,
-			MaxRetries:   30,
-			DialTimeout:  30,
-			ReadTimeout:  30,
-			WriteTimeout: 30,
+			DialTimeout:  1 * time.Minute,
+			ReadTimeout:  1 * time.Minute,
+			WriteTimeout: 1 * time.Minute,
 		}
 	}
 
