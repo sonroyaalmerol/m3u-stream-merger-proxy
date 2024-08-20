@@ -21,14 +21,22 @@ func InitializeDb(addr string, password string, db int) (*Instance, error) {
 
 	if password == "" {
 		redisOptions = &redis.Options{
-			Addr: addr,
-			DB:   db,
+			Addr:         addr,
+			DB:           db,
+			MaxRetries:   30,
+			DialTimeout:  30,
+			ReadTimeout:  30,
+			WriteTimeout: 30,
 		}
 	} else {
 		redisOptions = &redis.Options{
-			Addr:     addr,
-			Password: password,
-			DB:       db,
+			Addr:         addr,
+			Password:     password,
+			DB:           db,
+			MaxRetries:   30,
+			DialTimeout:  30,
+			ReadTimeout:  30,
+			WriteTimeout: 30,
 		}
 	}
 
