@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"m3u-stream-merger/database"
@@ -98,6 +99,13 @@ http://example.com/fox
 	}))
 	defer mockServer.Close()
 
+	// Create test file
+	mockFile := "test-playlist.m3u"
+	err := os.WriteFile(mockFile, []byte(testM3UContent), 0644)
+	if err != nil {
+		t.Errorf("WriteFile returned error: %v", err)
+	}
+
 	// Test InitializeSQLite and check if the database file exists
 	REDIS_ADDR := "127.0.0.1:6379"
 	REDIS_PASS := ""
@@ -119,12 +127,18 @@ http://example.com/fox
 		t.Errorf("Error parsing M3U from URL: %v", err)
 	}
 
+	// Test the parseM3UFromURL function with the mock server URL
+	err = ParseM3UFromURL(db, fmt.Sprintf("file://%s", mockFile), 1)
+	if err != nil {
+		t.Errorf("Error parsing M3U from URL: %v", err)
+	}
+
 	// Verify expected values
 	expectedStreams := []database.StreamInfo{
-		{Slug: "bbc-one", Title: "BBC One", TvgChNo: "0.0", TvgID: "bbc1", Group: "UK", URLs: map[int]string{0: "http://example.com/bbc1"}},
-		{Slug: "bbc-two", Title: "BBC Two", TvgChNo: "0.0", TvgID: "bbc2", Group: "UK", URLs: map[int]string{0: "http://example.com/bbc2"}},
-		{Slug: "cnn-international", Title: "CNN International", TvgChNo: "0.0", TvgID: "cnn", Group: "News", URLs: map[int]string{0: "http://example.com/cnn"}},
-		{Slug: "fox", Title: "FOX", TvgChNo: "0.0", Group: "Entertainment", URLs: map[int]string{0: "http://example.com/fox"}},
+		{Slug: "bbc-one", Title: "BBC One", TvgChNo: "0.0", TvgID: "bbc1", Group: "UK", URLs: map[int]string{0: "http://example.com/bbc1", 1: "http://example.com/bbc1"}},
+		{Slug: "bbc-two", Title: "BBC Two", TvgChNo: "0.0", TvgID: "bbc2", Group: "UK", URLs: map[int]string{0: "http://example.com/bbc2", 1: "http://example.com/bbc2"}},
+		{Slug: "cnn-international", Title: "CNN International", TvgChNo: "0.0", TvgID: "cnn", Group: "News", URLs: map[int]string{0: "http://example.com/cnn", 1: "http://example.com/cnn"}},
+		{Slug: "fox", Title: "FOX", TvgChNo: "0.0", Group: "Entertainment", URLs: map[int]string{0: "http://example.com/fox", 1: "http://example.com/fox"}},
 	}
 
 	storedStreams, err := db.GetStreams()

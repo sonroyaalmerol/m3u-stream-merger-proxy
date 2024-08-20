@@ -82,17 +82,33 @@ func checkIncludeGroup(groups []string, line string) bool {
 }
 
 func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
-	// Download M3U for processing
-	log.Printf("Downloading M3U from URL: %s\n", m3uURL)
-	resp, err := utils.CustomHttpRequest("GET", m3uURL)
-	if err != nil {
-		return fmt.Errorf("HTTP GET error: %v", err)
-	}
-	defer resp.Body.Close()
+	var file io.Reader
 
-	_, err = io.Copy(buffer, resp.Body)
+	if strings.HasPrefix(m3uURL, "file://") {
+		localPath := strings.TrimPrefix(m3uURL, "file://")
+		log.Printf("Reading M3U from local file: %s\n", localPath)
+
+		localFile, err := os.Open(localPath)
+		if err != nil {
+			return fmt.Errorf("Error opening file: %v", err)
+		}
+		defer localFile.Close()
+
+		file = localFile
+	} else {
+		log.Printf("Downloading M3U from URL: %s\n", m3uURL)
+		resp, err := utils.CustomHttpRequest("GET", m3uURL)
+		if err != nil {
+			return fmt.Errorf("HTTP GET error: %v", err)
+		}
+		defer resp.Body.Close()
+
+		file = resp.Body
+	}
+
+	_, err = io.Copy(buffer, file)
 	if err != nil {
-		return fmt.Errorf("Download file error: %v", err)
+		return fmt.Errorf("Error reading file: %v", err)
 	}
 
 	return nil
