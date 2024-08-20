@@ -9,12 +9,13 @@ import (
 	"m3u-stream-merger/utils"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 )
 
-func loadBalancer(stream database.StreamInfo, previous int) (*http.Response, string, int, error) {
+func loadBalancer(stream database.StreamInfo, previous []int) (*http.Response, string, int, error) {
 	m3uIndexes := utils.GetM3UIndexes()
 
 	sort.Slice(m3uIndexes, func(i, j int) bool {
@@ -28,7 +29,7 @@ func loadBalancer(stream database.StreamInfo, previous int) (*http.Response, str
 		allSkipped := true // Assume all URLs might be skipped
 
 		for _, index := range m3uIndexes {
-			if index == previous {
+			if slices.Contains(previous, index) {
 				log.Printf("Skipping M3U_%d: marked as previous stream\n", index+1)
 				continue
 			}
@@ -129,8 +130,10 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 		return
 	}
 
-	selectedIndex := -1
-	selectedUrl := ""
+	var selectedIndex int
+	var selectedUrl string
+
+	testedIndexes := []int{}
 
 	var resp *http.Response
 
@@ -143,7 +146,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 			}
 			return
 		default:
-			resp, selectedUrl, selectedIndex, err = loadBalancer(stream, selectedIndex)
+			resp, selectedUrl, selectedIndex, err = loadBalancer(stream, testedIndexes)
 			if err != nil {
 				log.Printf("Error reloading stream for %s: %v\n", streamSlug, err)
 				http.Error(w, "Error fetching stream. Exhausted all streams.", http.StatusInternalServerError)
@@ -151,7 +154,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 			}
 
 			// HTTP header initialization
-			if selectedIndex == -1 {
+			if len(testedIndexes) == 0 {
 				w.Header().Set("Cache-Control", "no-cache")
 				w.Header().Set("Access-Control-Allow-Origin", "*")
 				for k, v := range resp.Header {
@@ -162,12 +165,14 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 					}
 				}
 			}
+
 			exitStatus := make(chan int)
 
 			log.Printf("Proxying %s to %s\n", r.RemoteAddr, selectedUrl)
 			go func(m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan int) {
 				proxyStream(m3uIndex, resp, r, w, exitStatus)
 			}(selectedIndex, resp, r, w, exitStatus)
+			testedIndexes = append(testedIndexes, selectedIndex)
 
 			streamExitCode := <-exitStatus
 			log.Printf("Exit code %d received from %s\n", streamExitCode, selectedUrl)
