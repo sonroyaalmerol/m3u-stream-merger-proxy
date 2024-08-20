@@ -47,5 +47,8 @@ func (c *Cache) Clear(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	delete(c.entries, key)
+	_, ok := c.entries[key]
+	if ok {
+		delete(c.entries, key)
+	}
 }
