@@ -54,7 +54,6 @@ func updateSources(ctx context.Context) {
 			go func(currDb *database.Instance, m3uUrl string, index int) {
 				defer wg.Done()
 				updateSource(currDb, m3uUrl, index)
-				currDb.Cache.Clear("streams_sorted_cache")
 			}(db, m3uUrl, index)
 
 			index++
@@ -106,6 +105,7 @@ func main() {
 	c := cron.New()
 	_, err = c.AddFunc(cronSched, func() {
 		go updateSources(ctx)
+		db.Cache.Clear("streams_sorted_cache")
 	})
 	if err != nil {
 		log.Fatalf("Error initializing background processes: %v", err)
