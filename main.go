@@ -30,10 +30,13 @@ func updateSource(nextDb *database.Instance, m3uUrl string, index int) {
 
 }
 
-func updateSources(ctx context.Context) {
+func updateSources(ctx context.Context, ewg *sync.WaitGroup) {
 	// Ensure only one job is running at a time
 	cronMutex.Lock()
 	defer cronMutex.Unlock()
+	if ewg != nil {
+		defer ewg.Done()
+	}
 
 	select {
 	case <-ctx.Done():
@@ -96,6 +99,11 @@ func main() {
 		log.Fatalf("Error clearing concurrency database: %v", err)
 	}
 
+	cacheOnSync := os.Getenv("CACHE_ON_SYNC")
+	if len(strings.TrimSpace(cacheOnSync)) == 0 {
+		cacheOnSync = "false"
+	}
+
 	cronSched := os.Getenv("SYNC_CRON")
 	if len(strings.TrimSpace(cronSched)) == 0 {
 		log.Println("SYNC_CRON not initialized. Defaulting to 0 0 * * * (12am every day).")
@@ -104,7 +112,24 @@ func main() {
 
 	c := cron.New()
 	_, err = c.AddFunc(cronSched, func() {
-		go updateSources(ctx)
+		var wg sync.WaitGroup
+
+		wg.Add(1)
+		go updateSources(ctx, &wg)
+		if cacheOnSync == "true" {
+			wg.Wait()
+			log.Println("CACHE_ON_SYNC enabled. Building cache.")
+			cacheErr := make(chan error)
+			go func(db *database.Instance) {
+				_, err := db.GetStreams()
+				cacheErr <- err
+			}(db)
+			go func() {
+				if <-cacheErr != nil {
+					log.Printf("CACHE_ON_SYNC error: %v\n", err)
+				}
+			}()
+		}
 	})
 	if err != nil {
 		log.Fatalf("Error initializing background processes: %v", err)
@@ -118,7 +143,25 @@ func main() {
 
 	if syncOnBoot == "true" {
 		log.Println("SYNC_ON_BOOT enabled. Starting initial M3U update.")
-		go updateSources(ctx)
+
+		var wg sync.WaitGroup
+
+		wg.Add(1)
+		go updateSources(ctx, &wg)
+		if cacheOnSync == "true" {
+			wg.Wait()
+			log.Println("CACHE_ON_SYNC enabled. Building cache.")
+			cacheErr := make(chan error)
+			go func(db *database.Instance) {
+				_, err := db.GetStreams()
+				cacheErr <- err
+			}(db)
+			go func() {
+				if <-cacheErr != nil {
+					log.Printf("CACHE_ON_SYNC error: %v\n", err)
+				}
+			}()
+		}
 	}
 
 	clearOnBoot := os.Getenv("CLEAR_ON_BOOT")
