@@ -100,6 +100,7 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | TZ                          | Set timezone                                           | Etc/UTC     | [TZ Identifiers](https://nodatime.org/TimeZones) |
 | SYNC_CRON                   | Set cron schedule expression of the background updates. | 0 0 * * *   |  Any valid cron expression    |
 | SYNC_ON_BOOT                | Set if an initial background syncing will be executed on boot | true    | true/false   |
+| CACHE_ON_SYNC               | Set if an initial background cache building will be executed after sync | false | true/false   |
 | CLEAR_ON_BOOT                | Set if an initial database clearing will be executed on boot | false   | true/false   |
 | DEBUG                | Set if verbose logging is enabled | false    | true/false   |
 

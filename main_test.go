@@ -37,7 +37,7 @@ func TestStreamHandler(t *testing.T) {
 	os.Setenv("BUFFER_MB", "3")
 	os.Setenv("INCLUDE_GROUPS_1", "movies")
 
-	updateSources(ctx)
+	updateSources(ctx, nil)
 
 	streams, err := db.GetStreams()
 	if err != nil {
