@@ -129,7 +129,9 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 		return
 	}
 
-	currentIndex := -1
+	selectedIndex := -1
+	selectedUrl := ""
+
 	var resp *http.Response
 
 	for {
@@ -141,10 +143,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 			}
 			return
 		default:
-			var selectedUrl string
-			var selectedIndex int
-
-			resp, selectedUrl, selectedIndex, err = loadBalancer(stream, currentIndex)
+			resp, selectedUrl, selectedIndex, err = loadBalancer(stream, selectedIndex)
 			if err != nil {
 				log.Printf("Error reloading stream for %s: %v\n", streamSlug, err)
 				http.Error(w, "Error fetching stream. Exhausted all streams.", http.StatusInternalServerError)
@@ -152,7 +151,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 			}
 
 			// HTTP header initialization
-			if currentIndex == -1 {
+			if selectedIndex == -1 {
 				w.Header().Set("Cache-Control", "no-cache")
 				w.Header().Set("Access-Control-Allow-Origin", "*")
 				for k, v := range resp.Header {
@@ -165,12 +164,10 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 			}
 			exitStatus := make(chan int)
 
-			currentIndex = selectedIndex
-
 			log.Printf("Proxying %s to %s\n", r.RemoteAddr, selectedUrl)
 			go func(m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan int) {
 				proxyStream(m3uIndex, resp, r, w, exitStatus)
-			}(currentIndex, resp, r, w, exitStatus)
+			}(selectedIndex, resp, r, w, exitStatus)
 
 			streamExitCode := <-exitStatus
 			log.Printf("Exit code %d received from %s\n", streamExitCode, selectedUrl)
