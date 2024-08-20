@@ -130,8 +130,9 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 		return
 	}
 
-	selectedIndex := -1
-	selectedUrl := ""
+	var selectedIndex int
+	var selectedUrl string
+
 	testedIndexes := []int{}
 
 	var resp *http.Response
@@ -153,7 +154,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 			}
 
 			// HTTP header initialization
-			if selectedIndex == -1 {
+			if len(testedIndexes) == 0 {
 				w.Header().Set("Cache-Control", "no-cache")
 				w.Header().Set("Access-Control-Allow-Origin", "*")
 				for k, v := range resp.Header {
