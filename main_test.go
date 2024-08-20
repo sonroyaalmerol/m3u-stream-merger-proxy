@@ -62,7 +62,7 @@ func TestStreamHandler(t *testing.T) {
 		go func(stream database.StreamInfo) {
 			defer wg.Done()
 			log.Printf("Stream (%s): %v", stream.Title, stream)
-			req := httptest.NewRequest("GET", strings.TrimSpace(m3u.GenerateStreamURL("", stream.Slug, stream.URLs[0].Content)), nil)
+			req := httptest.NewRequest("GET", strings.TrimSpace(m3u.GenerateStreamURL("", stream.Slug, stream.URLs[0])), nil)
 			w := httptest.NewRecorder()
 
 			// Call the handler function
@@ -74,7 +74,7 @@ func TestStreamHandler(t *testing.T) {
 				t.Errorf("%s - Expected status code %d, got %d", stream.Title, http.StatusOK, resp.StatusCode)
 			}
 
-			res, err := http.Get(stream.URLs[0].Content)
+			res, err := http.Get(stream.URLs[0])
 			if err != nil {
 				t.Errorf("HttpGet returned error: %v", err)
 			}

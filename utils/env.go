@@ -2,6 +2,8 @@ package utils
 
 import (
 	"os"
+	"strconv"
+	"strings"
 )
 
 func GetEnv(env string) string {
@@ -16,4 +18,20 @@ func GetEnv(env string) string {
 	default:
 		return ""
 	}
+}
+
+func GetM3UIndexes() []int {
+	m3uIndexes := []int{}
+	for _, env := range os.Environ() {
+		pair := strings.SplitN(env, "=", 2)
+		if strings.HasPrefix(pair[0], "M3U_URL_") {
+			indexString := strings.TrimPrefix(pair[0], "M3U_URL_")
+			index, err := strconv.Atoi(indexString)
+			if err != nil {
+				continue
+			}
+			m3uIndexes = append(m3uIndexes, index)
+		}
+	}
+	return m3uIndexes
 }
