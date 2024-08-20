@@ -16,6 +16,8 @@ import (
 )
 
 func loadBalancer(stream database.StreamInfo, previous []int) (*http.Response, string, int, error) {
+	debug := os.Getenv("DEBUG") == "true"
+
 	m3uIndexes := utils.GetM3UIndexes()
 
 	sort.Slice(m3uIndexes, func(i, j int) bool {
@@ -49,12 +51,21 @@ func loadBalancer(stream database.StreamInfo, previous []int) (*http.Response, s
 
 			resp, err := utils.CustomHttpRequest("GET", url)
 			if err == nil {
+				if debug {
+					log.Printf("[DEBUG] Successfully fetched stream from %s\n", url)
+				}
 				return resp, url, index, nil
 			}
 			log.Printf("Error fetching stream: %s\n", err.Error())
+			if debug {
+				log.Printf("[DEBUG] Error fetching stream from %s: %s\n", url, err.Error())
+			}
 		}
 
 		if allSkipped {
+			if debug {
+				log.Printf("[DEBUG] All streams skipped in lap %d\n", lap)
+			}
 			break
 		}
 
@@ -104,6 +115,8 @@ func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.Resp
 }
 
 func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
+	debug := os.Getenv("DEBUG") == "true"
+
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
@@ -164,6 +177,9 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 						}
 					}
 				}
+				if debug {
+					log.Printf("[DEBUG] Headers set for response: %v\n", w.Header())
+				}
 			}
 
 			exitStatus := make(chan int)
@@ -188,3 +204,4 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 		}
 	}
 }
+
