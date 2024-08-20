@@ -36,7 +36,7 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 	debug := os.Getenv("DEBUG") == "true"
 
 	if debug {
-		log.Println("DEBUG: Generating M3U content")
+		log.Println("[DEBUG] Generating M3U content")
 	}
 
 	streams, err := db.GetStreams()
@@ -45,7 +45,7 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 	}
 
 	if debug {
-		log.Printf("DEBUG: Retrieved %d streams\n", len(streams))
+		log.Printf("[DEBUG] Retrieved %d streams\n", len(streams))
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
@@ -59,7 +59,7 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 	}
 
 	if debug {
-		log.Printf("DEBUG: Base URL set to %s\n", baseUrl)
+		log.Printf("[DEBUG] Base URL set to %s\n", baseUrl)
 	}
 
 	_, err = fmt.Fprintf(w, "#EXTM3U\n")
@@ -73,28 +73,28 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 		}
 
 		if debug {
-			log.Printf("DEBUG: Processing stream with TVG ID: %s\n", stream.TvgID)
+			log.Printf("[DEBUG] Processing stream with TVG ID: %s\n", stream.TvgID)
 		}
 
 		_, err := fmt.Fprintf(w, "#EXTINF:-1 channelID=\"x-ID.%s\" tvg-chno=\"%s\" tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
 			stream.TvgID, stream.TvgChNo, stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title)
 		if err != nil {
 			if debug {
-				log.Printf("DEBUG: Error writing #EXTINF line for stream %s: %v\n", stream.TvgID, err)
+				log.Printf("[DEBUG] Error writing #EXTINF line for stream %s: %v\n", stream.TvgID, err)
 			}
 			continue
 		}
 
-		_, err = fmt.Fprintf(w, "%s\n", GenerateStreamURL(baseUrl, stream.Slug, stream.URLs[0]))
+		_, err = fmt.Fprintf(w, "%s", GenerateStreamURL(baseUrl, stream.Slug, stream.URLs[0]))
 		if err != nil {
 			if debug {
-				log.Printf("DEBUG: Error writing stream URL for stream %s: %v\n", stream.TvgID, err)
+				log.Printf("[DEBUG] Error writing stream URL for stream %s: %v\n", stream.TvgID, err)
 			}
 			continue
 		}
 	}
 
 	if debug {
-		log.Println("DEBUG: Finished generating M3U content")
+		log.Println("[DEBUG] Finished generating M3U content")
 	}
 }
