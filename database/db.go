@@ -148,6 +148,7 @@ func (db *Instance) GetStreamBySlug(slug string) (StreamInfo, error) {
 		TvgChNo: streamData["tvg_chno"],
 		LogoURL: streamData["logo_url"],
 		Group:   streamData["group_name"],
+		URLs:    map[int]string{},
 	}
 
 	cursor := uint64(0)
@@ -234,6 +235,7 @@ func (db *Instance) GetStreams() ([]StreamInfo, error) {
 			TvgChNo: streamData["tvg_chno"],
 			LogoURL: streamData["logo_url"],
 			Group:   streamData["group_name"],
+			URLs:    map[int]string{},
 		}
 
 		urlKeys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", streamKeys[i])).Result()
