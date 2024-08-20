@@ -105,7 +105,6 @@ func main() {
 	c := cron.New()
 	_, err = c.AddFunc(cronSched, func() {
 		go updateSources(ctx)
-		db.Cache.Clear("streams_sorted_cache")
 	})
 	if err != nil {
 		log.Fatalf("Error initializing background processes: %v", err)

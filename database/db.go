@@ -94,6 +94,7 @@ func (db *Instance) SaveToDb(streams []StreamInfo) error {
 		}
 	}
 
+	db.Cache.Clear("streams_sorted_cache")
 	return nil
 }
 
@@ -130,6 +131,7 @@ func (db *Instance) DeleteStreamBySlug(slug string) error {
 		return fmt.Errorf("error deleting stream from Redis: %v", err)
 	}
 
+	db.Cache.Clear("streams_sorted_cache")
 	return nil
 }
 
@@ -138,6 +140,7 @@ func (db *Instance) DeleteStreamURL(s StreamInfo, m3uIndex int) error {
 		return fmt.Errorf("error deleting stream URL from Redis: %v", err)
 	}
 
+	db.Cache.Clear("streams_sorted_cache")
 	return nil
 }
 
