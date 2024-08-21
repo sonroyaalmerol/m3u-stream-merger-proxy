@@ -39,14 +39,6 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 		log.Println("[DEBUG] Generating M3U content")
 	}
 
-	streamChan := make(chan []database.StreamInfo)
-	errChan := make(chan error)
-
-	_, err := db.GetStreams(streamChan, errChan)
-	if err != nil {
-		log.Println(fmt.Errorf("GetStreams error: %v", err))
-	}
-
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
@@ -61,21 +53,33 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 		log.Printf("[DEBUG] Base URL set to %s\n", baseUrl)
 	}
 
-	_, err = fmt.Fprintf(w, "#EXTM3U\n")
+	_, err := fmt.Fprintf(w, "#EXTM3U\n")
 	if err != nil {
 		log.Println(fmt.Errorf("Fprintf error: %v", err))
+		return
 	}
+
+	streamChan := make(chan []database.StreamInfo)
+	errChan := make(chan error)
+
+	go func() {
+		defer close(streamChan)
+		defer close(errChan)
+
+		_, err := db.GetStreams(streamChan, errChan)
+		if err != nil {
+			errChan <- err
+			return
+		}
+	}()
 
 	for {
 		select {
 		case streamBatch, ok := <-streamChan:
 			if !ok {
-				if debug {
-					log.Println("[DEBUG] Finished generating M3U content")
-				}
+				// Channel closed, break out of the loop
 				return
 			}
-
 			for _, stream := range streamBatch {
 				if len(stream.URLs) == 0 {
 					continue
@@ -102,12 +106,15 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 					continue
 				}
 			}
-
-		case err := <-errChan:
-			if err != nil {
-				log.Println(fmt.Errorf("GetStreams error: %v", err))
+		case err, ok := <-errChan:
+			if !ok {
+				if debug {
+					log.Println("[DEBUG] Finished generating M3U content")
+				}
 				return
 			}
+			log.Println(fmt.Errorf("GetStreams error: %v", err))
+			return
 		}
 	}
 }

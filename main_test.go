@@ -41,6 +41,8 @@ func TestStreamHandler(t *testing.T) {
 
 	streamChan := make(chan []database.StreamInfo)
 	errChan := make(chan error)
+	defer close(streamChan)
+	defer close(errChan)
 	streams, err := db.GetStreams(streamChan, errChan)
 	if err != nil {
 		t.Errorf("GetStreams returned error: %v", err)

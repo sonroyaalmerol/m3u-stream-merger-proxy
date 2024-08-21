@@ -143,6 +143,8 @@ http://example.com/fox
 
 	streamChan := make(chan []database.StreamInfo)
 	errChan := make(chan error)
+	defer close(streamChan)
+	defer close(errChan)
 	storedStreams, err := db.GetStreams(streamChan, errChan)
 	if err != nil {
 		t.Fatalf("Error retrieving streams from database: %v", err)

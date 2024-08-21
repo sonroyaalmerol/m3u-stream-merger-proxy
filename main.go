@@ -122,6 +122,8 @@ func main() {
 			go func(db *database.Instance) {
 				streamChan := make(chan []database.StreamInfo)
 				errChan := make(chan error)
+				defer close(streamChan)
+				defer close(errChan)
 				_, err := db.GetStreams(streamChan, errChan)
 				if err != nil {
 					log.Printf("CACHE_ON_SYNC error: %v\n", err)
@@ -152,6 +154,8 @@ func main() {
 			go func(db *database.Instance) {
 				streamChan := make(chan []database.StreamInfo)
 				errChan := make(chan error)
+				defer close(streamChan)
+				defer close(errChan)
 				_, err := db.GetStreams(streamChan, errChan)
 				if err != nil {
 					log.Printf("CACHE_ON_SYNC error: %v\n", err)
