@@ -141,7 +141,9 @@ http://example.com/fox
 		{Slug: "fox", Title: "FOX", TvgChNo: "0.0", Group: "Entertainment", URLs: map[int]string{0: "http://example.com/fox", 1: "http://example.com/fox"}},
 	}
 
-	storedStreams, err := db.GetStreams()
+	streamChan := make(chan []database.StreamInfo)
+	errChan := make(chan error)
+	storedStreams, err := db.GetStreams(streamChan, errChan)
 	if err != nil {
 		t.Fatalf("Error retrieving streams from database: %v", err)
 	}

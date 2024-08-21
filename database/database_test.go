@@ -42,7 +42,9 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 		t.Errorf("SaveToDb returned error: %v", err)
 	}
 
-	result, err := db.GetStreams(nil, nil)
+	streamChan := make(chan []StreamInfo)
+	errChan := make(chan error)
+	result, err := db.GetStreams(streamChan, errChan)
 	if err != nil {
 		t.Errorf("GetStreams returned error: %v", err)
 	}
@@ -67,7 +69,9 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 		t.Errorf("DeleteStreamURL returned error: %v", err)
 	}
 
-	result, err = db.GetStreams(nil, nil)
+	streamChan = make(chan []StreamInfo)
+	errChan = make(chan error)
+	result, err = db.GetStreams(streamChan, errChan)
 	if err != nil {
 		t.Errorf("GetStreams returned error: %v", err)
 	}

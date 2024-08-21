@@ -120,7 +120,9 @@ func main() {
 			wg.Wait()
 			log.Println("CACHE_ON_SYNC enabled. Building cache.")
 			go func(db *database.Instance) {
-				_, err := db.GetStreams(nil, nil)
+				streamChan := make(chan []database.StreamInfo)
+				errChan := make(chan error)
+				_, err := db.GetStreams(streamChan, errChan)
 				if err != nil {
 					log.Printf("CACHE_ON_SYNC error: %v\n", err)
 				}
@@ -148,7 +150,9 @@ func main() {
 			wg.Wait()
 			log.Println("CACHE_ON_SYNC enabled. Building cache.")
 			go func(db *database.Instance) {
-				_, err := db.GetStreams(nil, nil)
+				streamChan := make(chan []database.StreamInfo)
+				errChan := make(chan error)
+				_, err := db.GetStreams(streamChan, errChan)
 				if err != nil {
 					log.Printf("CACHE_ON_SYNC error: %v\n", err)
 				}
