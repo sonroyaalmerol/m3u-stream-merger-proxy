@@ -39,7 +39,7 @@ func TestStreamHandler(t *testing.T) {
 
 	updateSources(ctx, nil)
 
-	streams, err := db.GetStreams()
+	streams, err := db.GetStreams(nil, nil)
 	if err != nil {
 		t.Errorf("GetStreams returned error: %v", err)
 	}

@@ -42,7 +42,7 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 		t.Errorf("SaveToDb returned error: %v", err)
 	}
 
-	result, err := db.GetStreams()
+	result, err := db.GetStreams(nil, nil)
 	if err != nil {
 		t.Errorf("GetStreams returned error: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 		t.Errorf("DeleteStreamURL returned error: %v", err)
 	}
 
-	result, err = db.GetStreams()
+	result, err = db.GetStreams(nil, nil)
 	if err != nil {
 		t.Errorf("GetStreams returned error: %v", err)
 	}

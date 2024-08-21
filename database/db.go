@@ -233,7 +233,7 @@ func (db *Instance) GetStreamBySlug(slug string) (StreamInfo, error) {
 	return s, nil
 }
 
-func (db *Instance) GetStreams() ([]StreamInfo, error) {
+func (db *Instance) GetStreams(out chan<- []StreamInfo, mainErr chan<- error) ([]StreamInfo, error) {
 	var debug = os.Getenv("DEBUG") == "true"
 
 	// Check if the data is in the cache
@@ -241,6 +241,9 @@ func (db *Instance) GetStreams() ([]StreamInfo, error) {
 	if data, found := db.Cache.Get(cacheKey); found {
 		if debug {
 			log.Printf("[DEBUG] Cache hit for key %s\n", cacheKey)
+		}
+		if out != nil {
+			out <- data
 		}
 		return data, nil
 	}
@@ -397,10 +400,16 @@ func (db *Instance) GetStreams() ([]StreamInfo, error) {
 	// Collect all streams and check for errors
 	var streams []StreamInfo
 	for chunkStreams := range resultChan {
+		if out != nil {
+			out <- chunkStreams
+		}
 		streams = append(streams, chunkStreams...)
 	}
 
 	if len(errChan) > 0 {
+		if mainErr != nil {
+			mainErr <- <-errChan
+		}
 		return nil, <-errChan
 	}
 

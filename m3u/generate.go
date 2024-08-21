@@ -39,13 +39,12 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 		log.Println("[DEBUG] Generating M3U content")
 	}
 
-	streams, err := db.GetStreams()
+	streamChan := make(chan []database.StreamInfo)
+	errChan := make(chan error)
+
+	_, err := db.GetStreams(streamChan, errChan)
 	if err != nil {
 		log.Println(fmt.Errorf("GetStreams error: %v", err))
-	}
-
-	if debug {
-		log.Printf("[DEBUG] Retrieved %d streams\n", len(streams))
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
@@ -67,34 +66,48 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 		log.Println(fmt.Errorf("Fprintf error: %v", err))
 	}
 
-	for _, stream := range streams {
-		if len(stream.URLs) == 0 {
-			continue
-		}
-
-		if debug {
-			log.Printf("[DEBUG] Processing stream with TVG ID: %s\n", stream.TvgID)
-		}
-
-		_, err := fmt.Fprintf(w, "#EXTINF:-1 channelID=\"x-ID.%s\" tvg-chno=\"%s\" tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
-			stream.TvgID, stream.TvgChNo, stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title)
-		if err != nil {
-			if debug {
-				log.Printf("[DEBUG] Error writing #EXTINF line for stream %s: %v\n", stream.TvgID, err)
+	for {
+		select {
+		case streamBatch, ok := <-streamChan:
+			if !ok {
+				if debug {
+					log.Println("[DEBUG] Finished generating M3U content")
+				}
+				return
 			}
-			continue
-		}
 
-		_, err = fmt.Fprintf(w, "%s", GenerateStreamURL(baseUrl, stream.Slug, stream.URLs[0]))
-		if err != nil {
-			if debug {
-				log.Printf("[DEBUG] Error writing stream URL for stream %s: %v\n", stream.TvgID, err)
+			for _, stream := range streamBatch {
+				if len(stream.URLs) == 0 {
+					continue
+				}
+
+				if debug {
+					log.Printf("[DEBUG] Processing stream with TVG ID: %s\n", stream.TvgID)
+				}
+
+				_, err := fmt.Fprintf(w, "#EXTINF:-1 channelID=\"x-ID.%s\" tvg-chno=\"%s\" tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
+					stream.TvgID, stream.TvgChNo, stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title)
+				if err != nil {
+					if debug {
+						log.Printf("[DEBUG] Error writing #EXTINF line for stream %s: %v\n", stream.TvgID, err)
+					}
+					continue
+				}
+
+				_, err = fmt.Fprintf(w, "%s", GenerateStreamURL(baseUrl, stream.Slug, stream.URLs[0]))
+				if err != nil {
+					if debug {
+						log.Printf("[DEBUG] Error writing stream URL for stream %s: %v\n", stream.TvgID, err)
+					}
+					continue
+				}
 			}
-			continue
-		}
-	}
 
-	if debug {
-		log.Println("[DEBUG] Finished generating M3U content")
+		case err := <-errChan:
+			if err != nil {
+				log.Println(fmt.Errorf("GetStreams error: %v", err))
+				return
+			}
+		}
 	}
 }
