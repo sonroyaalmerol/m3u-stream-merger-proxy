@@ -44,12 +44,12 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 
 	streamChan := make(chan []StreamInfo)
 	errChan := make(chan error)
-	defer close(streamChan)
-	defer close(errChan)
 	result, err := db.GetStreams(streamChan, errChan)
 	if err != nil {
 		t.Errorf("GetStreams returned error: %v", err)
 	}
+	close(streamChan)
+	close(errChan)
 
 	if len(result) != len(expected) {
 		t.Errorf("GetStreams returned %+v, expected %+v", result, expected)
@@ -77,6 +77,8 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 	if err != nil {
 		t.Errorf("GetStreams returned error: %v", err)
 	}
+	close(streamChan)
+	close(errChan)
 
 	expected = expected[:1]
 	expected[0].URLs = map[int]string{}
