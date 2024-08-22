@@ -205,7 +205,7 @@ func (db *Instance) GetStreamBySlug(slug string) (StreamInfo, error) {
 		if len(keys) > 0 {
 			results, err := db.Redis.Pipelined(db.Ctx, func(pipe redis.Pipeliner) error {
 				for _, key := range keys {
-					pipe.HGetAll(db.Ctx, key)
+					pipe.Get(db.Ctx, key)
 				}
 				return nil
 			})
