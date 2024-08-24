@@ -15,7 +15,7 @@ import (
 	"strings"
 )
 
-func loadBalancer(stream database.StreamInfo, previous []int) (*http.Response, string, int, error) {
+func loadBalancer(stream database.StreamInfo, previous *[]int) (*http.Response, string, int, error) {
 	debug := os.Getenv("DEBUG") == "true"
 
 	m3uIndexes := utils.GetM3UIndexes()
@@ -24,14 +24,22 @@ func loadBalancer(stream database.StreamInfo, previous []int) (*http.Response, s
 		return db.ConcurrencyPriorityValue(i) > db.ConcurrencyPriorityValue(j)
 	})
 
-	const maxLaps = 5
+	maxLapsString := os.Getenv("MAX_RETRIES")
+	maxLaps, err := strconv.Atoi(strings.TrimSpace(maxLapsString))
+	if err != nil || maxLaps < 0 {
+		maxLaps = 5
+	}
+
 	lap := 0
 
-	for lap < maxLaps {
+	for lap < maxLaps || maxLaps == 0 {
+		if debug {
+			log.Printf("[DEBUG] Stream attempt %d out of %d\n", lap+1, maxLaps)
+		}
 		allSkipped := true // Assume all URLs might be skipped
 
 		for _, index := range m3uIndexes {
-			if slices.Contains(previous, index) {
+			if slices.Contains(*previous, index) {
 				log.Printf("Skipping M3U_%d: marked as previous stream\n", index+1)
 				continue
 			}
@@ -66,7 +74,7 @@ func loadBalancer(stream database.StreamInfo, previous []int) (*http.Response, s
 			if debug {
 				log.Printf("[DEBUG] All streams skipped in lap %d\n", lap)
 			}
-			break
+			*previous = []int{}
 		}
 
 		lap++
@@ -146,6 +154,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 	var selectedUrl string
 
 	testedIndexes := []int{}
+	firstWrite := true
 
 	var resp *http.Response
 
@@ -158,15 +167,14 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 			}
 			return
 		default:
-			resp, selectedUrl, selectedIndex, err = loadBalancer(stream, testedIndexes)
+			resp, selectedUrl, selectedIndex, err = loadBalancer(stream, &testedIndexes)
 			if err != nil {
 				log.Printf("Error reloading stream for %s: %v\n", streamSlug, err)
-				http.Error(w, "Error fetching stream. Exhausted all streams.", http.StatusInternalServerError)
 				return
 			}
 
 			// HTTP header initialization
-			if len(testedIndexes) == 0 {
+			if firstWrite {
 				w.Header().Set("Cache-Control", "no-cache")
 				w.Header().Set("Access-Control-Allow-Origin", "*")
 				for k, v := range resp.Header {
@@ -179,6 +187,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 				if debug {
 					log.Printf("[DEBUG] Headers set for response: %v\n", w.Header())
 				}
+				firstWrite = false
 			}
 
 			exitStatus := make(chan int)
