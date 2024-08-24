@@ -96,6 +96,13 @@ func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.Resp
 		buffer = make([]byte, bufferMbInt*1024*1024)
 	}
 
+	defer func() {
+		buffer = nil
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}()
+
 	for {
 		n, err := resp.Body.Read(buffer)
 		if err != nil {
