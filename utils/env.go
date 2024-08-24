@@ -30,7 +30,7 @@ func GetM3UIndexes() []int {
 			if err != nil {
 				continue
 			}
-			m3uIndexes = append(m3uIndexes, index)
+			m3uIndexes = append(m3uIndexes, index-1)
 		}
 	}
 	return m3uIndexes

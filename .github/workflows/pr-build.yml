@@ -25,9 +25,16 @@ jobs:
             image=moby/buildkit:master
             network=host
 
-      - name: Docker - Build / Push
-        id: docker_build
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT }}
+
+      - name: Docker - Build and Push
         uses: docker/build-push-action@v5
         with:
-          push: false
-          tags: ${{ github.run_id }}
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:pr-${{ github.run_id }}
+
