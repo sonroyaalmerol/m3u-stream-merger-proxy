@@ -26,7 +26,7 @@ func loadBalancer(stream database.StreamInfo, previous *[]int) (*http.Response, 
 
 	maxLapsString := os.Getenv("MAX_RETRIES")
 	maxLaps, err := strconv.Atoi(strings.TrimSpace(maxLapsString))
-	if err != nil {
+	if err != nil || maxLaps < 0 {
 		maxLaps = 5
 	}
 
