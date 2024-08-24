@@ -39,15 +39,7 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 		log.Println("[DEBUG] Generating M3U content")
 	}
 
-	streams, err := db.GetStreams()
-	if err != nil {
-		log.Println(fmt.Errorf("GetStreams error: %v", err))
-	}
-
-	if debug {
-		log.Printf("[DEBUG] Retrieved %d streams\n", len(streams))
-	}
-
+	// Set response headers
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
@@ -62,12 +54,16 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 		log.Printf("[DEBUG] Base URL set to %s\n", baseUrl)
 	}
 
-	_, err = fmt.Fprintf(w, "#EXTM3U\n")
+	// Write the M3U header
+	_, err := fmt.Fprintf(w, "#EXTM3U\n")
 	if err != nil {
 		log.Println(fmt.Errorf("Fprintf error: %v", err))
+		return
 	}
 
-	for _, stream := range streams {
+	// Retrieve the streams from the database using channels
+	streamChan := db.GetStreams()
+	for stream := range streamChan {
 		if len(stream.URLs) == 0 {
 			continue
 		}
@@ -76,6 +72,7 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 			log.Printf("[DEBUG] Processing stream with TVG ID: %s\n", stream.TvgID)
 		}
 
+		// Write the stream info to the response
 		_, err := fmt.Fprintf(w, "#EXTINF:-1 channelID=\"x-ID.%s\" tvg-chno=\"%s\" tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
 			stream.TvgID, stream.TvgChNo, stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title)
 		if err != nil {
@@ -85,6 +82,7 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 			continue
 		}
 
+		// Write the actual stream URL to the response
 		_, err = fmt.Fprintf(w, "%s", GenerateStreamURL(baseUrl, stream.Slug, stream.URLs[0]))
 		if err != nil {
 			if debug {

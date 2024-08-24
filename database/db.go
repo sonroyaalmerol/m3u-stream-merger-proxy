@@ -8,7 +8,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -233,185 +232,99 @@ func (db *Instance) GetStreamBySlug(slug string) (StreamInfo, error) {
 	return s, nil
 }
 
-func (db *Instance) GetStreams() ([]StreamInfo, error) {
+func (db *Instance) GetStreams() <-chan StreamInfo {
 	var debug = os.Getenv("DEBUG") == "true"
 
-	// Check if the data is in the cache
-	cacheKey := "streams_sorted_cache"
-	if data, found := db.Cache.Get(cacheKey); found {
-		if debug {
-			log.Printf("[DEBUG] Cache hit for key %s\n", cacheKey)
-		}
-		return data, nil
-	}
+	// Channels for streaming results and errors
+	streamChan := make(chan StreamInfo)
 
-	if debug {
-		log.Println("[DEBUG] Cache miss. Retrieving streams from Redis...")
-	}
+	go func() {
+		defer close(streamChan)
 
-	keys, err := db.Redis.ZRange(db.Ctx, "streams_sorted", 0, -1).Result()
-	if err != nil {
-		return nil, fmt.Errorf("error retrieving streams: %v", err)
-	}
-
-	// Filter out URL keys
-	var streamKeys []string
-	for _, key := range keys {
-		if !strings.Contains(key, ":url:") {
-			streamKeys = append(streamKeys, key)
-		}
-	}
-
-	if debug {
-		log.Printf("[DEBUG] Filtered stream keys: %v\n", streamKeys)
-	}
-
-	// Split the stream keys into chunks
-	chunkSize := 100
-	var chunks [][]string
-	for i := 0; i < len(streamKeys); i += chunkSize {
-		end := i + chunkSize
-		if end > len(streamKeys) {
-			end = len(streamKeys)
-		}
-		chunks = append(chunks, streamKeys[i:end])
-	}
-
-	if debug {
-		log.Printf("[DEBUG] Chunks created: %d chunks\n", len(chunks))
-	}
-
-	// Create channels for work distribution and results collection
-	workChan := make(chan []string, len(chunks))
-	resultChan := make(chan []StreamInfo, len(chunks))
-	errChan := make(chan error, len(chunks))
-
-	// Define the number of workers
-	parserWorkers := os.Getenv("PARSER_WORKERS")
-	if parserWorkers == "" {
-		parserWorkers = "5"
-	}
-	numWorkers, err := strconv.Atoi(parserWorkers)
-	if err != nil {
-		numWorkers = 5
-	}
-
-	if debug {
-		log.Printf("[DEBUG] Number of workers: %d\n", numWorkers)
-	}
-
-	var wg sync.WaitGroup
-
-	// Start the worker pool
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
+		// Check if the data is in the cache
+		cacheKey := "streams_sorted_cache"
+		if data, found := db.Cache.Get(cacheKey); found {
 			if debug {
-				log.Printf("[DEBUG] Worker %d started\n", workerID)
+				log.Printf("[DEBUG] Cache hit for key %s\n", cacheKey)
 			}
-			for chunk := range workChan {
-				pipe := db.Redis.Pipeline()
-				cmds := make([]*redis.MapStringStringCmd, len(chunk))
+			for _, stream := range data {
+				streamChan <- stream
+			}
+			return
+		}
 
-				for i, key := range chunk {
-					cmds[i] = pipe.HGetAll(db.Ctx, key)
-				}
+		if debug {
+			log.Println("[DEBUG] Cache miss. Retrieving streams from Redis...")
+		}
 
-				if debug {
-					log.Printf("[DEBUG] Executing pipeline for chunk: %v\n", chunk)
-				}
+		keys, err := db.Redis.ZRange(db.Ctx, "streams_sorted", 0, -1).Result()
+		if err != nil {
+			log.Printf("error retrieving streams: %v", err)
+			return
+		}
 
-				_, err := pipe.Exec(db.Ctx)
+		// Store the result in the cache
+		var streams []StreamInfo
+
+		// Filter out URL keys
+		for _, key := range keys {
+			if !strings.Contains(key, ":url:") {
+				streamData, err := db.Redis.HGetAll(db.Ctx, key).Result()
 				if err != nil {
-					errChan <- fmt.Errorf("error executing Redis pipeline: %v", err)
+					log.Printf("error retrieving stream data: %v", err)
 					return
 				}
 
-				var chunkStreams []StreamInfo
-				for i, cmd := range cmds {
-					streamData := cmd.Val()
-					if len(streamData) == 0 {
-						continue
-					}
+				slug := extractSlug(key)
+				stream := StreamInfo{
+					Slug:    slug,
+					Title:   streamData["title"],
+					TvgID:   streamData["tvg_id"],
+					TvgChNo: streamData["tvg_chno"],
+					LogoURL: streamData["logo_url"],
+					Group:   streamData["group_name"],
+					URLs:    map[int]string{},
+				}
 
-					slug := extractSlug(chunk[i])
-					stream := StreamInfo{
-						Slug:    slug,
-						Title:   streamData["title"],
-						TvgID:   streamData["tvg_id"],
-						TvgChNo: streamData["tvg_chno"],
-						LogoURL: streamData["logo_url"],
-						Group:   streamData["group_name"],
-						URLs:    map[int]string{},
-					}
+				if debug {
+					log.Printf("[DEBUG] Processing stream: %v\n", stream)
+				}
 
-					if debug {
-						log.Printf("[DEBUG] Processing stream: %v\n", stream)
-					}
+				urlKeys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", key)).Result()
+				if err != nil {
+					log.Printf("error finding URLs for stream: %v", err)
+					return
+				}
 
-					urlKeys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", chunk[i])).Result()
+				for _, urlKey := range urlKeys {
+					urlData, err := db.Redis.Get(db.Ctx, urlKey).Result()
 					if err != nil {
-						errChan <- fmt.Errorf("error finding URLs for stream: %v", err)
+						log.Printf("error getting URL data from Redis: %v", err)
 						return
 					}
 
-					for _, urlKey := range urlKeys {
-						urlData, err := db.Redis.Get(db.Ctx, urlKey).Result()
-						if err != nil {
-							errChan <- fmt.Errorf("error getting URL data from Redis: %v", err)
-							return
-						}
-
-						m3uIndex, err := strconv.Atoi(extractM3UIndex(urlKey))
-						if err != nil {
-							errChan <- fmt.Errorf("m3u index is not an integer: %v", err)
-							return
-						}
-						stream.URLs[m3uIndex] = urlData
+					m3uIndex, err := strconv.Atoi(extractM3UIndex(urlKey))
+					if err != nil {
+						log.Printf("m3u index is not an integer: %v", err)
+						return
 					}
-
-					chunkStreams = append(chunkStreams, stream)
+					stream.URLs[m3uIndex] = urlData
 				}
 
-				resultChan <- chunkStreams
+				// Send the stream to the channel
+				streams = append(streams, stream)
+				streamChan <- stream
 			}
-		}(i)
-	}
-
-	// Send work to the workers
-	go func() {
-		for _, chunk := range chunks {
-			workChan <- chunk
 		}
-		close(workChan)
+
+		db.Cache.Set(cacheKey, streams)
+
+		if debug {
+			log.Println("[DEBUG] Streams retrieved and cached successfully.")
+		}
 	}()
 
-	// Wait for all workers to finish
-	go func() {
-		wg.Wait()
-		close(resultChan)
-		close(errChan)
-	}()
-
-	// Collect all streams and check for errors
-	var streams []StreamInfo
-	for chunkStreams := range resultChan {
-		streams = append(streams, chunkStreams...)
-	}
-
-	if len(errChan) > 0 {
-		return nil, <-errChan
-	}
-
-	// Store the result in the cache before returning
-	db.Cache.Set(cacheKey, streams)
-
-	if debug {
-		log.Println("[DEBUG] Streams retrieved and cached successfully.")
-	}
-
-	return streams, nil
+	return streamChan
 }
 
 // GetConcurrency retrieves the concurrency count for the given m3uIndex

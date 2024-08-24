@@ -39,9 +39,11 @@ func TestStreamHandler(t *testing.T) {
 
 	updateSources(ctx, nil)
 
-	streams, err := db.GetStreams()
-	if err != nil {
-		t.Errorf("GetStreams returned error: %v", err)
+	streamChan := db.GetStreams()
+	streams := []database.StreamInfo{}
+
+	for stream := range streamChan {
+		streams = append(streams, stream)
 	}
 
 	m3uReq := httptest.NewRequest("GET", "/playlist.m3u", nil)
