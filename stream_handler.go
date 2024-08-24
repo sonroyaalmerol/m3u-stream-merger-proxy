@@ -126,19 +126,19 @@ func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.Resp
 						return
 					}
 					returnStatus = 2
-					log.Printf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutDuration)
+					log.Printf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
 					continue
 				}
 				log.Printf("Error reading stream: %s\n", err.Error())
 				returnStatus = 1
-				log.Printf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutDuration)
+				log.Printf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
 				continue
 			}
 
 			if _, err := w.Write(buffer[:n]); err != nil {
 				log.Printf("Error writing to response: %s\n", err.Error())
 				returnStatus = 0
-				log.Printf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutDuration)
+				log.Printf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
 				continue
 			}
 
