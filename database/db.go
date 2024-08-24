@@ -396,7 +396,7 @@ func getSortingValue(s StreamInfo) string {
 
 	// Try to parse the value as a float.
 	if numValue, err := strconv.ParseFloat(value, 64); err == nil {
-		return fmt.Sprintf("%010.2f", numValue) // Fixed-width string with zero-padding and 2 decimal places
+		return fmt.Sprintf("%010.2f", numValue) + s.Title
 	}
 
 	// If parsing fails, fall back to using the original string value.
@@ -405,7 +405,7 @@ func getSortingValue(s StreamInfo) string {
 
 func calculateSortScore(s StreamInfo) float64 {
 	// Add to the sorted set with tvg_id as the score
-	maxLen := 20
+	maxLen := 40
 	base := float64(256)
 
 	// Normalize length by padding the string
