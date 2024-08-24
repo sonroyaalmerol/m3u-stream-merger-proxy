@@ -233,16 +233,14 @@ func (db *Instance) GetStreamBySlug(slug string) (StreamInfo, error) {
 	return s, nil
 }
 
-func (db *Instance) GetStreams() (<-chan StreamInfo, <-chan error) {
+func (db *Instance) GetStreams() <-chan StreamInfo {
 	var debug = os.Getenv("DEBUG") == "true"
 
 	// Channels for streaming results and errors
 	streamChan := make(chan StreamInfo)
-	errChan := make(chan error, 1)
 
 	go func() {
 		defer close(streamChan)
-		defer close(errChan)
 
 		// Check if the data is in the cache
 		cacheKey := "streams_sorted_cache"
@@ -262,7 +260,7 @@ func (db *Instance) GetStreams() (<-chan StreamInfo, <-chan error) {
 
 		keys, err := db.Redis.ZRange(db.Ctx, "streams_sorted", 0, -1).Result()
 		if err != nil {
-			errChan <- fmt.Errorf("error retrieving streams: %v", err)
+			log.Printf("error retrieving streams: %v", err)
 			return
 		}
 
@@ -308,7 +306,7 @@ func (db *Instance) GetStreams() (<-chan StreamInfo, <-chan error) {
 				for key := range workChan {
 					streamData, err := db.Redis.HGetAll(db.Ctx, key).Result()
 					if err != nil {
-						errChan <- fmt.Errorf("error retrieving stream data: %v", err)
+						log.Printf("error retrieving stream data: %v", err)
 						return
 					}
 
@@ -329,20 +327,20 @@ func (db *Instance) GetStreams() (<-chan StreamInfo, <-chan error) {
 
 					urlKeys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", key)).Result()
 					if err != nil {
-						errChan <- fmt.Errorf("error finding URLs for stream: %v", err)
+						log.Printf("error finding URLs for stream: %v", err)
 						return
 					}
 
 					for _, urlKey := range urlKeys {
 						urlData, err := db.Redis.Get(db.Ctx, urlKey).Result()
 						if err != nil {
-							errChan <- fmt.Errorf("error getting URL data from Redis: %v", err)
+							log.Printf("error getting URL data from Redis: %v", err)
 							return
 						}
 
 						m3uIndex, err := strconv.Atoi(extractM3UIndex(urlKey))
 						if err != nil {
-							errChan <- fmt.Errorf("m3u index is not an integer: %v", err)
+							log.Printf("m3u index is not an integer: %v", err)
 							return
 						}
 						stream.URLs[m3uIndex] = urlData
@@ -375,11 +373,9 @@ func (db *Instance) GetStreams() (<-chan StreamInfo, <-chan error) {
 		if debug {
 			log.Println("[DEBUG] Streams retrieved and cached successfully.")
 		}
-
-		errChan <- nil
 	}()
 
-	return streamChan, errChan
+	return streamChan
 }
 
 // GetConcurrency retrieves the concurrency count for the given m3uIndex

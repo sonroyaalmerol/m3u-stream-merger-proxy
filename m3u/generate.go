@@ -62,59 +62,33 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 	}
 
 	// Retrieve the streams from the database using channels
-	streamChan, errChan := db.GetStreams()
-
-	for {
-		select {
-		case stream, ok := <-streamChan:
-			if !ok {
-				streamChan = nil // Close the channel when done
-				break
-			}
-
-			if len(stream.URLs) == 0 {
-				continue
-			}
-
-			if debug {
-				log.Printf("[DEBUG] Processing stream with TVG ID: %s\n", stream.TvgID)
-			}
-
-			// Write the stream info to the response
-			_, err := fmt.Fprintf(w, "#EXTINF:-1 channelID=\"x-ID.%s\" tvg-chno=\"%s\" tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
-				stream.TvgID, stream.TvgChNo, stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title)
-			if err != nil {
-				if debug {
-					log.Printf("[DEBUG] Error writing #EXTINF line for stream %s: %v\n", stream.TvgID, err)
-				}
-				continue
-			}
-
-			// Write the actual stream URL to the response
-			_, err = fmt.Fprintf(w, "%s\n", GenerateStreamURL(baseUrl, stream.Slug, stream.URLs[0]))
-			if err != nil {
-				if debug {
-					log.Printf("[DEBUG] Error writing stream URL for stream %s: %v\n", stream.TvgID, err)
-				}
-				continue
-			}
-
-		case err, ok := <-errChan:
-			if !ok {
-				errChan = nil // Close the channel when done
-				break
-			}
-			if err != nil {
-				log.Println(fmt.Errorf("Error retrieving streams: %v", err))
-				if debug {
-					log.Printf("[DEBUG] Error retrieving streams: %v\n", err)
-				}
-			}
+	streamChan := db.GetStreams()
+	for stream := range streamChan {
+		if len(stream.URLs) == 0 {
+			continue
 		}
 
-		// Exit the loop when both channels are closed
-		if streamChan == nil && errChan == nil {
-			break
+		if debug {
+			log.Printf("[DEBUG] Processing stream with TVG ID: %s\n", stream.TvgID)
+		}
+
+		// Write the stream info to the response
+		_, err := fmt.Fprintf(w, "#EXTINF:-1 channelID=\"x-ID.%s\" tvg-chno=\"%s\" tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
+			stream.TvgID, stream.TvgChNo, stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title)
+		if err != nil {
+			if debug {
+				log.Printf("[DEBUG] Error writing #EXTINF line for stream %s: %v\n", stream.TvgID, err)
+			}
+			continue
+		}
+
+		// Write the actual stream URL to the response
+		_, err = fmt.Fprintf(w, "%s\n", GenerateStreamURL(baseUrl, stream.Slug, stream.URLs[0]))
+		if err != nil {
+			if debug {
+				log.Printf("[DEBUG] Error writing stream URL for stream %s: %v\n", stream.TvgID, err)
+			}
+			continue
 		}
 	}
 

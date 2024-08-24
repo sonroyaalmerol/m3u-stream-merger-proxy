@@ -141,33 +141,11 @@ http://example.com/fox
 		{Slug: "fox", Title: "FOX", TvgChNo: "0.0", Group: "Entertainment", URLs: map[int]string{0: "http://example.com/fox", 1: "http://example.com/fox"}},
 	}
 
-	streamChan, errChan := db.GetStreams()
+	streamChan := db.GetStreams()
 
 	storedStreams := []database.StreamInfo{}
-	for {
-		select {
-		case stream, ok := <-streamChan:
-			if !ok {
-				streamChan = nil // Close the channel when done
-				break
-			}
-
-			storedStreams = append(storedStreams, stream)
-
-		case err, ok := <-errChan:
-			if !ok {
-				errChan = nil // Close the channel when done
-				break
-			}
-			if err != nil {
-				t.Fatalf("Error retrieving streams from database: %v", err)
-			}
-		}
-
-		// Exit the loop when both channels are closed
-		if streamChan == nil && errChan == nil {
-			break
-		}
+	for stream := range streamChan {
+		storedStreams = append(storedStreams, stream)
 	}
 
 	// Compare the retrieved streams with the expected streams
