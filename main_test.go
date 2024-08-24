@@ -39,9 +39,32 @@ func TestStreamHandler(t *testing.T) {
 
 	updateSources(ctx, nil)
 
-	streams, err := db.GetStreams()
-	if err != nil {
-		t.Errorf("GetStreams returned error: %v", err)
+	streamChan, errChan := db.GetStreams()
+	streams := []database.StreamInfo{}
+	for {
+		select {
+		case stream, ok := <-streamChan:
+			if !ok {
+				streamChan = nil // Close the channel when done
+				break
+			}
+
+			streams = append(streams, stream)
+
+		case err, ok := <-errChan:
+			if !ok {
+				errChan = nil // Close the channel when done
+				break
+			}
+			if err != nil {
+				t.Errorf("GetStreams returned error: %v", err)
+			}
+		}
+
+		// Exit the loop when both channels are closed
+		if streamChan == nil && errChan == nil {
+			break
+		}
 	}
 
 	m3uReq := httptest.NewRequest("GET", "/playlist.m3u", nil)

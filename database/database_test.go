@@ -42,9 +42,33 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 		t.Errorf("SaveToDb returned error: %v", err)
 	}
 
-	result, err := db.GetStreams()
-	if err != nil {
-		t.Errorf("GetStreams returned error: %v", err)
+	streamChan, errChan := db.GetStreams()
+
+	var result []StreamInfo
+	for {
+		select {
+		case stream, ok := <-streamChan:
+			if !ok {
+				streamChan = nil // Close the channel when done
+				break
+			}
+
+			result = append(result, stream)
+
+		case err, ok := <-errChan:
+			if !ok {
+				errChan = nil // Close the channel when done
+				break
+			}
+			if err != nil {
+				t.Errorf("GetStreams returned error: %v", err)
+			}
+		}
+
+		// Exit the loop when both channels are closed
+		if streamChan == nil && errChan == nil {
+			break
+		}
 	}
 
 	if len(result) != len(expected) {
@@ -67,9 +91,33 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 		t.Errorf("DeleteStreamURL returned error: %v", err)
 	}
 
-	result, err = db.GetStreams()
-	if err != nil {
-		t.Errorf("GetStreams returned error: %v", err)
+	streamChan, errChan = db.GetStreams()
+
+	result = []StreamInfo{}
+	for {
+		select {
+		case stream, ok := <-streamChan:
+			if !ok {
+				streamChan = nil // Close the channel when done
+				break
+			}
+
+			result = append(result, stream)
+
+		case err, ok := <-errChan:
+			if !ok {
+				errChan = nil // Close the channel when done
+				break
+			}
+			if err != nil {
+				t.Errorf("GetStreams returned error: %v", err)
+			}
+		}
+
+		// Exit the loop when both channels are closed
+		if streamChan == nil && errChan == nil {
+			break
+		}
 	}
 
 	expected = expected[:1]

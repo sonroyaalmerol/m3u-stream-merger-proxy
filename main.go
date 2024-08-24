@@ -122,7 +122,7 @@ func main() {
 			cacheErr := make(chan error)
 			go func(db *database.Instance) {
 				_, err := db.GetStreams()
-				cacheErr <- err
+				cacheErr <- <-err
 			}(db)
 			go func() {
 				if <-cacheErr != nil {
@@ -154,7 +154,7 @@ func main() {
 			cacheErr := make(chan error)
 			go func(db *database.Instance) {
 				_, err := db.GetStreams()
-				cacheErr <- err
+				cacheErr <- <-err
 			}(db)
 			go func() {
 				if <-cacheErr != nil {
