@@ -33,6 +33,9 @@ func loadBalancer(stream database.StreamInfo, previous *[]int) (*http.Response, 
 	lap := 0
 
 	for lap < maxLaps || maxLaps == 0 {
+		if debug {
+			log.Printf("[DEBUG] Stream attempt %d out of %d\n", lap+1, maxLaps)
+		}
 		allSkipped := true // Assume all URLs might be skipped
 
 		for _, index := range m3uIndexes {
