@@ -114,6 +114,12 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 
 - `/stream/{streamID}.{fileExt}`: Stream video content for specified stream IDs.
 
+## Sponsors
+
+<p align="left"><!-- markdownlint-disable-line --><!-- markdownlint-disable-next-line -->
+<!-- sponsors --><!-- sponsors -->
+</p>
+
 ## Contributing
 
 First off, thanks for taking the time to contribute! ❤️
