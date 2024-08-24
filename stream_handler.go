@@ -81,7 +81,6 @@ func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.Resp
 
 	bufferMbInt, err := strconv.Atoi(os.Getenv("BUFFER_MB"))
 	if err != nil || bufferMbInt < 0 {
-		log.Printf("Invalid BUFFER_MB value: %v. Defaulting to 1KB buffer\n", err)
 		bufferMbInt = 0
 	}
 	buffer := make([]byte, 1024)
@@ -204,4 +203,3 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 		}
 	}
 }
-
