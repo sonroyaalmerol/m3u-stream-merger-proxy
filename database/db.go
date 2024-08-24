@@ -8,7 +8,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -264,110 +263,60 @@ func (db *Instance) GetStreams() <-chan StreamInfo {
 			return
 		}
 
-		// Filter out URL keys
-		var streamKeys []string
-		for _, key := range keys {
-			if !strings.Contains(key, ":url:") {
-				streamKeys = append(streamKeys, key)
-			}
-		}
-
-		if debug {
-			log.Printf("[DEBUG] Filtered stream keys: %v\n", streamKeys)
-		}
-
-		// Create channels for work distribution
-		workChan := make(chan string, len(streamKeys))
-
-		// Define the number of workers
-		parserWorkers := os.Getenv("PARSER_WORKERS")
-		if parserWorkers == "" {
-			parserWorkers = "5"
-		}
-		numWorkers, err := strconv.Atoi(parserWorkers)
-		if err != nil {
-			numWorkers = 5
-		}
-
-		if debug {
-			log.Printf("[DEBUG] Number of workers: %d\n", numWorkers)
-		}
-
-		var wg sync.WaitGroup
-
-		// Start the worker pool
-		for i := 0; i < numWorkers; i++ {
-			wg.Add(1)
-			go func(workerID int) {
-				defer wg.Done()
-				if debug {
-					log.Printf("[DEBUG] Worker %d started\n", workerID)
-				}
-				for key := range workChan {
-					streamData, err := db.Redis.HGetAll(db.Ctx, key).Result()
-					if err != nil {
-						log.Printf("error retrieving stream data: %v", err)
-						return
-					}
-
-					slug := extractSlug(key)
-					stream := StreamInfo{
-						Slug:    slug,
-						Title:   streamData["title"],
-						TvgID:   streamData["tvg_id"],
-						TvgChNo: streamData["tvg_chno"],
-						LogoURL: streamData["logo_url"],
-						Group:   streamData["group_name"],
-						URLs:    map[int]string{},
-					}
-
-					if debug {
-						log.Printf("[DEBUG] Processing stream: %v\n", stream)
-					}
-
-					urlKeys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", key)).Result()
-					if err != nil {
-						log.Printf("error finding URLs for stream: %v", err)
-						return
-					}
-
-					for _, urlKey := range urlKeys {
-						urlData, err := db.Redis.Get(db.Ctx, urlKey).Result()
-						if err != nil {
-							log.Printf("error getting URL data from Redis: %v", err)
-							return
-						}
-
-						m3uIndex, err := strconv.Atoi(extractM3UIndex(urlKey))
-						if err != nil {
-							log.Printf("m3u index is not an integer: %v", err)
-							return
-						}
-						stream.URLs[m3uIndex] = urlData
-					}
-
-					// Send the stream to the channel
-					streamChan <- stream
-				}
-			}(i)
-		}
-
-		// Send work to the workers
-		go func() {
-			for _, key := range streamKeys {
-				workChan <- key
-			}
-			close(workChan)
-		}()
-
-		// Wait for all workers to finish
-		wg.Wait()
-
 		// Store the result in the cache
 		var streams []StreamInfo
-		for stream := range streamChan {
-			streams = append(streams, stream)
+
+		// Filter out URL keys
+		for _, key := range keys {
+			if !strings.Contains(key, ":url:") {
+				streamData, err := db.Redis.HGetAll(db.Ctx, key).Result()
+				if err != nil {
+					log.Printf("error retrieving stream data: %v", err)
+					return
+				}
+
+				slug := extractSlug(key)
+				stream := StreamInfo{
+					Slug:    slug,
+					Title:   streamData["title"],
+					TvgID:   streamData["tvg_id"],
+					TvgChNo: streamData["tvg_chno"],
+					LogoURL: streamData["logo_url"],
+					Group:   streamData["group_name"],
+					URLs:    map[int]string{},
+				}
+
+				if debug {
+					log.Printf("[DEBUG] Processing stream: %v\n", stream)
+				}
+
+				urlKeys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", key)).Result()
+				if err != nil {
+					log.Printf("error finding URLs for stream: %v", err)
+					return
+				}
+
+				for _, urlKey := range urlKeys {
+					urlData, err := db.Redis.Get(db.Ctx, urlKey).Result()
+					if err != nil {
+						log.Printf("error getting URL data from Redis: %v", err)
+						return
+					}
+
+					m3uIndex, err := strconv.Atoi(extractM3UIndex(urlKey))
+					if err != nil {
+						log.Printf("m3u index is not an integer: %v", err)
+						return
+					}
+					stream.URLs[m3uIndex] = urlData
+				}
+
+				// Send the stream to the channel
+				streams = append(streams, stream)
+				streamChan <- stream
+			}
 		}
+
 		db.Cache.Set(cacheKey, streams)
 
 		if debug {
