@@ -47,3 +47,13 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
 
+      - name: Comment on Pull Request with Container Image URL
+        if: success()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          header: Built and pushed Docker image for PR
+          message: |
+            The Docker image for this pull request has been built and pushed to GHCR.
+
+            Image URL: `ghcr.io/${{ github.repository }}:pr-${{ github.event.number }}`
