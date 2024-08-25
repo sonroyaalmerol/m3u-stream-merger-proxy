@@ -87,7 +87,7 @@ func loadBalancer(stream database.StreamInfo, previous *[]int) (*http.Response, 
 	return nil, "", -1, fmt.Errorf("Error fetching stream. Exhausted all streams.")
 }
 
-func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
+func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
 	debug := os.Getenv("DEBUG") == "true"
 
 	db.UpdateConcurrency(m3uIndex, true)
@@ -127,6 +127,10 @@ func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.Resp
 
 	for {
 		select {
+		case <-ctx.Done(): // handle context cancellation
+			log.Printf("Context canceled for stream: %s\n", r.RemoteAddr)
+			statusChan <- 0
+			return
 		case <-timer.C:
 			log.Printf("Timeout reached while trying to stream: %s\n", r.RemoteAddr)
 			statusChan <- returnStatus
@@ -185,7 +189,10 @@ func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.Resp
 
 			// Reset the timer on each successful write and backoff
 			if !timer.Stop() {
-				<-timer.C
+				select {
+				case <-timer.C: // drain the channel to avoid blocking
+				default:
+				}
 			}
 			timer.Reset(timeoutDuration)
 
@@ -264,9 +271,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 			exitStatus := make(chan int)
 
 			log.Printf("Proxying %s to %s\n", r.RemoteAddr, selectedUrl)
-			go func(m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan int) {
-				proxyStream(m3uIndex, resp, r, w, exitStatus)
-			}(selectedIndex, resp, r, w, exitStatus)
+			go proxyStream(ctx, selectedIndex, resp, r, w, exitStatus)
 			testedIndexes = append(testedIndexes, selectedIndex)
 
 			streamExitCode := <-exitStatus

@@ -46,11 +46,11 @@ jobs:
       - name: Docker - Build and Push
         uses: docker/build-push-action@v5
         with:
-          push: ${{ contains(github.event.pull_request.labels.*.name, 'push-to-ghcr') }}
+          push: ${{ github.event_name == 'pull_request_target' && contains(github.event.pull_request.labels.*.name, 'push-to-ghcr') }}
           tags: ${{ steps.meta.outputs.tags }}
 
       - name: Comment on Pull Request with Container Image URL
-        if: success() && contains(github.event.pull_request.labels.*.name, 'push-to-ghcr')
+        if: success() && github.event_name == 'pull_request_target' && contains(github.event.pull_request.labels.*.name, 'push-to-ghcr')
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
