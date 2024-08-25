@@ -20,7 +20,7 @@ jobs:
           redis-version: "latest"
 
       - name: Login to GitHub Container Registry
-    if: github.event_name == 'pull_request_target' && contains(github.event.pull_request.labels.*.name, 'push-to-ghcr')
+        if: github.event_name == 'pull_request_target' && contains(github.event.pull_request.labels.*.name, 'push-to-ghcr')
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
