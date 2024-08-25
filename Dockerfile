@@ -21,7 +21,7 @@ RUN go test ./... \
 FROM alpine:latest
 
 # add bash and timezone data
-# hadolint ignore=DL3008
+# hadolint ignore=DL3018
 RUN apk --no-cache add tzdata
 
 # set the current workdir
