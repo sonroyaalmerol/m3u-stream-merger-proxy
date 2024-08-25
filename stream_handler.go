@@ -140,7 +140,7 @@ func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http
 			if err != nil {
 				if err == io.EOF {
 					log.Printf("Stream ended (EOF reached): %s\n", r.RemoteAddr)
-					if resp.Header.Get("Content-Type") != "video/mp2t" {
+					if strings.ToLower(resp.Header.Get("Content-Type")) != "video/mp2t" {
 						statusChan <- 2
 						return
 					}
@@ -283,7 +283,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 			streamExitCode := <-exitStatus
 			log.Printf("Exit code %d received from %s\n", streamExitCode, selectedUrl)
 
-			if streamExitCode == 2 && resp.Header.Get("Content-Type") != "video/mp2t" {
+			if streamExitCode == 2 && strings.ToLower(resp.Header.Get("Content-Type")) != "video/mp2t" {
 				log.Printf("Successfully proxied file: %s\n", r.RemoteAddr)
 				cancel()
 			} else if streamExitCode == 1 || streamExitCode == 2 {
