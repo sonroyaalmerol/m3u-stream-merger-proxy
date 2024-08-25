@@ -3,8 +3,11 @@ FROM golang:alpine AS build
 
 # install redis
 # hadolint ignore=DL3018
-RUN apk --no-cache add redis && \
-  sed -i "s/bind .*/bind 127.0.0.1/g" /etc/redis.conf
+RUN \
+  if [ "$(uname -m)" = "x86_64" ]; then \
+    apk --no-cache add redis && \
+    sed -i "s/bind .*/bind 127.0.0.1/g" /etc/redis.conf \
+  fi
 
 # Set the Current Working Directory inside the container
 WORKDIR /app
@@ -20,9 +23,11 @@ COPY . .
 
 # fire up redis server and test and build the app.
 RUN \
-  redis-server --daemonize yes && \
-  go test ./... \
-  && go build -ldflags='-s -w' -o main .
+  if [ "$(uname -m)" = "x86_64" ]; then \
+    redis-server --daemonize yes && \
+    go test ./... \
+  fi && \
+  go build -ldflags='-s -w' -o main .
 
 # End from the latest alpine image
 # hadolint ignore=DL3007
