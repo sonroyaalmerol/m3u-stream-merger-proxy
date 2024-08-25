@@ -16,4 +16,19 @@ COPY . .
 RUN go test ./... \
   && go build -ldflags='-s -w' -o main .
 
-ENTRYPOINT ["/app/main"]
+# End from the latest alpine image
+# hadolint ignore=DL3007
+FROM alpine:latest
+
+# add bash and timezone data
+# hadolint ignore=DL3018
+RUN apk --no-cache add tzdata
+
+# set the current workdir
+WORKDIR /app
+
+# copy in our compiled GO app
+COPY --from=build /app/main /app/
+
+# the containers entrypoint
+ENTRYPOINT [ "/app/main" ]
