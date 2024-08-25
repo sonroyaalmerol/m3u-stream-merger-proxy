@@ -129,7 +129,7 @@ func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http
 		select {
 		case <-ctx.Done(): // handle context cancellation
 			log.Printf("Context canceled for stream: %s\n", r.RemoteAddr)
-			statusChan <- returnStatus
+			statusChan <- 0
 			return
 		case <-timer.C:
 			log.Printf("Timeout reached while trying to stream: %s\n", r.RemoteAddr)
