@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func loadBalancer(stream database.StreamInfo, previous *[]int) (*http.Response, string, int, error) {
@@ -68,6 +69,9 @@ func loadBalancer(stream database.StreamInfo, previous *[]int) (*http.Response, 
 			if debug {
 				log.Printf("[DEBUG] Error fetching stream from %s: %s\n", url, err.Error())
 			}
+
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
 		}
 
 		if allSkipped {
@@ -95,7 +99,7 @@ func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.Resp
 	if bufferMbInt > 0 {
 		buffer = make([]byte, bufferMbInt*1024*1024)
 	}
-
+  
 	defer func() {
 		buffer = nil
 		if flusher, ok := w.(http.Flusher); ok {
@@ -103,27 +107,60 @@ func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.Resp
 		}
 	}()
 
+	// Set a timeout duration
+	timeoutSecond, err := strconv.Atoi(os.Getenv("STREAM_TIMEOUT"))
+	if err != nil || timeoutSecond <= 0 {
+		timeoutSecond = 3
+	}
+
+	timeoutDuration := time.Duration(timeoutSecond) * time.Second
+	timer := time.NewTimer(timeoutDuration)
+	defer timer.Stop()
+
+	returnStatus := 0
+
 	for {
-		n, err := resp.Body.Read(buffer)
-		if err != nil {
-			if err == io.EOF {
-				log.Printf("Stream ended (EOF reached): %s\n", r.RemoteAddr)
-				statusChan <- 2
+		select {
+		case <-timer.C:
+			// Timer expired
+			log.Printf("Timeout reached while trying to stream: %s\n", r.RemoteAddr)
+			statusChan <- returnStatus
+			return
+		default:
+			n, err := resp.Body.Read(buffer)
+			if err != nil {
+				if err == io.EOF {
+					log.Printf("Stream ended (EOF reached): %s\n", r.RemoteAddr)
+					if utils.IsPlaylistFile(r.RemoteAddr) {
+						statusChan <- 2
+						return
+					}
+					returnStatus = 2
+					log.Printf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
+					continue
+				}
+				log.Printf("Error reading stream: %s\n", err.Error())
+				returnStatus = 1
+				log.Printf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
+				continue
+			}
+
+			if _, err := w.Write(buffer[:n]); err != nil {
+				log.Printf("Error writing to response: %s\n", err.Error())
+				statusChan <- 0
 				return
 			}
-			log.Printf("Error reading stream: %s\n", err.Error())
-			statusChan <- 1
-			return
-		}
 
-		if _, err := w.Write(buffer[:n]); err != nil {
-			log.Printf("Error writing to response: %s\n", err.Error())
-			statusChan <- 0
-			return
-		}
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
 
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
+			// Reset the timer on each successful write
+			if !timer.Stop() {
+				<-timer.C // Drain the channel if timer expired
+			}
+
+			timer.Reset(timeoutDuration)
 		}
 	}
 }
@@ -169,9 +206,6 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 		select {
 		case <-ctx.Done():
 			log.Printf("Client disconnected: %s\n", r.RemoteAddr)
-			if resp != nil {
-				resp.Body.Close()
-			}
 			return
 		default:
 			resp, selectedUrl, selectedIndex, err = loadBalancer(stream, &testedIndexes)
@@ -219,6 +253,9 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 				log.Printf("Client has closed the stream: %s\n", r.RemoteAddr)
 				cancel()
 			}
+
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
 		}
 	}
 }
