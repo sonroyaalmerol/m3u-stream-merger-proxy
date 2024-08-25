@@ -358,8 +358,28 @@ func (db *Instance) DecrementConcurrency(m3uIndex int) error {
 }
 
 func (db *Instance) ClearConcurrencies() error {
-	if err := db.Redis.Del(db.Ctx, "concurrency:*").Err(); err != nil {
-		return fmt.Errorf("error clear concurrencies from Redis: %v", err)
+	var cursor uint64
+	var err error
+	var keys []string
+
+	for {
+		var scanKeys []string
+		scanKeys, cursor, err = db.Redis.Scan(db.Ctx, cursor, "concurrency:*", 0).Result()
+		if err != nil {
+			return fmt.Errorf("error scanning keys from Redis: %v", err)
+		}
+		keys = append(keys, scanKeys...)
+		if cursor == 0 {
+			break
+		}
+	}
+
+	if len(keys) == 0 {
+		return nil
+	}
+
+	if err := db.Redis.Del(db.Ctx, keys...).Err(); err != nil {
+		return fmt.Errorf("error deleting keys from Redis: %v", err)
 	}
 
 	return nil
