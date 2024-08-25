@@ -69,6 +69,8 @@ func loadBalancer(stream database.StreamInfo, previous *[]int) (*http.Response, 
 			if debug {
 				log.Printf("[DEBUG] Error fetching stream from %s: %s\n", url, err.Error())
 			}
+
+			resp.Body.Close()
 		}
 
 		if allSkipped {
@@ -196,9 +198,6 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 		select {
 		case <-ctx.Done():
 			log.Printf("Client disconnected: %s\n", r.RemoteAddr)
-			if resp != nil {
-				resp.Body.Close()
-			}
 			return
 		default:
 			resp, selectedUrl, selectedIndex, err = loadBalancer(stream, &testedIndexes)
@@ -246,6 +245,8 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 				log.Printf("Client has closed the stream: %s\n", r.RemoteAddr)
 				cancel()
 			}
+
+			resp.Body.Close()
 		}
 	}
 }
