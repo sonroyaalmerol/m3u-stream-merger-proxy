@@ -1,6 +1,14 @@
 # Start from the official Golang image
 FROM golang:alpine AS build
 
+# install redis
+# hadolint ignore=DL3018
+RUN apk --no-cache add redis
+
+# replace the bind address
+RUN \
+  sed -i "s/bind .*/bind 127.0.0.1/g" /etc/redis.conf
+
 # Set the Current Working Directory inside the container
 WORKDIR /app
 
@@ -13,7 +21,10 @@ RUN go mod download
 # Copy the source code from the current directory to the Working Directory inside the container
 COPY . .
 
-RUN go test ./... \
+# fire up redis server and test and build the app.
+RUN \
+  redis-server --daemonize yes && \
+  go test ./... \
   && go build -ldflags='-s -w' -o main .
 
 # End from the latest alpine image
