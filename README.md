@@ -99,7 +99,7 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | BUFFER_MB | Set buffer size in mb. | 0 (no buffer) | Any positive integer |
 | INCLUDE_GROUPS_1, INCLUDE_GROUPS_2, INCLUDE_GROUPS_X    | Set channel groups to include | all    | Comma-separated values   |
 | TITLE_SUBSTR_FILTER | Sets a regex pattern used to exclude substrings from channel titles | none    | Go regexp   |
-| BASE_URL | Sets the base URL for the stream URls in the M3U file to be generated. | http/s://<request_hostname> (e.g. http://192.168.1.10:8080)    | Any string that follows the URL format  |
+| BASE_URL | Sets the base URL for the stream URls in the M3U file to be generated. | http/s://<request_hostname> (e.g. <http://192.168.1.10:8080>)    | Any string that follows the URL format  |
 | TZ                          | Set timezone                                           | Etc/UTC     | [TZ Identifiers](https://nodatime.org/TimeZones) |
 | SYNC_CRON                   | Set cron schedule expression of the background updates. | 0 0 * * *   |  Any valid cron expression    |
 | SYNC_ON_BOOT                | Set if an initial background syncing will be executed on boot | true    | true/false   |
