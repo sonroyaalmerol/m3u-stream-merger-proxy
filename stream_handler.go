@@ -88,6 +88,8 @@ func loadBalancer(stream database.StreamInfo, previous *[]int) (*http.Response, 
 }
 
 func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
+	debug := os.Getenv("DEBUG") == "true"
+
 	db.UpdateConcurrency(m3uIndex, true)
 	defer db.UpdateConcurrency(m3uIndex, false)
 
@@ -99,7 +101,7 @@ func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.Resp
 	if bufferMbInt > 0 {
 		buffer = make([]byte, bufferMbInt*1024*1024)
 	}
-  
+
 	defer func() {
 		buffer = nil
 		if flusher, ok := w.(http.Flusher); ok {
@@ -107,7 +109,6 @@ func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.Resp
 		}
 	}()
 
-	// Set a timeout duration
 	timeoutSecond, err := strconv.Atoi(os.Getenv("STREAM_TIMEOUT"))
 	if err != nil || timeoutSecond <= 0 {
 		timeoutSecond = 3
@@ -117,12 +118,16 @@ func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.Resp
 	timer := time.NewTimer(timeoutDuration)
 	defer timer.Stop()
 
+	// Backoff settings
+	initialBackoff := 200 * time.Millisecond
+	maxBackoff := time.Duration(timeoutSecond-1) * time.Second
+	currentBackoff := initialBackoff
+
 	returnStatus := 0
 
 	for {
 		select {
 		case <-timer.C:
-			// Timer expired
 			log.Printf("Timeout reached while trying to stream: %s\n", r.RemoteAddr)
 			statusChan <- returnStatus
 			return
@@ -135,13 +140,36 @@ func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.Resp
 						statusChan <- 2
 						return
 					}
+
 					returnStatus = 2
 					log.Printf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
+					if debug {
+						log.Printf("[DEBUG] Retrying same stream with backoff of %v...\n", currentBackoff)
+					}
+
+					time.Sleep(currentBackoff)
+					currentBackoff *= 2
+					if currentBackoff > maxBackoff {
+						currentBackoff = maxBackoff
+					}
+
 					continue
 				}
+
 				log.Printf("Error reading stream: %s\n", err.Error())
+
 				returnStatus = 1
-				log.Printf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
+
+				if debug {
+					log.Printf("[DEBUG] Retrying same stream with backoff of %v...\n", currentBackoff)
+				}
+
+				time.Sleep(currentBackoff)
+				currentBackoff *= 2
+				if currentBackoff > maxBackoff {
+					currentBackoff = maxBackoff
+				}
+
 				continue
 			}
 
@@ -155,12 +183,14 @@ func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.Resp
 				flusher.Flush()
 			}
 
-			// Reset the timer on each successful write
+			// Reset the timer on each successful write and backoff
 			if !timer.Stop() {
-				<-timer.C // Drain the channel if timer expired
+				<-timer.C
 			}
-
 			timer.Reset(timeoutDuration)
+
+			// Reset the backoff duration after successful read/write
+			currentBackoff = initialBackoff
 		}
 	}
 }
