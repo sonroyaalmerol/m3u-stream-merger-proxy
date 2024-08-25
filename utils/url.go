@@ -2,6 +2,11 @@ package utils
 
 import (
 	"encoding/base64"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"regexp"
 	"strings"
 )
 
@@ -21,4 +26,25 @@ func IsPlaylistFile(url string) bool {
 	urlClean := strings.TrimSpace(strings.ToLower(url))
 
 	return strings.HasSuffix(urlClean, ".m3u") || strings.HasSuffix(urlClean, ".m3u8")
+}
+
+func SafeLogPrintf(r *http.Request, customUnsafe *string, format string, v ...any) {
+	safeLogs := os.Getenv("SAFE_LOGS") == "true"
+	safeString := fmt.Sprintf(format, v...)
+	if safeLogs {
+		if customUnsafe != nil {
+			safeString = strings.ReplaceAll(safeString, *customUnsafe, "[redacted sensitive string]")
+		}
+		if r != nil {
+			safeString = strings.ReplaceAll(safeString, r.RemoteAddr, "[redacted remote addr]")
+			safeString = strings.ReplaceAll(safeString, r.URL.Path, "[redacted request url path]")
+			safeString = strings.ReplaceAll(safeString, r.URL.String(), "[redacted request full url]")
+		}
+		urlRegex := `(https?|file):\/\/[^\s/$.?#].[^\s]*`
+		re := regexp.MustCompile(urlRegex)
+
+		safeString = re.ReplaceAllString(safeString, "[redacted url]")
+	}
+
+	log.Print(safeString)
 }

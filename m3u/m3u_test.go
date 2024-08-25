@@ -50,7 +50,7 @@ func TestGenerateM3UContent(t *testing.T) {
 	// Create a ResponseRecorder to record the response
 	rr := httptest.NewRecorder()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		GenerateM3UContent(w, r, db)
+		Handler(w, r, db)
 	})
 
 	// Call the ServeHTTP method of the handler to execute the test
