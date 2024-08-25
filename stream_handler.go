@@ -75,6 +75,10 @@ func loadBalancer(stream database.StreamInfo, previous *[]int) (*http.Response, 
 		}
 
 		if allSkipped {
+
+			// get our custom channel offline video to return
+			
+
 			if debug {
 				log.Printf("[DEBUG] All streams skipped in lap %d\n", lap)
 			}
