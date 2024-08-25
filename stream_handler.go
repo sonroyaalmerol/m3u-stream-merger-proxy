@@ -70,7 +70,7 @@ func loadBalancer(stream database.StreamInfo, previous *[]int) (*http.Response, 
 				log.Printf("[DEBUG] Error fetching stream from %s: %s\n", url, err.Error())
 			}
 
-			io.Copy(io.Discard, resp.Body)
+			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 		}
 
@@ -247,7 +247,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 				cancel()
 			}
 
-			io.Copy(io.Discard, resp.Body)
+			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 		}
 	}
