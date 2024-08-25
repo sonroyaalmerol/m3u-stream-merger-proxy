@@ -2,7 +2,6 @@ package utils
 
 import (
 	"encoding/base64"
-	"strings"
 )
 
 func GetStreamUrl(slug string) string {
@@ -15,10 +14,4 @@ func GetStreamSlugFromUrl(streamUID string) string {
 		return ""
 	}
 	return string(decoded)
-}
-
-func IsPlaylistFile(url string) bool {
-	urlClean := strings.TrimSpace(strings.ToLower(url))
-
-	return strings.HasSuffix(urlClean, ".m3u") || strings.HasSuffix(urlClean, ".m3u8")
 }
