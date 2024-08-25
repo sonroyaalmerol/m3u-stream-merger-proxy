@@ -13,7 +13,22 @@ RUN go mod download
 # Copy the source code from the current directory to the Working Directory inside the container
 COPY . .
 
-RUN go test ./... \
-  && go build -ldflags='-s -w' -o main .
+RUN go build -ldflags='-s -w' -o main .
 
-ENTRYPOINT ["/app/main"]
+# End from the latest alpine image
+FROM alpine:latest
+
+# add bash and timezone data
+RUN \
+  apk update && \
+  apk add bash && \
+  apk --no-cache add tzdata htop
+
+# set the current workdir
+WORKDIR /app
+
+# copy in our compiled GO app
+COPY --from=build /app/main /app/
+
+# the containers entrypoint
+ENTRYPOINT [ "/app/main" ]
