@@ -1,4 +1,3 @@
----
 name: Pull Request Build
 on:
   pull_request:
@@ -6,6 +5,8 @@ on:
       - opened
       - synchronize
       - reopened
+  pull_request_target:
+    types: [labeled]
 
 jobs:
   build-and-push:
@@ -19,6 +20,7 @@ jobs:
           redis-version: "latest"
 
       - name: Login to GitHub Container Registry
+    if: github.event_name == 'pull_request_target' && contains(github.event.pull_request.labels.*.name, 'push-to-ghcr')
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -44,11 +46,11 @@ jobs:
       - name: Docker - Build and Push
         uses: docker/build-push-action@v5
         with:
-          push: true
+          push: ${{ contains(github.event.pull_request.labels.*.name, 'push-to-ghcr') }}
           tags: ${{ steps.meta.outputs.tags }}
 
       - name: Comment on Pull Request with Container Image URL
-        if: success()
+        if: success() && contains(github.event.pull_request.labels.*.name, 'push-to-ghcr')
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
