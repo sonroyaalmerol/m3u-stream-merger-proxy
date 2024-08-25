@@ -84,7 +84,7 @@ func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
 			stream.TvgID, stream.TvgChNo, stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title)
 
 		// Append the actual stream URL to content
-		content += fmt.Sprintf("%s", GenerateStreamURL(baseUrl, stream.Slug, stream.URLs[0]))
+		content += GenerateStreamURL(baseUrl, stream.Slug, stream.URLs[0])
 	}
 
 	if debug {
@@ -119,7 +119,7 @@ func Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 		if debug {
 			log.Println("[DEBUG] Serving M3U content from cache")
 		}
-		w.Write([]byte(cacheData))
+		_, _ = w.Write([]byte(cacheData))
 		return
 	}
 
@@ -128,12 +128,12 @@ func Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 		if debug {
 			log.Println("[DEBUG] Cache expired, serving old cache and regenerating in background")
 		}
-		w.Write([]byte(cacheData))
+		_, _ = w.Write([]byte(cacheData))
 		go GenerateAndCacheM3UContent(db, r)
 		return
 	}
 
 	// If no valid cache, generate content and update cache
 	content := GenerateAndCacheM3UContent(db, r)
-	w.Write([]byte(content))
+	_, _ = w.Write([]byte(content))
 }
