@@ -207,7 +207,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		w.Write([]byte(fmt.Sprintf("HTTP method %q not allowed", r.Method)))
+		_, _ = w.Write([]byte(fmt.Sprintf("HTTP method %q not allowed", r.Method)))
 		return
 	}
 
