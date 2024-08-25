@@ -3,10 +3,7 @@ FROM golang:alpine AS build
 
 # install redis
 # hadolint ignore=DL3018
-RUN apk --no-cache add redis
-
-# replace the bind address
-RUN \
+RUN apk --no-cache add redis && \
   sed -i "s/bind .*/bind 127.0.0.1/g" /etc/redis.conf
 
 # Set the Current Working Directory inside the container
