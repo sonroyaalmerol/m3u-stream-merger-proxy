@@ -16,10 +16,10 @@ import (
 type Cache struct {
 	sync.Mutex
 	data         string
-	revalidating bool
+	Revalidating bool
 }
 
-var m3uCache = &Cache{}
+var M3uCache = &Cache{}
 
 func getFileExtensionFromUrl(rawUrl string) (string, error) {
 	u, err := url.Parse(rawUrl)
@@ -93,10 +93,10 @@ func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
 	}
 
 	// Update cache
-	m3uCache.Lock()
-	m3uCache.data = content
-	m3uCache.revalidating = false
-	m3uCache.Unlock()
+	M3uCache.Lock()
+	M3uCache.data = content
+	M3uCache.Revalidating = false
+	M3uCache.Unlock()
 
 	return content
 }
@@ -112,9 +112,9 @@ func Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	m3uCache.Lock()
-	cacheData := m3uCache.data
-	m3uCache.Unlock()
+	M3uCache.Lock()
+	cacheData := M3uCache.data
+	M3uCache.Unlock()
 
 	// serve old cache and regenerate in the background
 	if cacheData != "" {
@@ -122,8 +122,8 @@ func Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 			log.Println("[DEBUG] Serving old cache and regenerating in background")
 		}
 		_, _ = w.Write([]byte(cacheData))
-		if !m3uCache.revalidating {
-			m3uCache.revalidating = true
+		if !M3uCache.Revalidating {
+			M3uCache.Revalidating = true
 			go GenerateAndCacheM3UContent(db, r)
 		} else {
 			if debug {

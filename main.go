@@ -68,6 +68,8 @@ func updateSources(ctx context.Context, ewg *sync.WaitGroup) {
 }
 
 func main() {
+	debug := os.Getenv("DEBUG") == "true"
+
 	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -122,7 +124,14 @@ func main() {
 			}
 			wg.Wait()
 			log.Println("CACHE_ON_SYNC enabled. Building cache.")
-			go m3u.GenerateAndCacheM3UContent(db, nil)
+			if !m3u.M3uCache.Revalidating {
+				m3u.M3uCache.Revalidating = true
+				go m3u.GenerateAndCacheM3UContent(db, nil)
+			} else {
+				if debug {
+					log.Println("[DEBUG] Cache revalidation is already in progress. Skipping.")
+				}
+			}
 		}
 	})
 	if err != nil {
@@ -148,7 +157,14 @@ func main() {
 			}
 			wg.Wait()
 			log.Println("CACHE_ON_SYNC enabled. Building cache.")
-			go m3u.GenerateAndCacheM3UContent(db, nil)
+			if !m3u.M3uCache.Revalidating {
+				m3u.M3uCache.Revalidating = true
+				go m3u.GenerateAndCacheM3UContent(db, nil)
+			} else {
+				if debug {
+					log.Println("[DEBUG] Cache revalidation is already in progress. Skipping.")
+				}
+			}
 		}
 	}
 
