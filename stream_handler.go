@@ -205,6 +205,12 @@ func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http
 func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	debug := os.Getenv("DEBUG") == "true"
 
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_, _ = w.Write([]byte(fmt.Sprintf("HTTP method %q not allowed", r.Method)))
+		return
+	}
+
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
