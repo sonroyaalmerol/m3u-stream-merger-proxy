@@ -131,8 +131,11 @@ func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 		if err != nil {
 			return fmt.Errorf("HTTP GET error: %v", err)
 		}
-		defer io.Copy(io.Discard, resp.Body)
-		defer resp.Body.Close()
+
+		defer func() {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}()
 
 		file = resp.Body
 	}
