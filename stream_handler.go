@@ -185,7 +185,10 @@ func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.Resp
 
 			// Reset the timer on each successful write and backoff
 			if !timer.Stop() {
-				<-timer.C
+				select {
+				case <-timer.C: // drain the channel to avoid blocking
+				default:
+				}
 			}
 			timer.Reset(timeoutDuration)
 
