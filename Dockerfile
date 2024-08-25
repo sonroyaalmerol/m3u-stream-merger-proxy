@@ -13,16 +13,16 @@ RUN go mod download
 # Copy the source code from the current directory to the Working Directory inside the container
 COPY . .
 
-RUN go build -ldflags='-s -w' -o main .
+RUN go test ./... \
+  && go build -ldflags='-s -w' -o main .
 
 # End from the latest alpine image
+# hadolint ignore=DL3007
 FROM alpine:latest
 
 # add bash and timezone data
-RUN \
-  apk update && \
-  apk add bash && \
-  apk --no-cache add tzdata htop
+# hadolint ignore=DL3008
+RUN apk --no-cache add tzdata
 
 # set the current workdir
 WORKDIR /app
