@@ -99,6 +99,13 @@ func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.Resp
 	if bufferMbInt > 0 {
 		buffer = make([]byte, bufferMbInt*1024*1024)
 	}
+  
+	defer func() {
+		buffer = nil
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}()
 
 	// Set a timeout duration
 	timeoutSecond, err := strconv.Atoi(os.Getenv("STREAM_TIMEOUT"))
