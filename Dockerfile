@@ -14,6 +14,7 @@ RUN go mod download
 COPY . .
 
 # fire up redis server and test and build the app.
+# hadolint ignore=DL3018
 RUN \
   if [ "$(uname -m)" = "x86_64" ]; then \
     apk --no-cache add redis && \
