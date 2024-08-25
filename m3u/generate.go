@@ -15,7 +15,8 @@ import (
 
 type Cache struct {
 	sync.Mutex
-	data string
+	data         string
+	revalidating bool
 }
 
 var m3uCache = &Cache{}
@@ -94,6 +95,7 @@ func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
 	// Update cache
 	m3uCache.Lock()
 	m3uCache.data = content
+	m3uCache.revalidating = false
 	m3uCache.Unlock()
 
 	return content
@@ -114,22 +116,20 @@ func Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	cacheData := m3uCache.data
 	m3uCache.Unlock()
 
-	if cacheData != "" {
-		// Serve cached content if it's still valid
-		if debug {
-			log.Println("[DEBUG] Serving M3U content from cache")
-		}
-		_, _ = w.Write([]byte(cacheData))
-		return
-	}
-
-	// If cache is expired, serve old cache and regenerate in the background
+	// serve old cache and regenerate in the background
 	if cacheData != "" {
 		if debug {
-			log.Println("[DEBUG] Cache expired, serving old cache and regenerating in background")
+			log.Println("[DEBUG] Serving old cache and regenerating in background")
 		}
 		_, _ = w.Write([]byte(cacheData))
-		go GenerateAndCacheM3UContent(db, r)
+		if !m3uCache.revalidating {
+			m3uCache.revalidating = true
+			go GenerateAndCacheM3UContent(db, r)
+		} else {
+			if debug {
+				log.Println("[DEBUG] Cache revalidation is already in progress. Skipping.")
+			}
+		}
 		return
 	}
 
