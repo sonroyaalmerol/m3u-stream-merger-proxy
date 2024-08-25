@@ -120,7 +120,7 @@ func proxyStream(m3uIndex int, resp *http.Response, r *http.Request, w http.Resp
 
 	// Backoff settings
 	initialBackoff := 200 * time.Millisecond
-	maxBackoff := 5 * time.Second
+	maxBackoff := time.Duration(timeoutSecond-1) * time.Second
 	currentBackoff := initialBackoff
 
 	returnStatus := 0
