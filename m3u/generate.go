@@ -10,7 +10,16 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 )
+
+type Cache struct {
+	sync.Mutex
+	data         string
+	Revalidating bool
+}
+
+var M3uCache = &Cache{}
 
 func getFileExtensionFromUrl(rawUrl string) (string, error) {
 	u, err := url.Parse(rawUrl)
@@ -32,7 +41,67 @@ func GenerateStreamURL(baseUrl string, slug string, sampleUrl string) string {
 	return fmt.Sprintf("%s/%s.%s\n", baseUrl, utils.GetStreamUrl(slug), ext)
 }
 
-func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Instance) {
+func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
+	debug := os.Getenv("DEBUG") == "true"
+	if debug {
+		log.Println("[DEBUG] Regenerating M3U cache in the background")
+	}
+
+	var content string
+
+	baseUrl := "" // Setup base URL logic
+	if r != nil {
+		if r.TLS == nil {
+			baseUrl = fmt.Sprintf("http://%s/stream", r.Host)
+		} else {
+			baseUrl = fmt.Sprintf("https://%s/stream", r.Host)
+		}
+	}
+
+	if customBase, ok := os.LookupEnv("BASE_URL"); ok {
+		customBase = strings.TrimSuffix(customBase, "/")
+		baseUrl = fmt.Sprintf("%s/stream", customBase)
+	}
+
+	if debug {
+		utils.SafeLogPrintf(r, nil, "[DEBUG] Base URL set to %s\n", baseUrl)
+	}
+
+	content += "#EXTM3U\n"
+
+	// Retrieve the streams from the database using channels
+	streamChan := db.GetStreams()
+	for stream := range streamChan {
+		if len(stream.URLs) == 0 {
+			continue
+		}
+
+		if debug {
+			utils.SafeLogPrintf(nil, nil, "[DEBUG] Processing stream with TVG ID: %s\n", stream.TvgID)
+		}
+
+		// Append the stream info to content
+		content += fmt.Sprintf("#EXTINF:-1 channelID=\"x-ID.%s\" tvg-chno=\"%s\" tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
+			stream.TvgID, stream.TvgChNo, stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title)
+
+		// Append the actual stream URL to content
+		content += GenerateStreamURL(baseUrl, stream.Slug, stream.URLs[0])
+	}
+
+	if debug {
+		log.Println("[DEBUG] Finished generating M3U content")
+	}
+
+	// Update cache
+	M3uCache.Lock()
+	M3uCache.data = content
+	M3uCache.Revalidating = false
+	M3uCache.Unlock()
+
+	return content
+}
+
+func Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	debug := os.Getenv("DEBUG") == "true"
 
 	if debug {
@@ -43,56 +112,28 @@ func GenerateM3UContent(w http.ResponseWriter, r *http.Request, db *database.Ins
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	baseUrl := ""
-	if r.TLS == nil {
-		baseUrl = fmt.Sprintf("http://%s/stream", r.Host)
-	} else {
-		baseUrl = fmt.Sprintf("https://%s/stream", r.Host)
-	}
+	M3uCache.Lock()
+	cacheData := M3uCache.data
+	M3uCache.Unlock()
 
-	if debug {
-		log.Printf("[DEBUG] Base URL set to %s\n", baseUrl)
-	}
-
-	// Write the M3U header
-	_, err := fmt.Fprintf(w, "#EXTM3U\n")
-	if err != nil {
-		log.Println(fmt.Errorf("Fprintf error: %v", err))
+	// serve old cache and regenerate in the background
+	if cacheData != "" {
+		if debug {
+			log.Println("[DEBUG] Serving old cache and regenerating in background")
+		}
+		_, _ = w.Write([]byte(cacheData))
+		if !M3uCache.Revalidating {
+			M3uCache.Revalidating = true
+			go GenerateAndCacheM3UContent(db, r)
+		} else {
+			if debug {
+				log.Println("[DEBUG] Cache revalidation is already in progress. Skipping.")
+			}
+		}
 		return
 	}
 
-	// Retrieve the streams from the database using channels
-	streamChan := db.GetStreams()
-	for stream := range streamChan {
-		if len(stream.URLs) == 0 {
-			continue
-		}
-
-		if debug {
-			log.Printf("[DEBUG] Processing stream with TVG ID: %s\n", stream.TvgID)
-		}
-
-		// Write the stream info to the response
-		_, err := fmt.Fprintf(w, "#EXTINF:-1 channelID=\"x-ID.%s\" tvg-chno=\"%s\" tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
-			stream.TvgID, stream.TvgChNo, stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title)
-		if err != nil {
-			if debug {
-				log.Printf("[DEBUG] Error writing #EXTINF line for stream %s: %v\n", stream.TvgID, err)
-			}
-			continue
-		}
-
-		// Write the actual stream URL to the response
-		_, err = fmt.Fprintf(w, "%s", GenerateStreamURL(baseUrl, stream.Slug, stream.URLs[0]))
-		if err != nil {
-			if debug {
-				log.Printf("[DEBUG] Error writing stream URL for stream %s: %v\n", stream.TvgID, err)
-			}
-			continue
-		}
-	}
-
-	if debug {
-		log.Println("[DEBUG] Finished generating M3U content")
-	}
+	// If no valid cache, generate content and update cache
+	content := GenerateAndCacheM3UContent(db, r)
+	_, _ = w.Write([]byte(content))
 }

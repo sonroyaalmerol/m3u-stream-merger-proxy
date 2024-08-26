@@ -22,9 +22,9 @@ import (
 func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 	debug := os.Getenv("DEBUG") == "true"
 	if debug {
-		log.Printf("[DEBUG] Parsing line: %s\n", line)
-		log.Printf("[DEBUG] Next line: %s\n", nextLine)
-		log.Printf("[DEBUG] M3U index: %d\n", m3uIndex)
+		utils.SafeLogPrintf(nil, nil, "[DEBUG] Parsing line: %s\n", line)
+		utils.SafeLogPrintf(nil, &nextLine, "[DEBUG] Next line: %s\n", nextLine)
+		utils.SafeLogPrintf(nil, nil, "[DEBUG] M3U index: %d\n", m3uIndex)
 	}
 
 	var currentStream database.StreamInfo
@@ -43,7 +43,7 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 		value := strings.TrimSpace(match[2])
 
 		if debug {
-			log.Printf("[DEBUG] Processing attribute: %s=%s\n", key, value)
+			utils.SafeLogPrintf(nil, nil, "[DEBUG] Processing attribute: %s=%s\n", key, value)
 		}
 
 		switch strings.ToLower(key) {
@@ -59,7 +59,7 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 			currentStream.LogoURL = tvgLogoParser(value)
 		default:
 			if debug {
-				log.Printf("[DEBUG] Uncaught attribute: %s=%s\n", key, value)
+				utils.SafeLogPrintf(nil, nil, "[DEBUG] Uncaught attribute: %s=%s\n", key, value)
 			}
 		}
 
@@ -70,7 +70,7 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 
 	if len(lineCommaSplit) > 1 {
 		if debug {
-			log.Printf("[DEBUG] Line comma split detected, title: %s\n", strings.TrimSpace(lineCommaSplit[1]))
+			utils.SafeLogPrintf(nil, nil, "[DEBUG] Line comma split detected, title: %s\n", strings.TrimSpace(lineCommaSplit[1]))
 		}
 		currentStream.Title = tvgNameParser(strings.TrimSpace(lineCommaSplit[1]))
 	}
@@ -78,7 +78,7 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 	currentStream.Slug = slug.Make(currentStream.Title)
 
 	if debug {
-		log.Printf("[DEBUG] Generated slug: %s\n", currentStream.Slug)
+		utils.SafeLogPrintf(nil, nil, "[DEBUG] Generated slug: %s\n", currentStream.Slug)
 	}
 
 	return currentStream
@@ -87,7 +87,7 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 func checkIncludeGroup(groups []string, line string) bool {
 	debug := os.Getenv("DEBUG") == "true"
 	if debug {
-		log.Printf("[DEBUG] Checking if line includes group: %s\n", line)
+		utils.SafeLogPrintf(nil, nil, "[DEBUG] Checking if line includes group: %s\n", line)
 	}
 
 	if len(groups) == 0 {
@@ -97,7 +97,7 @@ func checkIncludeGroup(groups []string, line string) bool {
 			toMatch := "group-title=" + "\"" + group + "\""
 			if strings.Contains(line, toMatch) {
 				if debug {
-					log.Printf("[DEBUG] Line matches group: %s\n", group)
+					utils.SafeLogPrintf(nil, nil, "[DEBUG] Line matches group: %s\n", group)
 				}
 				return true
 			}
@@ -109,14 +109,14 @@ func checkIncludeGroup(groups []string, line string) bool {
 func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 	debug := os.Getenv("DEBUG") == "true"
 	if debug {
-		log.Printf("[DEBUG] Downloading M3U from: %s\n", m3uURL)
+		utils.SafeLogPrintf(nil, &m3uURL, "[DEBUG] Downloading M3U from: %s\n", m3uURL)
 	}
 
 	var file io.Reader
 
 	if strings.HasPrefix(m3uURL, "file://") {
 		localPath := strings.TrimPrefix(m3uURL, "file://")
-		log.Printf("Reading M3U from local file: %s\n", localPath)
+		utils.SafeLogPrintf(nil, &localPath, "Reading M3U from local file: %s\n", localPath)
 
 		localFile, err := os.Open(localPath)
 		if err != nil {
@@ -126,7 +126,7 @@ func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 
 		file = localFile
 	} else {
-		log.Printf("Downloading M3U from URL: %s\n", m3uURL)
+		utils.SafeLogPrintf(nil, &m3uURL, "Downloading M3U from URL: %s\n", m3uURL)
 		resp, err := utils.CustomHttpRequest("GET", m3uURL)
 		if err != nil {
 			return fmt.Errorf("HTTP GET error: %v", err)
@@ -166,7 +166,7 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 	}
 
 	if debug {
-		log.Printf("[DEBUG] Max retries set to %d\n", maxRetries)
+		utils.SafeLogPrintf(nil, nil, "[DEBUG] Max retries set to %d\n", maxRetries)
 	}
 
 	var buffer bytes.Buffer
@@ -176,17 +176,17 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 	if includeGroups != "" {
 		grps = strings.Split(includeGroups, ",")
 		if debug {
-			log.Printf("[DEBUG] Include groups: %v\n", grps)
+			utils.SafeLogPrintf(nil, nil, "[DEBUG] Include groups: %v\n", grps)
 		}
 	}
 
 	for i := 0; i <= maxRetries; i++ {
 		if debug {
-			log.Printf("[DEBUG] Attempt %d to download M3U\n", i+1)
+			utils.SafeLogPrintf(nil, nil, "[DEBUG] Attempt %d to download M3U\n", i+1)
 		}
 		err := downloadM3UToBuffer(m3uURL, &buffer)
 		if err != nil {
-			log.Printf("downloadM3UToBuffer error. Retrying in 5 secs... (error: %v)\n", err)
+			utils.SafeLogPrintf(nil, nil, "downloadM3UToBuffer error. Retrying in 5 secs... (error: %v)\n", err)
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -201,7 +201,7 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 		}
 
 		if debug {
-			log.Printf("[DEBUG] Using %s parser workers\n", parserWorkers)
+			utils.SafeLogPrintf(nil, nil, "[DEBUG] Using %s parser workers\n", parserWorkers)
 		}
 
 		streamInfoCh := make(chan database.StreamInfo)
@@ -220,7 +220,7 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 				defer wg.Done()
 				for streamInfo := range streamInfoCh {
 					if debug {
-						log.Printf("[DEBUG] Worker processing stream info: %s\n", streamInfo.Slug)
+						utils.SafeLogPrintf(nil, nil, "[DEBUG] Worker processing stream info: %s\n", streamInfo.Slug)
 					}
 					mu.Lock()
 					streamInfos = append(streamInfos, streamInfo)
@@ -231,7 +231,7 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 
 		go func() {
 			for err := range errCh {
-				log.Printf("M3U Parser error: %v\n", err)
+				utils.SafeLogPrintf(nil, &m3uURL, "M3U Parser error: %v\n", err)
 			}
 		}()
 
@@ -239,7 +239,7 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 			line := scanner.Text()
 
 			if debug {
-				log.Printf("[DEBUG] Scanning line: %s\n", line)
+				utils.SafeLogPrintf(nil, nil, "[DEBUG] Scanning line: %s\n", line)
 			}
 
 			if strings.HasPrefix(line, "#EXTINF:") && checkIncludeGroup(grps, line) {
@@ -247,7 +247,7 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 					nextLine := scanner.Text()
 
 					if debug {
-						log.Printf("[DEBUG] Found next line for EXTINF: %s\n", nextLine)
+						utils.SafeLogPrintf(nil, nil, "[DEBUG] Found next line for EXTINF: %s\n", nextLine)
 					}
 
 					streamInfo := parseLine(line, nextLine, m3uIndex)
@@ -266,7 +266,7 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 
 		if len(streamInfos) > 0 {
 			if debug {
-				log.Printf("[DEBUG] Saving %d stream infos to database\n", len(streamInfos))
+				utils.SafeLogPrintf(nil, nil, "[DEBUG] Saving %d stream infos to database\n", len(streamInfos))
 			}
 			if err := db.SaveToDb(streamInfos); err != nil {
 				return fmt.Errorf("failed to save data to database: %v", err)

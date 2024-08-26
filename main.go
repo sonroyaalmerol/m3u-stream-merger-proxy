@@ -68,6 +68,8 @@ func updateSources(ctx context.Context, ewg *sync.WaitGroup) {
 }
 
 func main() {
+	debug := os.Getenv("DEBUG") == "true"
+
 	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -117,9 +119,19 @@ func main() {
 		wg.Add(1)
 		go updateSources(ctx, &wg)
 		if cacheOnSync == "true" {
+			if _, ok := os.LookupEnv("BASE_URL"); !ok {
+				log.Println("BASE_URL is required for CACHE_ON_SYNC to work.")
+			}
 			wg.Wait()
 			log.Println("CACHE_ON_SYNC enabled. Building cache.")
-			db.GetStreams()
+			if !m3u.M3uCache.Revalidating {
+				m3u.M3uCache.Revalidating = true
+				go m3u.GenerateAndCacheM3UContent(db, nil)
+			} else {
+				if debug {
+					log.Println("[DEBUG] Cache revalidation is already in progress. Skipping.")
+				}
+			}
 		}
 	})
 	if err != nil {
@@ -140,9 +152,19 @@ func main() {
 		wg.Add(1)
 		go updateSources(ctx, &wg)
 		if cacheOnSync == "true" {
+			if _, ok := os.LookupEnv("BASE_URL"); !ok {
+				log.Println("BASE_URL is required for CACHE_ON_SYNC to work.")
+			}
 			wg.Wait()
 			log.Println("CACHE_ON_SYNC enabled. Building cache.")
-			db.GetStreams()
+			if !m3u.M3uCache.Revalidating {
+				m3u.M3uCache.Revalidating = true
+				go m3u.GenerateAndCacheM3UContent(db, nil)
+			} else {
+				if debug {
+					log.Println("[DEBUG] Cache revalidation is already in progress. Skipping.")
+				}
+			}
 		}
 	}
 
@@ -160,7 +182,7 @@ func main() {
 
 	// HTTP handlers
 	http.HandleFunc("/playlist.m3u", func(w http.ResponseWriter, r *http.Request) {
-		m3u.GenerateM3UContent(w, r, db)
+		m3u.Handler(w, r, db)
 	})
 	http.HandleFunc("/stream/", func(w http.ResponseWriter, r *http.Request) {
 		streamHandler(w, r, db)

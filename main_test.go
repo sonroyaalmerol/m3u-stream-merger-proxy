@@ -50,7 +50,7 @@ func TestStreamHandler(t *testing.T) {
 	m3uW := httptest.NewRecorder()
 
 	func() {
-		m3u.GenerateM3UContent(m3uW, m3uReq, db)
+		m3u.Handler(m3uW, m3uReq, db)
 	}()
 
 	m3uResp := m3uW.Result()

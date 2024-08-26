@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"m3u-stream-merger/utils"
 	"math"
 	"os"
 	"strconv"
@@ -16,7 +17,6 @@ import (
 type Instance struct {
 	Redis *redis.Client
 	Ctx   context.Context
-	Cache *Cache
 }
 
 func InitializeDb(addr string, password string, db int) (*Instance, error) {
@@ -47,15 +47,13 @@ func InitializeDb(addr string, password string, db int) (*Instance, error) {
 		return nil, fmt.Errorf("error connecting to Redis: %v", err)
 	}
 
-	return &Instance{Redis: redisInstance, Ctx: context.Background(), Cache: NewCache()}, nil
+	return &Instance{Redis: redisInstance, Ctx: context.Background()}, nil
 }
 
 func (db *Instance) ClearDb() error {
 	if err := db.Redis.FlushDB(db.Ctx).Err(); err != nil {
 		return fmt.Errorf("error clearing Redis: %v", err)
 	}
-
-	db.Cache.Clear("streams_sorted_cache")
 
 	return nil
 }
@@ -76,7 +74,7 @@ func (db *Instance) SaveToDb(streams []StreamInfo) error {
 		}
 
 		if debug {
-			log.Printf("[DEBUG] Preparing to set data for stream key %s: %v\n", streamKey, streamData)
+			utils.SafeLogPrintf(nil, nil, "[DEBUG] Preparing to set data for stream key %s: %v\n", streamKey, streamData)
 		}
 
 		pipeline.HSet(db.Ctx, streamKey, streamData)
@@ -85,7 +83,7 @@ func (db *Instance) SaveToDb(streams []StreamInfo) error {
 			streamURLKey := fmt.Sprintf("stream:%s:url:%d", s.Slug, index)
 
 			if debug {
-				log.Printf("[DEBUG] Preparing to set URL for key %s: %s\n", streamURLKey, u)
+				utils.SafeLogPrintf(nil, nil, "[DEBUG] Preparing to set URL for key %s: %s\n", streamURLKey, u)
 			}
 
 			pipeline.Set(db.Ctx, streamURLKey, u, 0)
@@ -95,7 +93,7 @@ func (db *Instance) SaveToDb(streams []StreamInfo) error {
 		sortScore := calculateSortScore(s)
 
 		if debug {
-			log.Printf("[DEBUG] Adding to sorted set with score %f and member %s\n", sortScore, streamKey)
+			utils.SafeLogPrintf(nil, nil, "[DEBUG] Adding to sorted set with score %f and member %s\n", sortScore, streamKey)
 		}
 
 		pipeline.ZAdd(db.Ctx, "streams_sorted", redis.Z{
@@ -117,12 +115,6 @@ func (db *Instance) SaveToDb(streams []StreamInfo) error {
 		if debug {
 			log.Println("[DEBUG] Pipeline executed successfully.")
 		}
-	}
-
-	db.Cache.Clear("streams_sorted_cache")
-
-	if debug {
-		log.Println("[DEBUG] Cache cleared.")
 	}
 
 	return nil
@@ -160,7 +152,6 @@ func (db *Instance) DeleteStreamBySlug(slug string) error {
 		return fmt.Errorf("error deleting stream from Redis: %v", err)
 	}
 
-	db.Cache.Clear("streams_sorted_cache")
 	return nil
 }
 
@@ -169,7 +160,6 @@ func (db *Instance) DeleteStreamURL(s StreamInfo, m3uIndex int) error {
 		return fmt.Errorf("error deleting stream URL from Redis: %v", err)
 	}
 
-	db.Cache.Clear("streams_sorted_cache")
 	return nil
 }
 
@@ -241,37 +231,18 @@ func (db *Instance) GetStreams() <-chan StreamInfo {
 	go func() {
 		defer close(streamChan)
 
-		// Check if the data is in the cache
-		cacheKey := "streams_sorted_cache"
-		if data, found := db.Cache.Get(cacheKey); found {
-			if debug {
-				log.Printf("[DEBUG] Cache hit for key %s\n", cacheKey)
-			}
-			for _, stream := range data {
-				streamChan <- stream
-			}
-			return
-		}
-
-		if debug {
-			log.Println("[DEBUG] Cache miss. Retrieving streams from Redis...")
-		}
-
 		keys, err := db.Redis.ZRange(db.Ctx, "streams_sorted", 0, -1).Result()
 		if err != nil {
-			log.Printf("error retrieving streams: %v", err)
+			utils.SafeLogPrintf(nil, nil, "error retrieving streams: %v", err)
 			return
 		}
-
-		// Store the result in the cache
-		var streams []StreamInfo
 
 		// Filter out URL keys
 		for _, key := range keys {
 			if !strings.Contains(key, ":url:") {
 				streamData, err := db.Redis.HGetAll(db.Ctx, key).Result()
 				if err != nil {
-					log.Printf("error retrieving stream data: %v", err)
+					utils.SafeLogPrintf(nil, nil, "error retrieving stream data: %v", err)
 					return
 				}
 
@@ -287,40 +258,37 @@ func (db *Instance) GetStreams() <-chan StreamInfo {
 				}
 
 				if debug {
-					log.Printf("[DEBUG] Processing stream: %v\n", stream)
+					utils.SafeLogPrintf(nil, nil, "[DEBUG] Processing stream: %v\n", stream)
 				}
 
 				urlKeys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", key)).Result()
 				if err != nil {
-					log.Printf("error finding URLs for stream: %v", err)
+					utils.SafeLogPrintf(nil, nil, "error finding URLs for stream: %v", err)
 					return
 				}
 
 				for _, urlKey := range urlKeys {
 					urlData, err := db.Redis.Get(db.Ctx, urlKey).Result()
 					if err != nil {
-						log.Printf("error getting URL data from Redis: %v", err)
+						utils.SafeLogPrintf(nil, nil, "error getting URL data from Redis: %v", err)
 						return
 					}
 
 					m3uIndex, err := strconv.Atoi(extractM3UIndex(urlKey))
 					if err != nil {
-						log.Printf("m3u index is not an integer: %v", err)
+						utils.SafeLogPrintf(nil, nil, "m3u index is not an integer: %v", err)
 						return
 					}
 					stream.URLs[m3uIndex] = urlData
 				}
 
 				// Send the stream to the channel
-				streams = append(streams, stream)
 				streamChan <- stream
 			}
 		}
 
-		db.Cache.Set(cacheKey, streams)
-
 		if debug {
-			log.Println("[DEBUG] Streams retrieved and cached successfully.")
+			log.Println("[DEBUG] Streams retrieved successfully.")
 		}
 	}()
 
