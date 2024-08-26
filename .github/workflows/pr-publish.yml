@@ -5,14 +5,35 @@ on:
       - created
 
 jobs:
+  fetch-pr-details:
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.get-ref.outputs.ref }}
+    steps:
+      - name: Get PR Ref
+        id: get-ref
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const prNumber = context.issue.number;
+            const response = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+            const ref = response.data.head.ref;
+            return ref;
+        result-encoding: string
+
   build-and-push:
-    if: ${{ github.event.comment.body == '/publish' && github.event.issue.pull_request && github.event.comment.user.login == github.repository_owner }}
+    needs: fetch-pr-details
+    if: ${{ github.event.comment.body == '/publish' && github.event.issue.pull_request }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.issue.pull_request.head.ref }}
+          ref: ${{ needs.fetch-pr-details.outputs.ref }}
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
