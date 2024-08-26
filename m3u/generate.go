@@ -146,7 +146,7 @@ func Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	cacheData := M3uCache.data
 	M3uCache.Unlock()
 
-	if cacheData == "" || len(cacheData) <= 8 {
+	if cacheData == "#EXTM3U\n" || cacheData == "" {
 		// Check the file-based cache
 		if fileData, err := ReadCacheFromFile(); err == nil {
 			cacheData = fileData
@@ -157,7 +157,7 @@ func Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	}
 
 	// serve old cache and regenerate in the background
-	if cacheData != "" && len(cacheData) > 8 {
+	if cacheData != "#EXTM3U\n" && cacheData != "" {
 		if debug {
 			log.Println("[DEBUG] Serving old cache and regenerating in background")
 		}
