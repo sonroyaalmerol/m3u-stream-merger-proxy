@@ -39,7 +39,10 @@ func InitCache(db *database.Instance) {
 
 	go func() {
 		content := GenerateAndCacheM3UContent(db, nil)
-		_ = WriteCacheToFile(content)
+		err := WriteCacheToFile(content)
+		if err != nil {
+			log.Printf("Error writing cache to file: %v\n", err)
+		}
 	}()
 }
 
@@ -143,7 +146,7 @@ func Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	cacheData := M3uCache.data
 	M3uCache.Unlock()
 
-	if cacheData == "" {
+	if cacheData == "" || len(cacheData) == 8 {
 		// Check the file-based cache
 		if fileData, err := ReadCacheFromFile(); err == nil {
 			cacheData = fileData
@@ -154,7 +157,7 @@ func Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	}
 
 	// serve old cache and regenerate in the background
-	if cacheData != "" {
+	if cacheData != "" && len(cacheData) != 8 {
 		if debug {
 			log.Println("[DEBUG] Serving old cache and regenerating in background")
 		}
