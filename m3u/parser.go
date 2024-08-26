@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -107,72 +108,109 @@ func checkIncludeGroup(groups []string, line string) bool {
 	}
 }
 
-func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
+func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) error {
 	debug := os.Getenv("DEBUG") == "true"
+
+	var err error
+	maxRetries := 5
+	maxRetriesStr, ok := os.LookupEnv("MAX_RETRIES")
+	if ok {
+		maxRetries, err = strconv.Atoi(maxRetriesStr)
+		if err != nil {
+			maxRetries = 5
+		}
+	}
+
+	const retryDelay = time.Second * 5 // Delay between retries
+
 	if debug {
 		utils.SafeLogPrintf(nil, &m3uURL, "[DEBUG] Downloading M3U from: %s\n", m3uURL)
 	}
 
-	var file io.Reader
+	var tempFilePath string
+	var finalFilePath string
 	startOffset := int64(0)
 
-	if strings.HasPrefix(m3uURL, "file://") {
-		localPath := strings.TrimPrefix(m3uURL, "file://")
-		utils.SafeLogPrintf(nil, &localPath, "Reading M3U from local file: %s\n", localPath)
-
-		localFile, err := os.Open(localPath)
-		if err != nil {
-			return fmt.Errorf("Error opening file: %v", err)
-		}
-		defer localFile.Close()
-
-		file = localFile
-	} else {
-		// Calculate how much has already been downloaded
-		startOffset = int64(buffer.Len())
-		utils.SafeLogPrintf(nil, &m3uURL, "Downloading M3U from URL: %s, starting at offset: %d\n", m3uURL, startOffset)
-
-		// Make HTTP request with Range header to resume download
+	// Function to handle actual download with support for resumption
+	downloadToTempFile := func() error {
+		var err error
 		var resp *http.Response
 
+		rangeHeader := ""
 		if startOffset > 0 {
-			resp, err = utils.CustomHttpRequest("GET", m3uURL, fmt.Sprintf("bytes=%d-", startOffset))
-		} else {
-			resp, err = utils.CustomHttpRequest("GET", m3uURL, "")
+			rangeHeader = fmt.Sprintf("bytes=%d-", startOffset)
 		}
 
+		resp, err = utils.CustomHttpRequest("GET", m3uURL, rangeHeader)
 		if err != nil {
 			return fmt.Errorf("HTTP GET error: %v", err)
 		}
+		defer resp.Body.Close()
 
-		defer func() {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-		}()
-
-		// Check if server supports resuming
-		if resp.StatusCode == http.StatusRequestedRangeNotSatisfiable {
-			buffer.Reset()
-			return fmt.Errorf("Requested range not satisfiable, server does not support resuming")
-		} else if resp.StatusCode != http.StatusPartialContent && startOffset > 0 {
-			return fmt.Errorf("Server did not return 206 Partial Content, cannot resume download")
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+			return fmt.Errorf("Failed to download M3U: HTTP status %d", resp.StatusCode)
 		}
 
-		file = resp.Body
+		tempFile, err := os.OpenFile(tempFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return fmt.Errorf("Error opening temp file: %v", err)
+		}
+		defer tempFile.Close()
+
+		written, err := io.Copy(tempFile, resp.Body)
+		if err != nil {
+			return fmt.Errorf("Error writing to temp file: %v", err)
+		}
+
+		startOffset += written
+		return nil
 	}
 
-	// Write the content to the buffer
-	tempBuffer := &bytes.Buffer{}
-	_, err = io.Copy(tempBuffer, file)
+	if strings.HasPrefix(m3uURL, "file://") {
+		// Handle local file directly
+		localPath := strings.TrimPrefix(m3uURL, "file://")
+		utils.SafeLogPrintf(nil, &localPath, "[DEBUG] Reading M3U from local file: %s\n", localPath)
+		finalFilePath = localPath
+	} else {
+		fileName := filepath.Base(m3uURL)
+		tempFilePath := fmt.Sprintf("/tmp/%s.m3u-incomplete", fileName)
+
+		// Retry logic
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			err := downloadToTempFile()
+			if err == nil {
+				break // Success, exit loop
+			}
+
+			if debug {
+				utils.SafeLogPrintf(nil, &m3uURL, "[DEBUG] Download attempt %d failed: %v\n", attempt, err)
+			}
+			time.Sleep(retryDelay)
+		}
+
+		if startOffset == 0 {
+			return fmt.Errorf("Failed to download M3U after %d attempts", maxRetries)
+		}
+
+		finalFilePath = strings.TrimSuffix(tempFilePath, "-incomplete")
+		if err := os.Rename(tempFilePath, finalFilePath); err != nil {
+			return fmt.Errorf("Error renaming temp file: %v", err)
+		}
+	}
+
+	file, err := os.Open(finalFilePath)
 	if err != nil {
-		return fmt.Errorf("Error reading file: %v", err)
+		return fmt.Errorf("Error opening file: %v", err)
 	}
+	defer file.Close()
 
-	// Append the new content to the existing buffer
-	buffer.Write(tempBuffer.Bytes())
+	_, err = io.Copy(buffer, file)
+	if err != nil {
+		return fmt.Errorf("Error reading file to buffer: %v", err)
+	}
 
 	if debug {
-		log.Println("[DEBUG] Successfully copied M3U content to buffer")
+		log.Println("[DEBUG] Successfully read M3U content into buffer")
 	}
 
 	return nil
