@@ -57,7 +57,7 @@ func loadBalancer(stream database.StreamInfo, previous *[]int, method string) (*
 
 			allSkipped = false // At least one URL is not skipped
 
-			resp, err := utils.CustomHttpRequest(method, url)
+			resp, err := utils.CustomHttpRequest(method, url, "")
 			if err == nil {
 				if debug {
 					utils.SafeLogPrintf(nil, &url, "[DEBUG] Successfully fetched stream from %s\n", url)
