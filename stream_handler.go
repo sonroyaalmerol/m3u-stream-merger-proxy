@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-func loadBalancer(stream database.StreamInfo, previous *[]int) (*http.Response, string, int, error) {
+func loadBalancer(stream database.StreamInfo, previous *[]int, method string) (*http.Response, string, int, error) {
 	debug := os.Getenv("DEBUG") == "true"
 
 	m3uIndexes := utils.GetM3UIndexes()
@@ -57,7 +57,7 @@ func loadBalancer(stream database.StreamInfo, previous *[]int) (*http.Response, 
 
 			allSkipped = false // At least one URL is not skipped
 
-			resp, err := utils.CustomHttpRequest("GET", url)
+			resp, err := utils.CustomHttpRequest(method, url)
 			if err == nil {
 				if debug {
 					utils.SafeLogPrintf(nil, &url, "[DEBUG] Successfully fetched stream from %s\n", url)
@@ -88,6 +88,11 @@ func loadBalancer(stream database.StreamInfo, previous *[]int) (*http.Response, 
 
 func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
 	debug := os.Getenv("DEBUG") == "true"
+
+	if r.Method == http.MethodHead {
+		resp.Body.Close()
+		return
+	}
 
 	db.UpdateConcurrency(m3uIndex, true)
 	defer db.UpdateConcurrency(m3uIndex, false)
@@ -204,12 +209,6 @@ func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http
 func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	debug := os.Getenv("DEBUG") == "true"
 
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		_, _ = w.Write([]byte(fmt.Sprintf("HTTP method %q not allowed", r.Method)))
-		return
-	}
-
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
@@ -250,7 +249,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 			utils.SafeLogPrintf(r, nil, "Client disconnected: %s\n", r.RemoteAddr)
 			return
 		default:
-			resp, selectedUrl, selectedIndex, err = loadBalancer(stream, &testedIndexes)
+			resp, selectedUrl, selectedIndex, err = loadBalancer(stream, &testedIndexes, r.Method)
 			if err != nil {
 				utils.SafeLogPrintf(r, nil, "Error reloading stream for %s: %v\n", streamSlug, err)
 				return
@@ -258,13 +257,13 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 
 			// HTTP header initialization
 			if firstWrite {
-				w.Header().Set("Cache-Control", "no-cache")
-				w.Header().Set("Access-Control-Allow-Origin", "*")
 				for k, v := range resp.Header {
-					if strings.ToLower(k) != "content-length" {
-						for _, val := range v {
-							w.Header().Set(k, val)
-						}
+					if strings.ToLower(k) == "content-length" && !utils.EOFIsExpected(resp) {
+						continue
+					}
+
+					for _, val := range v {
+						w.Header().Set(k, val)
 					}
 				}
 				if debug {
