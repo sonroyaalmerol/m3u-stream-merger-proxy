@@ -20,7 +20,7 @@ func GetStreamSlugFromUrl(streamUID string) string {
 	return string(decoded)
 }
 
-func IsPlaylist(resp *http.Response) bool {
+func EOFIsExpected(resp *http.Response) bool {
 	knownMimeTypes := []string{
 		"application/x-mpegurl",
 		"text/plain",
