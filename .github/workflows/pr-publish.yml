@@ -6,6 +6,7 @@ on:
 
 jobs:
   fetch-pr-details:
+    if: ${{ github.event.comment.body == '/publish' && github.event.issue.pull_request }}
     runs-on: ubuntu-latest
     outputs:
       ref: ${{ steps.get-ref.outputs.ref }}
