@@ -66,6 +66,7 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: Built and pushed Docker image for PR
+          number: ${{ github.event.issue.number }}
           message: |
             The Docker image for this pull request has been built and pushed to GHCR.
 
