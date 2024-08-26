@@ -6,8 +6,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
-	"path/filepath
 	"slices"
 	"strings"
 )
