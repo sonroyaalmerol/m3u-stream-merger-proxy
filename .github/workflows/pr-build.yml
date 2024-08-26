@@ -5,23 +5,13 @@ on:
       - opened
       - synchronize
       - reopened
-  pull_request_target:
-    types: [labeled]
 
 jobs:
-  build-and-push:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Login to GitHub Container Registry
-        if: github.event_name == 'pull_request_target' && contains(github.event.pull_request.labels.*.name, 'push-to-ghcr')
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GHCR_PAT }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -35,19 +25,8 @@ jobs:
           tags: type=raw,value=pr-${{ github.event.number }}
           flavor: latest=false
 
-      - name: Docker - Build and Push
+      - name: Docker - Build
         uses: docker/build-push-action@v5
         with:
-          push: ${{ github.event_name == 'pull_request_target' && contains(github.event.pull_request.labels.*.name, 'push-to-ghcr') }}
+          push: false
           tags: ${{ steps.meta.outputs.tags }}
-
-      - name: Comment on Pull Request with Container Image URL
-        if: success() && github.event_name == 'pull_request_target' && contains(github.event.pull_request.labels.*.name, 'push-to-ghcr')
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          header: Built and pushed Docker image for PR
-          message: |
-            The Docker image for this pull request has been built and pushed to GHCR.
-
-            Image URL: `ghcr.io/${{ github.repository }}:pr-${{ github.event.number }}`
