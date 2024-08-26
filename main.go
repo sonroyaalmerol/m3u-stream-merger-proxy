@@ -68,8 +68,6 @@ func updateSources(ctx context.Context, ewg *sync.WaitGroup) {
 }
 
 func main() {
-	debug := os.Getenv("DEBUG") == "true"
-
 	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -101,6 +99,18 @@ func main() {
 		log.Fatalf("Error clearing concurrency database: %v", err)
 	}
 
+	clearOnBoot := os.Getenv("CLEAR_ON_BOOT")
+	if len(strings.TrimSpace(clearOnBoot)) == 0 {
+		clearOnBoot = "false"
+	}
+
+	if clearOnBoot == "true" {
+		log.Println("CLEAR_ON_BOOT enabled. Clearing current database.")
+		if err := db.ClearDb(); err != nil {
+			log.Fatalf("Error clearing database: %v", err)
+		}
+	}
+
 	cacheOnSync := os.Getenv("CACHE_ON_SYNC")
 	if len(strings.TrimSpace(cacheOnSync)) == 0 {
 		cacheOnSync = "false"
@@ -124,14 +134,7 @@ func main() {
 			}
 			wg.Wait()
 			log.Println("CACHE_ON_SYNC enabled. Building cache.")
-			if !m3u.M3uCache.Revalidating {
-				m3u.M3uCache.Revalidating = true
-				go m3u.GenerateAndCacheM3UContent(db, nil)
-			} else {
-				if debug {
-					log.Println("[DEBUG] Cache revalidation is already in progress. Skipping.")
-				}
-			}
+			m3u.InitCache(db)
 		}
 	})
 	if err != nil {
@@ -157,26 +160,7 @@ func main() {
 			}
 			wg.Wait()
 			log.Println("CACHE_ON_SYNC enabled. Building cache.")
-			if !m3u.M3uCache.Revalidating {
-				m3u.M3uCache.Revalidating = true
-				go m3u.GenerateAndCacheM3UContent(db, nil)
-			} else {
-				if debug {
-					log.Println("[DEBUG] Cache revalidation is already in progress. Skipping.")
-				}
-			}
-		}
-	}
-
-	clearOnBoot := os.Getenv("CLEAR_ON_BOOT")
-	if len(strings.TrimSpace(clearOnBoot)) == 0 {
-		clearOnBoot = "false"
-	}
-
-	if clearOnBoot == "true" {
-		log.Println("CLEAR_ON_BOOT enabled. Clearing current database.")
-		if err := db.ClearDb(); err != nil {
-			log.Fatalf("Error clearing database: %v", err)
+			m3u.InitCache(db)
 		}
 	}
 

@@ -196,7 +196,7 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 		var wg sync.WaitGroup
 
 		parserWorkers := os.Getenv("PARSER_WORKERS")
-		if parserWorkers != "" {
+		if strings.TrimSpace(parserWorkers) != "" {
 			parserWorkers = "5"
 		}
 
