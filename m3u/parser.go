@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"regexp"
 	"strconv"
@@ -113,6 +114,7 @@ func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 	}
 
 	var file io.Reader
+	var startOffset int64 = 0
 
 	if strings.HasPrefix(m3uURL, "file://") {
 		localPath := strings.TrimPrefix(m3uURL, "file://")
@@ -126,8 +128,19 @@ func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 
 		file = localFile
 	} else {
-		utils.SafeLogPrintf(nil, &m3uURL, "Downloading M3U from URL: %s\n", m3uURL)
-		resp, err := utils.CustomHttpRequest("GET", m3uURL)
+		// Calculate how much has already been downloaded
+		startOffset = int64(buffer.Len())
+		utils.SafeLogPrintf(nil, &m3uURL, "Downloading M3U from URL: %s, starting at offset: %d\n", m3uURL, startOffset)
+
+		// Make HTTP request with Range header to resume download
+		var resp *http.Response
+
+		if startOffset > 0 {
+			resp, err = utils.CustomHttpRequest("GET", m3uURL, fmt.Sprintf("bytes=%d-", startOffset))
+		} else {
+			resp, err = utils.CustomHttpRequest("GET", m3uURL, "")
+		}
+
 		if err != nil {
 			return fmt.Errorf("HTTP GET error: %v", err)
 		}
@@ -137,13 +150,26 @@ func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 			resp.Body.Close()
 		}()
 
+		// Check if server supports resuming
+		if resp.StatusCode == http.StatusRequestedRangeNotSatisfiable {
+			buffer.Reset()
+			return fmt.Errorf("Requested range not satisfiable, server does not support resuming")
+		} else if resp.StatusCode != http.StatusPartialContent && startOffset > 0 {
+			return fmt.Errorf("Server did not return 206 Partial Content, cannot resume download")
+		}
+
 		file = resp.Body
 	}
 
-	_, err = io.Copy(buffer, file)
+	// Write the content to the buffer
+	tempBuffer := &bytes.Buffer{}
+	_, err = io.Copy(tempBuffer, file)
 	if err != nil {
 		return fmt.Errorf("Error reading file: %v", err)
 	}
+
+	// Append the new content to the existing buffer
+	buffer.Write(tempBuffer.Bytes())
 
 	if debug {
 		log.Println("[DEBUG] Successfully copied M3U content to buffer")

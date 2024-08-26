@@ -2,7 +2,7 @@ package utils
 
 import "net/http"
 
-func CustomHttpRequest(method string, url string) (*http.Response, error) {
+func CustomHttpRequest(method string, url string, rangeHeader string) (*http.Response, error) {
 	userAgent := GetEnv("USER_AGENT")
 
 	// Create a new HTTP client with a custom User-Agent header
@@ -14,6 +14,10 @@ func CustomHttpRequest(method string, url string) (*http.Response, error) {
 	}
 
 	req.Header.Set("User-Agent", userAgent)
+
+	if rangeHeader != "" {
+		req.Header.Set("Range", rangeHeader)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
