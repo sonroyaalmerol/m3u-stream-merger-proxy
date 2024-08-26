@@ -2,6 +2,9 @@ package utils
 
 import (
 	"encoding/base64"
+	"net/http"
+	"slices"
+	"strings"
 )
 
 func GetStreamUrl(slug string) string {
@@ -14,4 +17,16 @@ func GetStreamSlugFromUrl(streamUID string) string {
 		return ""
 	}
 	return string(decoded)
+}
+
+func IsPlaylist(resp *http.Response) bool {
+	knownMimeTypes := []string{
+		"application/x-mpegurl",
+		"text/plain",
+		"audio/x-mpegurl",
+		"audio/mpegurl",
+		"application/vnd.apple.mpegurl",
+	}
+
+	return slices.Contains(knownMimeTypes, strings.ToLower(resp.Header.Get("Content-Type")))
 }
