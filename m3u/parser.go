@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -112,41 +114,66 @@ func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 		utils.SafeLogPrintf(nil, &m3uURL, "[DEBUG] Downloading M3U from: %s\n", m3uURL)
 	}
 
-	var file io.Reader
+	var tempFilePath string
 
 	if strings.HasPrefix(m3uURL, "file://") {
+		// Handle local file directly
 		localPath := strings.TrimPrefix(m3uURL, "file://")
-		utils.SafeLogPrintf(nil, &localPath, "Reading M3U from local file: %s\n", localPath)
-
-		localFile, err := os.Open(localPath)
-		if err != nil {
-			return fmt.Errorf("Error opening file: %v", err)
-		}
-		defer localFile.Close()
-
-		file = localFile
+		utils.SafeLogPrintf(nil, &localPath, "[DEBUG] Reading M3U from local file: %s\n", localPath)
+		tempFilePath = localPath
 	} else {
-		utils.SafeLogPrintf(nil, &m3uURL, "Downloading M3U from URL: %s\n", m3uURL)
-		resp, err := utils.CustomHttpRequest("GET", m3uURL)
+		// Create temporary file path
+		fileName := filepath.Base(m3uURL)
+		tempFilePath = fmt.Sprintf("/tmp/%s.m3u-incomplete", fileName)
+
+		// Make HTTP request to download the file
+		resp, err := http.Get(m3uURL)
 		if err != nil {
 			return fmt.Errorf("HTTP GET error: %v", err)
 		}
+		defer resp.Body.Close()
 
-		defer func() {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-		}()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("Failed to download M3U: HTTP status %d", resp.StatusCode)
+		}
 
-		file = resp.Body
+		// Create temporary file
+		tempFile, err := os.Create(tempFilePath)
+		if err != nil {
+			return fmt.Errorf("Error creating temp file: %v", err)
+		}
+		defer tempFile.Close()
+
+		// Download to the temporary file
+		_, err = io.Copy(tempFile, resp.Body)
+		if err != nil {
+			return fmt.Errorf("Error writing to temp file: %v", err)
+		}
+
+		// Rename the file to remove the "-incomplete" suffix
+		finalFilePath := strings.TrimSuffix(tempFilePath, "-incomplete")
+		err = os.Rename(tempFilePath, finalFilePath)
+		if err != nil {
+			return fmt.Errorf("Error renaming temp file: %v", err)
+		}
+
+		tempFilePath = finalFilePath
 	}
+
+	// Read the final file into the buffer
+	file, err := os.Open(tempFilePath)
+	if err != nil {
+		return fmt.Errorf("Error opening file: %v", err)
+	}
+	defer file.Close()
 
 	_, err = io.Copy(buffer, file)
 	if err != nil {
-		return fmt.Errorf("Error reading file: %v", err)
+		return fmt.Errorf("Error reading file to buffer: %v", err)
 	}
 
 	if debug {
-		log.Println("[DEBUG] Successfully copied M3U content to buffer")
+		log.Println("[DEBUG] Successfully read M3U content into buffer")
 	}
 
 	return nil
