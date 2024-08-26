@@ -114,7 +114,7 @@ func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 	}
 
 	var file io.Reader
-	var startOffset int64 = 0
+	startOffset := int64(0)
 
 	if strings.HasPrefix(m3uURL, "file://") {
 		localPath := strings.TrimPrefix(m3uURL, "file://")
