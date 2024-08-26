@@ -21,6 +21,32 @@ type Cache struct {
 
 var M3uCache = &Cache{}
 
+const cacheFilePath = "/cache.m3u"
+
+func InitCache(db *database.Instance) {
+	debug := isDebugMode()
+
+	M3uCache.Lock()
+	if M3uCache.Revalidating {
+		M3uCache.Unlock()
+		if debug {
+			log.Println("[DEBUG] Cache revalidation is already in progress. Skipping.")
+		}
+		return
+	}
+	M3uCache.Revalidating = true
+	M3uCache.Unlock()
+
+	go func() {
+		content := GenerateAndCacheM3UContent(db, nil)
+		WriteCacheToFile(content)
+	}()
+}
+
+func isDebugMode() bool {
+	return os.Getenv("DEBUG") == "true"
+}
+
 func getFileExtensionFromUrl(rawUrl string) (string, error) {
 	u, err := url.Parse(rawUrl)
 	if err != nil {
@@ -42,32 +68,19 @@ func GenerateStreamURL(baseUrl string, slug string, sampleUrl string) string {
 }
 
 func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
-	debug := os.Getenv("DEBUG") == "true"
+	debug := isDebugMode()
 	if debug {
 		log.Println("[DEBUG] Regenerating M3U cache in the background")
 	}
 
-	var content string
-
-	baseUrl := "" // Setup base URL logic
-	if r != nil {
-		if r.TLS == nil {
-			baseUrl = fmt.Sprintf("http://%s/stream", r.Host)
-		} else {
-			baseUrl = fmt.Sprintf("https://%s/stream", r.Host)
-		}
-	}
-
-	if customBase, ok := os.LookupEnv("BASE_URL"); ok {
-		customBase = strings.TrimSuffix(customBase, "/")
-		baseUrl = fmt.Sprintf("%s/stream", customBase)
-	}
+	baseUrl := determineBaseURL(r)
 
 	if debug {
 		utils.SafeLogPrintf(r, nil, "[DEBUG] Base URL set to %s\n", baseUrl)
 	}
 
-	content += "#EXTM3U\n"
+	var content strings.Builder
+	content.WriteString("#EXTM3U\n")
 
 	// Retrieve the streams from the database using channels
 	streamChan := db.GetStreams()
@@ -80,12 +93,10 @@ func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
 			utils.SafeLogPrintf(nil, nil, "[DEBUG] Processing stream with TVG ID: %s\n", stream.TvgID)
 		}
 
-		// Append the stream info to content
-		content += fmt.Sprintf("#EXTINF:-1 channelID=\"x-ID.%s\" tvg-chno=\"%s\" tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
-			stream.TvgID, stream.TvgChNo, stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title)
+		content.WriteString(fmt.Sprintf("#EXTINF:-1 channelID=\"x-ID.%s\" tvg-chno=\"%s\" tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
+			stream.TvgID, stream.TvgChNo, stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title))
 
-		// Append the actual stream URL to content
-		content += GenerateStreamURL(baseUrl, stream.Slug, stream.URLs[0])
+		content.WriteString(GenerateStreamURL(baseUrl, stream.Slug, stream.URLs[0]))
 	}
 
 	if debug {
@@ -94,15 +105,31 @@ func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
 
 	// Update cache
 	M3uCache.Lock()
-	M3uCache.data = content
+	M3uCache.data = content.String()
 	M3uCache.Revalidating = false
 	M3uCache.Unlock()
 
-	return content
+	return content.String()
+}
+
+func determineBaseURL(r *http.Request) string {
+	if r != nil {
+		if r.TLS == nil {
+			return fmt.Sprintf("http://%s/stream", r.Host)
+		} else {
+			return fmt.Sprintf("https://%s/stream", r.Host)
+		}
+	}
+
+	if customBase, ok := os.LookupEnv("BASE_URL"); ok {
+		return fmt.Sprintf("%s/stream", strings.TrimSuffix(customBase, "/"))
+	}
+
+	return ""
 }
 
 func Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
-	debug := os.Getenv("DEBUG") == "true"
+	debug := isDebugMode()
 
 	if debug {
 		log.Println("[DEBUG] Generating M3U content")
@@ -116,24 +143,45 @@ func Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	cacheData := M3uCache.data
 	M3uCache.Unlock()
 
+	if cacheData == "" {
+		// Check the file-based cache
+		if fileData, err := ReadCacheFromFile(); err == nil {
+			cacheData = fileData
+			M3uCache.Lock()
+			M3uCache.data = fileData // update in-memory cache
+			M3uCache.Unlock()
+		}
+	}
+
 	// serve old cache and regenerate in the background
 	if cacheData != "" {
 		if debug {
 			log.Println("[DEBUG] Serving old cache and regenerating in background")
 		}
-		_, _ = w.Write([]byte(cacheData))
-		if !M3uCache.Revalidating {
-			M3uCache.Revalidating = true
-			go GenerateAndCacheM3UContent(db, r)
-		} else {
-			if debug {
-				log.Println("[DEBUG] Cache revalidation is already in progress. Skipping.")
-			}
+		if _, err := w.Write([]byte(cacheData)); err != nil {
+			log.Printf("[ERROR] Failed to write response: %v\n", err)
 		}
+
+		InitCache(db)
 		return
 	}
 
 	// If no valid cache, generate content and update cache
 	content := GenerateAndCacheM3UContent(db, r)
-	_, _ = w.Write([]byte(content))
+	WriteCacheToFile(content)
+	if _, err := w.Write([]byte(content)); err != nil {
+		log.Printf("[ERROR] Failed to write response: %v\n", err)
+	}
+}
+
+func ReadCacheFromFile() (string, error) {
+	data, err := os.ReadFile(cacheFilePath)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func WriteCacheToFile(content string) error {
+	return os.WriteFile(cacheFilePath, []byte(content), 0644)
 }
