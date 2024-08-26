@@ -90,6 +90,7 @@ func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http
 	debug := os.Getenv("DEBUG") == "true"
 
 	if r.Method == http.MethodHead {
+		statusChan <- 4
 		resp.Body.Close()
 		return
 	}
@@ -287,6 +288,9 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 			} else if streamExitCode == 1 || streamExitCode == 2 {
 				// Retry on server-side connection errors
 				utils.SafeLogPrintf(r, nil, "Retrying other servers...\n")
+			} else if streamExitCode == 4 {
+				utils.SafeLogPrintf(r, nil, "Successfully proxied HEAD request: %s\n", r.RemoteAddr)
+				cancel()
 			} else {
 				// Consider client-side connection errors as complete closure
 				utils.SafeLogPrintf(r, nil, "Client has closed the stream: %s\n", r.RemoteAddr)
