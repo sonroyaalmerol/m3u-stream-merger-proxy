@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -22,10 +23,16 @@ func GetStreamSlugFromUrl(streamUID string) string {
 	return string(decoded)
 }
 
-func IsPlaylistFile(url string) bool {
-	urlClean := strings.TrimSpace(strings.ToLower(url))
+func IsPlaylist(resp *http.Response) bool {
+	knownMimeTypes := []string{
+		"application/x-mpegurl",
+		"text/plain",
+		"audio/x-mpegurl",
+		"audio/mpegurl",
+		"application/vnd.apple.mpegurl",
+	}
 
-	return strings.HasSuffix(urlClean, ".m3u") || strings.HasSuffix(urlClean, ".m3u8")
+	return slices.Contains(knownMimeTypes, strings.ToLower(resp.Header.Get("Content-Type")))
 }
 
 func SafeLogPrintf(r *http.Request, customUnsafe *string, format string, v ...any) {

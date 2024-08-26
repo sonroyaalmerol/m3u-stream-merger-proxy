@@ -139,7 +139,7 @@ func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http
 			if err != nil {
 				if err == io.EOF {
 					utils.SafeLogPrintf(r, nil, "Stream ended (EOF reached): %s\n", r.RemoteAddr)
-					if utils.IsPlaylistFile(r.URL.String()) {
+					if utils.IsPlaylist(resp) {
 						statusChan <- 2
 						return
 					}
@@ -282,7 +282,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 			streamExitCode := <-exitStatus
 			utils.SafeLogPrintf(r, &selectedUrl, "Exit code %d received from %s\n", streamExitCode, selectedUrl)
 
-			if streamExitCode == 2 && utils.IsPlaylistFile(selectedUrl) {
+			if streamExitCode == 2 && utils.IsPlaylist(resp) {
 				utils.SafeLogPrintf(r, nil, "Successfully proxied playlist (M3U) file: %s\n", r.RemoteAddr)
 				cancel()
 			} else if streamExitCode == 1 || streamExitCode == 2 {
