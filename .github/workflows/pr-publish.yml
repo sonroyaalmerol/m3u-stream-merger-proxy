@@ -9,12 +9,13 @@ jobs:
     if: ${{ github.event.comment.body == '/publish' && github.event.issue.pull_request }}
     runs-on: ubuntu-latest
     outputs:
-      ref: ${{ steps.get-ref.outputs.ref }}
+      ref: ${{ steps.get-ref.outputs.result }}
     steps:
       - name: Get PR Ref
         id: get-ref
         uses: actions/github-script@v6
         with:
+          result-encoding: string
           script: |
             const prNumber = context.issue.number;
             const response = await github.rest.pulls.get({
@@ -24,7 +25,6 @@ jobs:
             });
             const ref = response.data.head.ref;
             return ref;
-        result-encoding: string
 
   build-and-push:
     needs: fetch-pr-details
