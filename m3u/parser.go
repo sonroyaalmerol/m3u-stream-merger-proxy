@@ -108,97 +108,60 @@ func checkIncludeGroup(groups []string, line string) bool {
 	}
 }
 
-func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) error {
+func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 	debug := os.Getenv("DEBUG") == "true"
-
-	var err error
-	maxRetries := 5
-	maxRetriesStr, ok := os.LookupEnv("MAX_RETRIES")
-	if ok {
-		maxRetries, err = strconv.Atoi(maxRetriesStr)
-		if err != nil {
-			maxRetries = 5
-		}
-	}
-
-	const retryDelay = time.Second * 5 // Delay between retries
-
 	if debug {
 		utils.SafeLogPrintf(nil, &m3uURL, "[DEBUG] Downloading M3U from: %s\n", m3uURL)
 	}
 
 	var tempFilePath string
-	var finalFilePath string
-	startOffset := int64(0)
-
-	// Function to handle actual download with support for resumption
-	downloadToTempFile := func() error {
-		var err error
-		var resp *http.Response
-
-		rangeHeader := ""
-		if startOffset > 0 {
-			rangeHeader = fmt.Sprintf("bytes=%d-", startOffset)
-		}
-
-		resp, err = utils.CustomHttpRequest("GET", m3uURL, rangeHeader)
-		if err != nil {
-			return fmt.Errorf("HTTP GET error: %v", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-			return fmt.Errorf("Failed to download M3U: HTTP status %d", resp.StatusCode)
-		}
-
-		tempFile, err := os.OpenFile(tempFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return fmt.Errorf("Error opening temp file: %v", err)
-		}
-		defer tempFile.Close()
-
-		written, err := io.Copy(tempFile, resp.Body)
-		if err != nil {
-			return fmt.Errorf("Error writing to temp file: %v", err)
-		}
-
-		startOffset += written
-		return nil
-	}
 
 	if strings.HasPrefix(m3uURL, "file://") {
 		// Handle local file directly
 		localPath := strings.TrimPrefix(m3uURL, "file://")
 		utils.SafeLogPrintf(nil, &localPath, "[DEBUG] Reading M3U from local file: %s\n", localPath)
-		finalFilePath = localPath
+		tempFilePath = localPath
 	} else {
+		// Create temporary file path
 		fileName := filepath.Base(m3uURL)
-		tempFilePath := fmt.Sprintf("/tmp/%s.m3u-incomplete", fileName)
+		tempFilePath = fmt.Sprintf("/tmp/%s.m3u-incomplete", fileName)
 
-		// Retry logic
-		for attempt := 1; attempt <= maxRetries; attempt++ {
-			err := downloadToTempFile()
-			if err == nil {
-				break // Success, exit loop
-			}
+		// Make HTTP request to download the file
+		resp, err := http.Get(m3uURL)
+		if err != nil {
+			return fmt.Errorf("HTTP GET error: %v", err)
+		}
+		defer resp.Body.Close()
 
-			if debug {
-				utils.SafeLogPrintf(nil, &m3uURL, "[DEBUG] Download attempt %d failed: %v\n", attempt, err)
-			}
-			time.Sleep(retryDelay)
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("Failed to download M3U: HTTP status %d", resp.StatusCode)
 		}
 
-		if startOffset == 0 {
-			return fmt.Errorf("Failed to download M3U after %d attempts", maxRetries)
+		// Create temporary file
+		tempFile, err := os.Create(tempFilePath)
+		if err != nil {
+			return fmt.Errorf("Error creating temp file: %v", err)
+		}
+		defer tempFile.Close()
+
+		// Download to the temporary file
+		_, err = io.Copy(tempFile, resp.Body)
+		if err != nil {
+			return fmt.Errorf("Error writing to temp file: %v", err)
 		}
 
-		finalFilePath = strings.TrimSuffix(tempFilePath, "-incomplete")
-		if err := os.Rename(tempFilePath, finalFilePath); err != nil {
+		// Rename the file to remove the "-incomplete" suffix
+		finalFilePath := strings.TrimSuffix(tempFilePath, "-incomplete")
+		err = os.Rename(tempFilePath, finalFilePath)
+		if err != nil {
 			return fmt.Errorf("Error renaming temp file: %v", err)
 		}
+
+		tempFilePath = finalFilePath
 	}
 
-	file, err := os.Open(finalFilePath)
+	// Read the final file into the buffer
+	file, err := os.Open(tempFilePath)
 	if err != nil {
 		return fmt.Errorf("Error opening file: %v", err)
 	}
