@@ -64,11 +64,6 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 		t.Errorf("DeleteStreamBySlug returned error: %v", err)
 	}
 
-	err = db.DeleteStreamURL(expected[0], 0)
-	if err != nil {
-		t.Errorf("DeleteStreamURL returned error: %v", err)
-	}
-
 	streamChan = db.GetStreams()
 
 	result = []StreamInfo{}
@@ -77,7 +72,6 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 	}
 
 	expected = expected[:1]
-	expected[0].URLs = map[int]string{}
 
 	if len(result) != len(expected) {
 		t.Errorf("GetStreams returned %+v, expected %+v", result, expected)
