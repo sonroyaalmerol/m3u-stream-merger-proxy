@@ -126,6 +126,9 @@ func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http
 	}
 
 	timeoutDuration := time.Duration(timeoutSecond) * time.Second
+	if timeoutSecond == 0 {
+		timeoutDuration = time.Minute
+	}
 	timer := time.NewTimer(timeoutDuration)
 	defer timer.Stop()
 
@@ -201,15 +204,6 @@ func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http
 
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
-			}
-
-			if timeoutSecond == 0 {
-				select {
-				case <-timer.C: // drain the channel to avoid blocking
-				default:
-				}
-
-				continue
 			}
 
 			// Reset the timer on each successful write and backoff
