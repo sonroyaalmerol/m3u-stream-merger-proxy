@@ -171,9 +171,11 @@ func Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 
 	// If no valid cache, generate content and update cache
 	content := GenerateAndCacheM3UContent(db, r)
-	if err := WriteCacheToFile(content); err != nil {
-		log.Printf("[ERROR] Failed to write cache to file: %v\n", err)
-	}
+	go func() {
+		if err := WriteCacheToFile(content); err != nil {
+			log.Printf("[ERROR] Failed to write cache to file: %v\n", err)
+		}
+	}()
 
 	if _, err := w.Write([]byte(content)); err != nil {
 		log.Printf("[ERROR] Failed to write response: %v\n", err)
