@@ -86,21 +86,6 @@ func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
 	content.WriteString("#EXTM3U\n")
 
 	// Retrieve the streams from the database using channels
-	buffer := make([]string, 0, batchSize)
-	for stream := range streamChan {
-		// Add stream processing results to the buffer
-		buffer = append(buffer, processStream(stream))
-		if len(buffer) >= batchSize {
-			// Write batch to cache or response
-			writeBatch(buffer)
-			buffer = buffer[:0] // Clear buffer
-		}
-	}
-	// Write any remaining items in the buffer
-	if len(buffer) > 0 {
-		writeBatch(buffer)
-	}
-
 	streamChan := db.GetStreams()
 	for stream := range streamChan {
 		if len(stream.URLs) == 0 {
@@ -186,11 +171,9 @@ func Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 
 	// If no valid cache, generate content and update cache
 	content := GenerateAndCacheM3UContent(db, r)
-	go func() {
-		if err := WriteCacheToFile(content); err != nil {
-			log.Printf("[ERROR] Failed to write cache to file: %v\n", err)
-		}
-	}()
+	if err := WriteCacheToFile(content); err != nil {
+		log.Printf("[ERROR] Failed to write cache to file: %v\n", err)
+	}
 
 	if _, err := w.Write([]byte(content)); err != nil {
 		log.Printf("[ERROR] Failed to write response: %v\n", err)
