@@ -55,7 +55,7 @@ func getFileExtensionFromUrl(rawUrl string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.ReplaceAll(path.Ext(u.Path), ".", ""), nil
+	return path.Ext(u.Path), nil
 }
 
 func GenerateStreamURL(baseUrl string, slug string, sampleUrl string) string {
@@ -63,7 +63,7 @@ func GenerateStreamURL(baseUrl string, slug string, sampleUrl string) string {
 	if err != nil {
 		return fmt.Sprintf("%s/%s\n", baseUrl, slug)
 	}
-	return fmt.Sprintf("%s/%s.%s\n", baseUrl, slug, ext)
+	return fmt.Sprintf("%s/%s%s\n", baseUrl, slug, ext)
 }
 
 func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
