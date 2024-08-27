@@ -55,7 +55,7 @@ func getFileExtensionFromUrl(rawUrl string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return path.Ext(u.Path)[1:], nil
+	return strings.ReplaceAll(path.Ext(u.Path), ".", ""), nil
 }
 
 func GenerateStreamURL(baseUrl string, slug string, sampleUrl string) string {
