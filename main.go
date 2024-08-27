@@ -6,8 +6,10 @@ import (
 	"log"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/m3u"
+	"maps"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,9 +21,9 @@ import (
 var db *database.Instance
 var cronMutex sync.Mutex
 
-func updateSource(nextDb *database.Instance, m3uUrl string, index int) {
+func updateSource(tmpStore map[string]database.StreamInfo, m3uUrl string, index int) {
 	log.Printf("Background process: Updating M3U #%d from %s\n", index+1, m3uUrl)
-	err := m3u.ParseM3UFromURL(nextDb, m3uUrl, index)
+	err := m3u.ParseM3UFromURL(tmpStore, m3uUrl, index)
 	if err != nil {
 		log.Printf("Background process: Error updating M3U: %v\n", err)
 	} else {
@@ -45,6 +47,8 @@ func updateSources(ctx context.Context, ewg *sync.WaitGroup) {
 		log.Println("Background process: Checking M3U_URLs...")
 		var wg sync.WaitGroup
 		index := 0
+		tmpStore := map[string]database.StreamInfo{}
+
 		for {
 			m3uUrl, m3uExists := os.LookupEnv(fmt.Sprintf("M3U_URL_%d", index+1))
 			if !m3uExists {
@@ -54,14 +58,19 @@ func updateSources(ctx context.Context, ewg *sync.WaitGroup) {
 			log.Printf("Background process: Fetching M3U_URL_%d...\n", index+1)
 			wg.Add(1)
 			// Start the goroutine for periodic updates
-			go func(currDb *database.Instance, m3uUrl string, index int) {
+			go func(store map[string]database.StreamInfo, m3uUrl string, index int) {
 				defer wg.Done()
-				updateSource(currDb, m3uUrl, index)
-			}(db, m3uUrl, index)
+				updateSource(store, m3uUrl, index)
+			}(tmpStore, m3uUrl, index)
 
 			index++
 		}
 		wg.Wait()
+
+		err := db.SaveToDb(slices.Collect(maps.Values(tmpStore)))
+		if err != nil {
+			log.Printf("Background process: Error updating M3U database: %v\n", err)
+		}
 
 		log.Println("Background process: Updated M3U database.")
 	}

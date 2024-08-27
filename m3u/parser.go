@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"os"
 	"regexp"
 	"strconv"
@@ -152,7 +153,7 @@ func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 	return nil
 }
 
-func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
+func ParseM3UFromURL(streams map[string]database.StreamInfo, m3uURL string, m3uIndex int) error {
 	debug := os.Getenv("DEBUG") == "true"
 
 	maxRetries := 10
@@ -211,7 +212,6 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 			numWorkers = 5
 		}
 
-		var streamInfos []database.StreamInfo
 		var mu sync.Mutex
 
 		for w := 0; w < numWorkers; w++ {
@@ -223,7 +223,12 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 						utils.SafeLogPrintf(nil, nil, "[DEBUG] Worker processing stream info: %s\n", streamInfo.Slug)
 					}
 					mu.Lock()
-					streamInfos = append(streamInfos, streamInfo)
+					_, ok := streams[streamInfo.Title]
+					if !ok {
+						streams[streamInfo.Title] = streamInfo
+					} else {
+						maps.Copy(streams[streamInfo.Title].URLs, streamInfo.URLs)
+					}
 					mu.Unlock()
 				}
 			}()
@@ -262,15 +267,6 @@ func ParseM3UFromURL(db *database.Instance, m3uURL string, m3uIndex int) error {
 
 		if err := scanner.Err(); err != nil {
 			return fmt.Errorf("scanner error: %v", err)
-		}
-
-		if len(streamInfos) > 0 {
-			if debug {
-				utils.SafeLogPrintf(nil, nil, "[DEBUG] Saving %d stream infos to database\n", len(streamInfos))
-			}
-			if err := db.SaveToDb(streamInfos); err != nil {
-				return fmt.Errorf("failed to save data to database: %v", err)
-			}
 		}
 
 		buffer.Reset()
