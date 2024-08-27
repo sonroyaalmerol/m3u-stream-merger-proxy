@@ -121,11 +121,14 @@ func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http
 	}()
 
 	timeoutSecond, err := strconv.Atoi(os.Getenv("STREAM_TIMEOUT"))
-	if err != nil || timeoutSecond <= 0 {
+	if err != nil || timeoutSecond < 0 {
 		timeoutSecond = 3
 	}
 
 	timeoutDuration := time.Duration(timeoutSecond) * time.Second
+	if timeoutSecond == 0 {
+		timeoutDuration = time.Minute
+	}
 	timer := time.NewTimer(timeoutDuration)
 	defer timer.Stop()
 
@@ -151,7 +154,7 @@ func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http
 			if err != nil {
 				if err == io.EOF {
 					utils.SafeLogPrintf(r, nil, "Stream ended (EOF reached): %s\n", r.RemoteAddr)
-					if utils.EOFIsExpected(resp) {
+					if utils.EOFIsExpected(resp) || timeoutSecond == 0 {
 						statusChan <- 2
 						return
 					}
@@ -174,6 +177,11 @@ func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http
 				utils.SafeLogPrintf(r, nil, "Error reading stream: %s\n", err.Error())
 
 				returnStatus = 1
+
+				if timeoutSecond == 0 {
+					statusChan <- 1
+					return
+				}
 
 				if debug {
 					utils.SafeLogPrintf(nil, nil, "[DEBUG] Retrying same stream with backoff of %v...\n", currentBackoff)
