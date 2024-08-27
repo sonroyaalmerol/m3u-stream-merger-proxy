@@ -1,7 +1,6 @@
 package m3u
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"m3u-stream-merger/database"
@@ -9,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"strings"
 	"sync"
 )
@@ -55,19 +55,15 @@ func getFileExtensionFromUrl(rawUrl string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	pos := strings.LastIndex(u.Path, ".")
-	if pos == -1 {
-		return "", errors.New("couldn't find a period to indicate a file extension")
-	}
-	return u.Path[pos+1:], nil
+	return path.Ext(u.Path), nil
 }
 
 func GenerateStreamURL(baseUrl string, slug string, sampleUrl string) string {
 	ext, err := getFileExtensionFromUrl(sampleUrl)
 	if err != nil {
-		return fmt.Sprintf("%s/%s\n", baseUrl, utils.GetStreamUrl(slug))
+		return fmt.Sprintf("%s/%s\n", baseUrl, slug)
 	}
-	return fmt.Sprintf("%s/%s.%s\n", baseUrl, utils.GetStreamUrl(slug), ext)
+	return fmt.Sprintf("%s/%s.%s\n", baseUrl, slug, ext)
 }
 
 func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {

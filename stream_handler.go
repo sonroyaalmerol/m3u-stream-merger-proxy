@@ -222,16 +222,9 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 		return
 	}
 
-	streamSlug := utils.GetStreamSlugFromUrl(streamUrl)
-	if streamSlug == "" {
-		utils.SafeLogPrintf(r, nil, "No stream found for streamUrl %s from %s\n", streamUrl, r.RemoteAddr)
-		http.NotFound(w, r)
-		return
-	}
-
-	stream, err := db.GetStreamBySlug(streamSlug)
+	stream, err := db.GetStreamBySlug(streamUrl)
 	if err != nil {
-		utils.SafeLogPrintf(r, nil, "Error retrieving stream for slug %s: %v\n", streamSlug, err)
+		utils.SafeLogPrintf(r, nil, "Error retrieving stream for slug %s: %v\n", streamUrl, err)
 		http.NotFound(w, r)
 		return
 	}
@@ -252,7 +245,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 		default:
 			resp, selectedUrl, selectedIndex, err = loadBalancer(stream, &testedIndexes, r.Method)
 			if err != nil {
-				utils.SafeLogPrintf(r, nil, "Error reloading stream for %s: %v\n", streamSlug, err)
+				utils.SafeLogPrintf(r, nil, "Error reloading stream for %s: %v\n", streamUrl, err)
 				return
 			}
 
