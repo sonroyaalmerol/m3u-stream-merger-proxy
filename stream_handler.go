@@ -90,7 +90,7 @@ func loadBalancer(stream database.StreamInfo, previous *[]int, method string) (*
 func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
 	debug := os.Getenv("DEBUG") == "true"
 
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet || utils.EOFIsExpected(resp) {
 		_, err := io.Copy(w, resp.Body)
 		statusChan <- 4
 
