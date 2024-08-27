@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/utils"
 	"net/http"
@@ -89,9 +90,14 @@ func loadBalancer(stream database.StreamInfo, previous *[]int, method string) (*
 func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
 	debug := os.Getenv("DEBUG") == "true"
 
-	if r.Method == http.MethodHead {
+	if r.Method != http.MethodGet {
+		_, err := io.Copy(w, resp.Body)
 		statusChan <- 4
-		resp.Body.Close()
+
+		if err != nil {
+			log.Printf("Failed to write segment to response: %v", err)
+			return
+		}
 		return
 	}
 
@@ -282,7 +288,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 				// Retry on server-side connection errors
 				utils.SafeLogPrintf(r, nil, "Retrying other servers...\n")
 			} else if streamExitCode == 4 {
-				utils.SafeLogPrintf(r, nil, "Successfully proxied HEAD request: %s\n", r.RemoteAddr)
+				utils.SafeLogPrintf(r, nil, "Finished handling %s request: %s\n", r.Method, r.RemoteAddr)
 				cancel()
 			} else {
 				// Consider client-side connection errors as complete closure
