@@ -71,6 +71,8 @@ func (db *Instance) SaveToDb(streams []*StreamInfo) error {
 
 	pipeline := db.Redis.Pipeline()
 
+	pipeline.FlushDB(db.Ctx)
+
 	for _, s := range streams {
 		streamKey := fmt.Sprintf("stream:%s", s.Slug)
 

@@ -111,6 +111,24 @@ func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
 	return content.String()
 }
 
+func ClearCache() {
+	debug := isDebugMode()
+
+	M3uCache.Lock()
+
+	if debug {
+		log.Println("[DEBUG] Clearing memory and disk M3U cache.")
+	}
+	M3uCache.data = ""
+	if err := DeleteCacheFile(); err != nil {
+		if debug {
+			log.Printf("[DEBUG] Cache file deletion failed: %v\n", err)
+		}
+	}
+
+	M3uCache.Unlock()
+}
+
 func Handler(w http.ResponseWriter, r *http.Request) {
 	db, err := database.InitializeDb()
 	if err != nil {
@@ -176,4 +194,8 @@ func ReadCacheFromFile() (string, error) {
 
 func WriteCacheToFile(content string) error {
 	return os.WriteFile(cacheFilePath, []byte(content), 0644)
+}
+
+func DeleteCacheFile() error {
+	return os.Remove(cacheFilePath)
 }
