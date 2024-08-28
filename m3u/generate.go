@@ -120,7 +120,11 @@ func ClearCache() {
 		log.Println("[DEBUG] Clearing memory and disk M3U cache.")
 	}
 	M3uCache.data = ""
-	DeleteCacheFile()
+	if err := DeleteCacheFile(); err != nil {
+		if debug {
+			log.Printf("[DEBUG] Cache file deletion failed: %v\n", err)
+		}
+	}
 
 	M3uCache.Unlock()
 }
