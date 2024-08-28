@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"io"
 	"log"
 	"maps"
 	"os"
@@ -95,74 +94,6 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 	}
 
 	return currentStream
-}
-
-func checkIncludeGroup(groups []string, line string) bool {
-	debug := os.Getenv("DEBUG") == "true"
-	if debug {
-		utils.SafeLogPrintf(nil, nil, "[DEBUG] Checking if line includes group: %s\n", line)
-	}
-
-	if len(groups) == 0 {
-		return true
-	} else {
-		for _, group := range groups {
-			toMatch := "group-title=" + "\"" + group + "\""
-			if strings.Contains(strings.ToLower(line), toMatch) {
-				if debug {
-					utils.SafeLogPrintf(nil, nil, "[DEBUG] Line matches group: %s\n", group)
-				}
-				return true
-			}
-		}
-		return false
-	}
-}
-
-func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
-	debug := os.Getenv("DEBUG") == "true"
-	if debug {
-		utils.SafeLogPrintf(nil, &m3uURL, "[DEBUG] Downloading M3U from: %s\n", m3uURL)
-	}
-
-	var file io.Reader
-
-	if strings.HasPrefix(m3uURL, "file://") {
-		localPath := strings.TrimPrefix(m3uURL, "file://")
-		utils.SafeLogPrintf(nil, &localPath, "Reading M3U from local file: %s\n", localPath)
-
-		localFile, err := os.Open(localPath)
-		if err != nil {
-			return fmt.Errorf("Error opening file: %v", err)
-		}
-		defer localFile.Close()
-
-		file = localFile
-	} else {
-		utils.SafeLogPrintf(nil, &m3uURL, "Downloading M3U from URL: %s\n", m3uURL)
-		resp, err := utils.CustomHttpRequest("GET", m3uURL)
-		if err != nil {
-			return fmt.Errorf("HTTP GET error: %v", err)
-		}
-
-		defer func() {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-		}()
-
-		file = resp.Body
-	}
-
-	_, err = io.Copy(buffer, file)
-	if err != nil {
-		return fmt.Errorf("Error reading file: %v", err)
-	}
-
-	if debug {
-		log.Println("[DEBUG] Successfully copied M3U content to buffer")
-	}
-
-	return nil
 }
 
 func (instance *Parser) GetStreams() []*database.StreamInfo {
