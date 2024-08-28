@@ -39,7 +39,7 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 		utils.SafeLogPrintf(nil, nil, "[DEBUG] M3U index: %d\n", m3uIndex)
 	}
 
-	var currentStream database.StreamInfo
+	currentStream := database.StreamInfo{}
 	currentStream.URLs = map[int]string{m3uIndex: strings.TrimSpace(nextLine)}
 
 	lineWithoutPairs := line
