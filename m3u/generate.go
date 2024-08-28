@@ -14,7 +14,7 @@ import (
 )
 
 type Cache struct {
-	sync.RWMutex
+	sync.Mutex
 	data         string
 	Revalidating bool
 }

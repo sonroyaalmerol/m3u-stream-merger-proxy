@@ -4,11 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"io"
 	"log"
 	"maps"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +19,17 @@ import (
 
 	"github.com/gosimple/slug"
 )
+
+type Parser struct {
+	sync.Mutex
+	Streams map[string]*database.StreamInfo
+}
+
+func InitializeParser() *Parser {
+	return &Parser{
+		Streams: map[string]*database.StreamInfo{},
+	}
+}
 
 func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 	debug := os.Getenv("DEBUG") == "true"
@@ -85,75 +96,17 @@ func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 	return currentStream
 }
 
-func checkIncludeGroup(groups []string, line string) bool {
-	debug := os.Getenv("DEBUG") == "true"
-	if debug {
-		utils.SafeLogPrintf(nil, nil, "[DEBUG] Checking if line includes group: %s\n", line)
+func (instance *Parser) GetStreams() []*database.StreamInfo {
+	storeArray := []*database.StreamInfo{}
+	storeValues := maps.Values(instance.Streams)
+	if storeValues != nil {
+		storeArray = slices.Collect(storeValues)
 	}
 
-	if len(groups) == 0 {
-		return true
-	} else {
-		for _, group := range groups {
-			toMatch := "group-title=" + "\"" + group + "\""
-			if strings.Contains(strings.ToLower(line), toMatch) {
-				if debug {
-					utils.SafeLogPrintf(nil, nil, "[DEBUG] Line matches group: %s\n", group)
-				}
-				return true
-			}
-		}
-		return false
-	}
+	return storeArray
 }
 
-func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
-	debug := os.Getenv("DEBUG") == "true"
-	if debug {
-		utils.SafeLogPrintf(nil, &m3uURL, "[DEBUG] Downloading M3U from: %s\n", m3uURL)
-	}
-
-	var file io.Reader
-
-	if strings.HasPrefix(m3uURL, "file://") {
-		localPath := strings.TrimPrefix(m3uURL, "file://")
-		utils.SafeLogPrintf(nil, &localPath, "Reading M3U from local file: %s\n", localPath)
-
-		localFile, err := os.Open(localPath)
-		if err != nil {
-			return fmt.Errorf("Error opening file: %v", err)
-		}
-		defer localFile.Close()
-
-		file = localFile
-	} else {
-		utils.SafeLogPrintf(nil, &m3uURL, "Downloading M3U from URL: %s\n", m3uURL)
-		resp, err := utils.CustomHttpRequest("GET", m3uURL)
-		if err != nil {
-			return fmt.Errorf("HTTP GET error: %v", err)
-		}
-
-		defer func() {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-		}()
-
-		file = resp.Body
-	}
-
-	_, err = io.Copy(buffer, file)
-	if err != nil {
-		return fmt.Errorf("Error reading file: %v", err)
-	}
-
-	if debug {
-		log.Println("[DEBUG] Successfully copied M3U content to buffer")
-	}
-
-	return nil
-}
-
-func ParseM3UFromURL(streams map[string]*database.StreamInfo, m3uURL string, m3uIndex int) error {
+func (instance *Parser) ParseURL(m3uURL string, m3uIndex int) error {
 	debug := os.Getenv("DEBUG") == "true"
 
 	maxRetries := 10
@@ -212,8 +165,6 @@ func ParseM3UFromURL(streams map[string]*database.StreamInfo, m3uURL string, m3u
 			numWorkers = 5
 		}
 
-		var mu sync.Mutex
-
 		for w := 0; w < numWorkers; w++ {
 			wg.Add(1)
 			go func() {
@@ -222,20 +173,21 @@ func ParseM3UFromURL(streams map[string]*database.StreamInfo, m3uURL string, m3u
 					if debug {
 						utils.SafeLogPrintf(nil, nil, "[DEBUG] Worker processing stream info: %s\n", streamInfo.Slug)
 					}
-					mu.Lock()
-					_, ok := streams[streamInfo.Title]
-					if !ok {
-						streams[streamInfo.Title] = &streamInfo
-					} else {
-      if streams[streamInfo.Title].URLs == nil {
-       streams[streamInfo.Title].URLs = map[int]string{}
-      }
 
-      if streamInfo.URLs != nil {
-						 maps.Copy(streams[streamInfo.Title].URLs, streamInfo.URLs)
-      }
-				 }
-					mu.Unlock()
+					instance.Lock()
+					_, ok := instance.Streams[streamInfo.Title]
+					if !ok {
+						instance.Streams[streamInfo.Title] = &streamInfo
+					} else {
+						if instance.Streams[streamInfo.Title].URLs == nil {
+							instance.Streams[streamInfo.Title].URLs = map[int]string{}
+						}
+
+						if streamInfo.URLs != nil {
+							maps.Copy(instance.Streams[streamInfo.Title].URLs, streamInfo.URLs)
+						}
+					}
+					instance.Unlock()
 				}
 			}()
 		}

@@ -2,11 +2,9 @@ package m3u
 
 import (
 	"fmt"
-	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"slices"
 	"testing"
 
 	"m3u-stream-merger/database"
@@ -116,21 +114,21 @@ http://example.com/fox
 		t.Errorf("ClearDb returned error: %v", err)
 	}
 
-	tmpStore := map[string]*database.StreamInfo{}
+	parser := InitializeParser()
 
 	// Test the parseM3UFromURL function with the mock server URL
-	err = ParseM3UFromURL(tmpStore, mockServer.URL, 0)
+	err = parser.ParseURL(mockServer.URL, 0)
 	if err != nil {
 		t.Errorf("Error parsing M3U from URL: %v", err)
 	}
 
 	// Test the parseM3UFromURL function with the mock server URL
-	err = ParseM3UFromURL(tmpStore, fmt.Sprintf("file://%s", mockFile), 1)
+	err = parser.ParseURL(fmt.Sprintf("file://%s", mockFile), 1)
 	if err != nil {
 		t.Errorf("Error parsing M3U from URL: %v", err)
 	}
 
-	err = db.SaveToDb(slices.Collect(maps.Values(tmpStore)))
+	err = db.SaveToDb(parser.GetStreams())
 	if err != nil {
 		t.Errorf("Error store to db: %v", err)
 	}
