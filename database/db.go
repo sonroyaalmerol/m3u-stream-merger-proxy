@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"m3u-stream-merger/utils"
@@ -19,7 +20,14 @@ type Instance struct {
 	Ctx   context.Context
 }
 
-func InitializeDb(addr string, password string, db int) (*Instance, error) {
+func InitializeDb() (*Instance, error) {
+	addr := os.Getenv("REDIS_ADDR")
+	password := os.Getenv("REDIS_PASS")
+	db := 0
+	if i, err := strconv.Atoi(os.Getenv("REDIS_DB")); err == nil {
+		db = i
+	}
+
 	var redisOptions *redis.Options
 
 	if password == "" {
@@ -58,39 +66,27 @@ func (db *Instance) ClearDb() error {
 	return nil
 }
 
-func (db *Instance) SaveToDb(streams []StreamInfo) error {
+func (db *Instance) SaveToDb(streams []*StreamInfo) error {
 	var debug = os.Getenv("DEBUG") == "true"
 
 	pipeline := db.Redis.Pipeline()
 
 	for _, s := range streams {
 		streamKey := fmt.Sprintf("stream:%s", s.Slug)
-		streamData := map[string]interface{}{
-			"title":      s.Title,
-			"tvg_id":     s.TvgID,
-			"tvg_chno":   s.TvgChNo,
-			"logo_url":   s.LogoURL,
-			"group_name": s.Group,
+
+		streamDataJson, err := json.Marshal(s)
+		if err != nil {
+			return fmt.Errorf("SaveToDb error: %v", err)
 		}
 
 		if debug {
-			utils.SafeLogPrintf(nil, nil, "[DEBUG] Preparing to set data for stream key %s: %v\n", streamKey, streamData)
+			utils.SafeLogPrintf(nil, nil, "[DEBUG] Preparing to set data for stream key %s: %v\n", streamKey, s)
 		}
 
-		pipeline.HSet(db.Ctx, streamKey, streamData)
-
-		for index, u := range s.URLs {
-			streamURLKey := fmt.Sprintf("stream:%s:url:%d", s.Slug, index)
-
-			if debug {
-				utils.SafeLogPrintf(nil, nil, "[DEBUG] Preparing to set URL for key %s: %s\n", streamURLKey, u)
-			}
-
-			pipeline.Set(db.Ctx, streamURLKey, u, 0)
-		}
+		pipeline.Set(db.Ctx, streamKey, string(streamDataJson), 0)
 
 		// Add to the sorted set
-		sortScore := calculateSortScore(s)
+		sortScore := calculateSortScore(*s)
 
 		if debug {
 			utils.SafeLogPrintf(nil, nil, "[DEBUG] Adding to sorted set with score %f and member %s\n", sortScore, streamKey)
@@ -122,26 +118,6 @@ func (db *Instance) SaveToDb(streams []StreamInfo) error {
 func (db *Instance) DeleteStreamBySlug(slug string) error {
 	streamKey := fmt.Sprintf("stream:%s", slug)
 
-	// Delete associated URLs
-	cursor := uint64(0)
-	for {
-		keys, newCursor, err := db.Redis.Scan(db.Ctx, cursor, fmt.Sprintf("%s:url:*", streamKey), 10).Result()
-		if err != nil {
-			return fmt.Errorf("error scanning associated URLs: %v", err)
-		}
-
-		for _, key := range keys {
-			if err := db.Redis.Del(db.Ctx, key).Err(); err != nil {
-				return fmt.Errorf("error deleting stream URL from Redis: %v", err)
-			}
-		}
-
-		cursor = newCursor
-		if cursor == 0 {
-			break
-		}
-	}
-
 	// Delete from the sorted set
 	if err := db.Redis.ZRem(db.Ctx, "streams_sorted", streamKey).Err(); err != nil {
 		return fmt.Errorf("error removing stream from sorted set: %v", err)
@@ -155,71 +131,25 @@ func (db *Instance) DeleteStreamBySlug(slug string) error {
 	return nil
 }
 
-func (db *Instance) DeleteStreamURL(s StreamInfo, m3uIndex int) error {
-	if err := db.Redis.Del(db.Ctx, fmt.Sprintf("stream:%s:url:%d", s.Slug, m3uIndex)).Err(); err != nil {
-		return fmt.Errorf("error deleting stream URL from Redis: %v", err)
-	}
-
-	return nil
-}
-
 func (db *Instance) GetStreamBySlug(slug string) (StreamInfo, error) {
 	streamKey := fmt.Sprintf("stream:%s", slug)
-	streamData, err := db.Redis.HGetAll(db.Ctx, streamKey).Result()
+	streamDataJson, err := db.Redis.Get(db.Ctx, streamKey).Result()
 	if err != nil {
 		return StreamInfo{}, fmt.Errorf("error getting stream from Redis: %v", err)
 	}
 
-	if len(streamData) == 0 {
+	stream := StreamInfo{}
+
+	err = json.Unmarshal([]byte(streamDataJson), &stream)
+	if err != nil {
+		return StreamInfo{}, fmt.Errorf("error getting stream: %v", err)
+	}
+
+	if strings.TrimSpace(stream.Title) == "" {
 		return StreamInfo{}, fmt.Errorf("stream not found: %s", slug)
 	}
 
-	s := StreamInfo{
-		Slug:    slug,
-		Title:   streamData["title"],
-		TvgID:   streamData["tvg_id"],
-		TvgChNo: streamData["tvg_chno"],
-		LogoURL: streamData["logo_url"],
-		Group:   streamData["group_name"],
-		URLs:    map[int]string{},
-	}
-
-	cursor := uint64(0)
-	for {
-		keys, newCursor, err := db.Redis.Scan(db.Ctx, cursor, fmt.Sprintf("%s:url:*", streamKey), 10).Result()
-		if err != nil {
-			return s, fmt.Errorf("error finding URLs for stream: %v", err)
-		}
-
-		if len(keys) > 0 {
-			results, err := db.Redis.Pipelined(db.Ctx, func(pipe redis.Pipeliner) error {
-				for _, key := range keys {
-					pipe.Get(db.Ctx, key)
-				}
-				return nil
-			})
-			if err != nil {
-				return s, fmt.Errorf("error getting URL data from Redis: %v", err)
-			}
-
-			for i, result := range results {
-				urlData := result.(*redis.StringCmd).Val()
-
-				m3uIndex, err := strconv.Atoi(extractM3UIndex(keys[i]))
-				if err != nil {
-					return s, fmt.Errorf("m3u index is not an integer: %v", err)
-				}
-				s.URLs[m3uIndex] = urlData
-			}
-		}
-
-		cursor = newCursor
-		if cursor == 0 {
-			break
-		}
-	}
-
-	return s, nil
+	return stream, nil
 }
 
 func (db *Instance) GetStreams() <-chan StreamInfo {
@@ -239,52 +169,26 @@ func (db *Instance) GetStreams() <-chan StreamInfo {
 
 		// Filter out URL keys
 		for _, key := range keys {
-			if !strings.Contains(key, ":url:") {
-				streamData, err := db.Redis.HGetAll(db.Ctx, key).Result()
-				if err != nil {
-					utils.SafeLogPrintf(nil, nil, "error retrieving stream data: %v", err)
-					return
-				}
-
-				slug := extractSlug(key)
-				stream := StreamInfo{
-					Slug:    slug,
-					Title:   streamData["title"],
-					TvgID:   streamData["tvg_id"],
-					TvgChNo: streamData["tvg_chno"],
-					LogoURL: streamData["logo_url"],
-					Group:   streamData["group_name"],
-					URLs:    map[int]string{},
-				}
-
-				if debug {
-					utils.SafeLogPrintf(nil, nil, "[DEBUG] Processing stream: %v\n", stream)
-				}
-
-				urlKeys, err := db.Redis.Keys(db.Ctx, fmt.Sprintf("%s:url:*", key)).Result()
-				if err != nil {
-					utils.SafeLogPrintf(nil, nil, "error finding URLs for stream: %v", err)
-					return
-				}
-
-				for _, urlKey := range urlKeys {
-					urlData, err := db.Redis.Get(db.Ctx, urlKey).Result()
-					if err != nil {
-						utils.SafeLogPrintf(nil, nil, "error getting URL data from Redis: %v", err)
-						return
-					}
-
-					m3uIndex, err := strconv.Atoi(extractM3UIndex(urlKey))
-					if err != nil {
-						utils.SafeLogPrintf(nil, nil, "m3u index is not an integer: %v", err)
-						return
-					}
-					stream.URLs[m3uIndex] = urlData
-				}
-
-				// Send the stream to the channel
-				streamChan <- stream
+			streamDataJson, err := db.Redis.Get(db.Ctx, key).Result()
+			if err != nil {
+				utils.SafeLogPrintf(nil, nil, "error retrieving stream data: %v", err)
+				return
 			}
+
+			stream := StreamInfo{}
+
+			err = json.Unmarshal([]byte(streamDataJson), &stream)
+			if err != nil {
+				utils.SafeLogPrintf(nil, nil, "error retrieving stream data: %v", err)
+				return
+			}
+
+			if debug {
+				utils.SafeLogPrintf(nil, nil, "[DEBUG] Processing stream: %v\n", stream)
+			}
+
+			// Send the stream to the channel
+			streamChan <- stream
 		}
 
 		if debug {
@@ -351,22 +255,6 @@ func (db *Instance) ClearConcurrencies() error {
 	}
 
 	return nil
-}
-
-func extractSlug(key string) string {
-	parts := strings.Split(key, ":")
-	if len(parts) > 1 {
-		return parts[1]
-	}
-	return ""
-}
-
-func extractM3UIndex(key string) string {
-	parts := strings.Split(key, ":")
-	if len(parts) > 1 {
-		return parts[3]
-	}
-	return ""
 }
 
 func getSortingValue(s StreamInfo) string {

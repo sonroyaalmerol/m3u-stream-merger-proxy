@@ -1,11 +1,11 @@
 package database
 
 type StreamInfo struct {
-	Slug    string
-	Title   string
-	TvgID   string
-	TvgChNo string
-	LogoURL string
-	Group   string
-	URLs    map[int]string
+	Slug    string         `json:"slug"`
+	Title   string         `json:"title"`
+	TvgID   string         `json:"tvg_id"`
+	TvgChNo string         `json:"tvg_chno"`
+	LogoURL string         `json:"logo_url"`
+	Group   string         `json:"group_name"`
+	URLs    map[int]string `json:"urls"`
 }

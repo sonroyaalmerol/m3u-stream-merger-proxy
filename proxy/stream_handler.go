@@ -1,4 +1,4 @@
-package main
+package proxy
 
 import (
 	"context"
@@ -16,13 +16,35 @@ import (
 	"time"
 )
 
-func loadBalancer(stream database.StreamInfo, previous *[]int, method string) (*http.Response, string, int, error) {
+type StreamInstance struct {
+	Database *database.Instance
+	Info     database.StreamInfo
+}
+
+func InitializeStream(streamUrl string) (*StreamInstance, error) {
+	initDb, err := database.InitializeDb()
+	if err != nil {
+		log.Fatalf("Error initializing Redis database: %v", err)
+	}
+
+	stream, err := initDb.GetStreamBySlug(streamUrl)
+	if err != nil {
+		return nil, err
+	}
+
+	return &StreamInstance{
+		Database: initDb,
+		Info:     stream,
+	}, nil
+}
+
+func (instance *StreamInstance) LoadBalancer(previous *[]int, method string) (*http.Response, string, int, error) {
 	debug := os.Getenv("DEBUG") == "true"
 
 	m3uIndexes := utils.GetM3UIndexes()
 
 	sort.Slice(m3uIndexes, func(i, j int) bool {
-		return db.ConcurrencyPriorityValue(i) > db.ConcurrencyPriorityValue(j)
+		return instance.Database.ConcurrencyPriorityValue(i) > instance.Database.ConcurrencyPriorityValue(j)
 	})
 
 	maxLapsString := os.Getenv("MAX_RETRIES")
@@ -45,13 +67,13 @@ func loadBalancer(stream database.StreamInfo, previous *[]int, method string) (*
 				continue
 			}
 
-			url, ok := stream.URLs[index]
+			url, ok := instance.Info.URLs[index]
 			if !ok {
-				utils.SafeLogPrintf(nil, nil, "Channel not found from M3U_%d: %s\n", index+1, stream.Title)
+				utils.SafeLogPrintf(nil, nil, "Channel not found from M3U_%d: %s\n", index+1, instance.Info.Title)
 				continue
 			}
 
-			if db.CheckConcurrency(index) {
+			if instance.Database.CheckConcurrency(index) {
 				utils.SafeLogPrintf(nil, &url, "Concurrency limit reached for M3U_%d: %s\n", index+1, url)
 				continue
 			}
@@ -87,7 +109,7 @@ func loadBalancer(stream database.StreamInfo, previous *[]int, method string) (*
 	return nil, "", -1, fmt.Errorf("Error fetching stream. Exhausted all streams.")
 }
 
-func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
+func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
 	debug := os.Getenv("DEBUG") == "true"
 
 	if r.Method != http.MethodGet || utils.EOFIsExpected(resp) {
@@ -101,8 +123,8 @@ func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http
 		return
 	}
 
-	db.UpdateConcurrency(m3uIndex, true)
-	defer db.UpdateConcurrency(m3uIndex, false)
+	instance.Database.UpdateConcurrency(m3uIndex, true)
+	defer instance.Database.UpdateConcurrency(m3uIndex, false)
 
 	bufferMbInt, err := strconv.Atoi(os.Getenv("BUFFER_MB"))
 	if err != nil || bufferMbInt < 0 {
@@ -221,7 +243,7 @@ func proxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http
 	}
 }
 
-func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
+func Handler(w http.ResponseWriter, r *http.Request) {
 	debug := os.Getenv("DEBUG") == "true"
 
 	ctx, cancel := context.WithCancel(r.Context())
@@ -236,7 +258,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 		return
 	}
 
-	stream, err := db.GetStreamBySlug(streamUrl)
+	stream, err := InitializeStream(strings.TrimPrefix(streamUrl, "/"))
 	if err != nil {
 		utils.SafeLogPrintf(r, nil, "Error retrieving stream for slug %s: %v\n", streamUrl, err)
 		http.NotFound(w, r)
@@ -257,7 +279,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 			utils.SafeLogPrintf(r, nil, "Client disconnected: %s\n", r.RemoteAddr)
 			return
 		default:
-			resp, selectedUrl, selectedIndex, err = loadBalancer(stream, &testedIndexes, r.Method)
+			resp, selectedUrl, selectedIndex, err = stream.LoadBalancer(&testedIndexes, r.Method)
 			if err != nil {
 				utils.SafeLogPrintf(r, nil, "Error reloading stream for %s: %v\n", streamUrl, err)
 				return
@@ -283,7 +305,7 @@ func streamHandler(w http.ResponseWriter, r *http.Request, db *database.Instance
 			exitStatus := make(chan int)
 
 			utils.SafeLogPrintf(r, &selectedUrl, "Proxying %s to %s\n", r.RemoteAddr, selectedUrl)
-			go proxyStream(ctx, selectedIndex, resp, r, w, exitStatus)
+			go stream.ProxyStream(ctx, selectedIndex, resp, r, w, exitStatus)
 			testedIndexes = append(testedIndexes, selectedIndex)
 
 			streamExitCode := <-exitStatus

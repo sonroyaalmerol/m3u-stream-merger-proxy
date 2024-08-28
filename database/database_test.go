@@ -1,16 +1,15 @@
 package database
 
 import (
+	"os"
 	"testing"
 )
 
 func TestSaveAndLoadFromDb(t *testing.T) {
 	// Test InitializeDb and check if the database file exists
-	REDIS_ADDR := "127.0.0.1:6379"
-	REDIS_PASS := ""
-	REDIS_DB := 1
+	os.Setenv("REDIS_DB", "1")
 
-	db, err := InitializeDb(REDIS_ADDR, REDIS_PASS, REDIS_DB)
+	db, err := InitializeDb()
 	if err != nil {
 		t.Errorf("InitializeDb returned error: %v", err)
 	}
@@ -21,7 +20,7 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 	}
 
 	// Test LoadFromDb with existing data in the database
-	expected := []StreamInfo{{
+	expected := []*StreamInfo{{
 		Slug:    "stream1",
 		Title:   "stream1",
 		TvgID:   "test1",
@@ -54,7 +53,7 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 	}
 
 	for i, expectedStream := range expected {
-		if !streamInfoEqual(result[i], expectedStream) {
+		if !streamInfoEqual(result[i], *expectedStream) {
 			t.Errorf("GetStreams returned %+v, expected %+v", result[i], expectedStream)
 		}
 	}
@@ -62,11 +61,6 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 	err = db.DeleteStreamBySlug(expected[1].Slug)
 	if err != nil {
 		t.Errorf("DeleteStreamBySlug returned error: %v", err)
-	}
-
-	err = db.DeleteStreamURL(expected[0], 0)
-	if err != nil {
-		t.Errorf("DeleteStreamURL returned error: %v", err)
 	}
 
 	streamChan = db.GetStreams()
@@ -77,14 +71,13 @@ func TestSaveAndLoadFromDb(t *testing.T) {
 	}
 
 	expected = expected[:1]
-	expected[0].URLs = map[int]string{}
 
 	if len(result) != len(expected) {
 		t.Errorf("GetStreams returned %+v, expected %+v", result, expected)
 	}
 
 	for i, expectedStream := range expected {
-		if !streamInfoEqual(result[i], expectedStream) {
+		if !streamInfoEqual(result[i], *expectedStream) {
 			t.Errorf("GetStreams returned %+v, expected %+v", result[i], expectedStream)
 		}
 	}

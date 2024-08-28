@@ -2,9 +2,11 @@ package m3u
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"testing"
 
 	"m3u-stream-merger/database"
@@ -21,12 +23,9 @@ func TestGenerateM3UContent(t *testing.T) {
 		URLs:    map[int]string{0: "http://example.com/stream"},
 	}
 
-	// Test InitializeSQLite and check if the database file exists
-	REDIS_ADDR := "127.0.0.1:6379"
-	REDIS_PASS := ""
-	REDIS_DB := 2
+	os.Setenv("REDIS_DB", "2")
 
-	db, err := database.InitializeDb(REDIS_ADDR, REDIS_PASS, REDIS_DB)
+	db, err := database.InitializeDb()
 	if err != nil {
 		t.Errorf("InitializeDb returned error: %v", err)
 	}
@@ -36,7 +35,7 @@ func TestGenerateM3UContent(t *testing.T) {
 		t.Errorf("ClearDb returned error: %v", err)
 	}
 
-	err = db.SaveToDb([]database.StreamInfo{stream})
+	err = db.SaveToDb([]*database.StreamInfo{&stream})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +49,7 @@ func TestGenerateM3UContent(t *testing.T) {
 	// Create a ResponseRecorder to record the response
 	rr := httptest.NewRecorder()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		Handler(w, r, db)
+		Handler(w, r)
 	})
 
 	// Call the ServeHTTP method of the handler to execute the test
@@ -106,12 +105,8 @@ http://example.com/fox
 		t.Errorf("WriteFile returned error: %v", err)
 	}
 
-	// Test InitializeSQLite and check if the database file exists
-	REDIS_ADDR := "127.0.0.1:6379"
-	REDIS_PASS := ""
-	REDIS_DB := 3
-
-	db, err := database.InitializeDb(REDIS_ADDR, REDIS_PASS, REDIS_DB)
+	os.Setenv("REDIS_DB", "3")
+	db, err := database.InitializeDb()
 	if err != nil {
 		t.Errorf("InitializeDb returned error: %v", err)
 	}
@@ -121,16 +116,23 @@ http://example.com/fox
 		t.Errorf("ClearDb returned error: %v", err)
 	}
 
+	tmpStore := map[string]*database.StreamInfo{}
+
 	// Test the parseM3UFromURL function with the mock server URL
-	err = ParseM3UFromURL(db, mockServer.URL, 0)
+	err = ParseM3UFromURL(tmpStore, mockServer.URL, 0)
 	if err != nil {
 		t.Errorf("Error parsing M3U from URL: %v", err)
 	}
 
 	// Test the parseM3UFromURL function with the mock server URL
-	err = ParseM3UFromURL(db, fmt.Sprintf("file://%s", mockFile), 1)
+	err = ParseM3UFromURL(tmpStore, fmt.Sprintf("file://%s", mockFile), 1)
 	if err != nil {
 		t.Errorf("Error parsing M3U from URL: %v", err)
+	}
+
+	err = db.SaveToDb(slices.Collect(maps.Values(tmpStore)))
+	if err != nil {
+		t.Errorf("Error store to db: %v", err)
 	}
 
 	// Verify expected values

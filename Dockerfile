@@ -30,7 +30,9 @@ FROM alpine:latest
 
 # add bash and timezone data
 # hadolint ignore=DL3018
-RUN apk --no-cache add tzdata
+RUN apk --no-cache add tzdata \
+  ca-certificates \
+  && update-ca-certificates
 
 # set the current workdir
 WORKDIR /app
