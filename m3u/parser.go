@@ -96,7 +96,7 @@ func checkIncludeGroup(groups []string, line string) bool {
 	} else {
 		for _, group := range groups {
 			toMatch := "group-title=" + "\"" + group + "\""
-			if strings.Contains(line, toMatch) {
+			if strings.Contains(strings.ToLower(line), toMatch) {
 				if debug {
 					utils.SafeLogPrintf(nil, nil, "[DEBUG] Line matches group: %s\n", group)
 				}
@@ -153,7 +153,7 @@ func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 	return nil
 }
 
-func ParseM3UFromURL(streams map[string]database.StreamInfo, m3uURL string, m3uIndex int) error {
+func ParseM3UFromURL(streams map[string]*database.StreamInfo, m3uURL string, m3uIndex int) error {
 	debug := os.Getenv("DEBUG") == "true"
 
 	maxRetries := 10
@@ -197,7 +197,7 @@ func ParseM3UFromURL(streams map[string]database.StreamInfo, m3uURL string, m3uI
 		var wg sync.WaitGroup
 
 		parserWorkers := os.Getenv("PARSER_WORKERS")
-		if strings.TrimSpace(parserWorkers) != "" {
+		if strings.TrimSpace(parserWorkers) == "" {
 			parserWorkers = "5"
 		}
 
@@ -225,7 +225,7 @@ func ParseM3UFromURL(streams map[string]database.StreamInfo, m3uURL string, m3uI
 					mu.Lock()
 					_, ok := streams[streamInfo.Title]
 					if !ok {
-						streams[streamInfo.Title] = streamInfo
+						streams[streamInfo.Title] = &streamInfo
 					} else {
 						maps.Copy(streams[streamInfo.Title].URLs, streamInfo.URLs)
 					}
@@ -256,6 +256,7 @@ func ParseM3UFromURL(streams map[string]database.StreamInfo, m3uURL string, m3uI
 					}
 
 					streamInfo := parseLine(line, nextLine, m3uIndex)
+					log.Println(streamInfo)
 					streamInfoCh <- streamInfo
 				}
 			}

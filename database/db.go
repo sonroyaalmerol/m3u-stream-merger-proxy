@@ -20,7 +20,14 @@ type Instance struct {
 	Ctx   context.Context
 }
 
-func InitializeDb(addr string, password string, db int) (*Instance, error) {
+func InitializeDb() (*Instance, error) {
+	addr := os.Getenv("REDIS_ADDR")
+	password := os.Getenv("REDIS_PASS")
+	db := 0
+	if i, err := strconv.Atoi(os.Getenv("REDIS_DB")); err == nil {
+		db = i
+	}
+
 	var redisOptions *redis.Options
 
 	if password == "" {
@@ -59,7 +66,7 @@ func (db *Instance) ClearDb() error {
 	return nil
 }
 
-func (db *Instance) SaveToDb(streams []StreamInfo) error {
+func (db *Instance) SaveToDb(streams []*StreamInfo) error {
 	var debug = os.Getenv("DEBUG") == "true"
 
 	pipeline := db.Redis.Pipeline()
@@ -79,7 +86,7 @@ func (db *Instance) SaveToDb(streams []StreamInfo) error {
 		pipeline.Set(db.Ctx, streamKey, string(streamDataJson), 0)
 
 		// Add to the sorted set
-		sortScore := calculateSortScore(s)
+		sortScore := calculateSortScore(*s)
 
 		if debug {
 			utils.SafeLogPrintf(nil, nil, "[DEBUG] Adding to sorted set with score %f and member %s\n", sortScore, streamKey)
@@ -248,22 +255,6 @@ func (db *Instance) ClearConcurrencies() error {
 	}
 
 	return nil
-}
-
-func extractSlug(key string) string {
-	parts := strings.Split(key, ":")
-	if len(parts) > 1 {
-		return parts[1]
-	}
-	return ""
-}
-
-func extractM3UIndex(key string) string {
-	parts := strings.Split(key, ":")
-	if len(parts) > 1 {
-		return parts[3]
-	}
-	return ""
 }
 
 func getSortingValue(s StreamInfo) string {

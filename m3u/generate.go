@@ -72,7 +72,7 @@ func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
 		log.Println("[DEBUG] Regenerating M3U cache in the background")
 	}
 
-	baseUrl := determineBaseURL(r)
+	baseUrl := utils.DetermineBaseURL(r)
 
 	if debug {
 		utils.SafeLogPrintf(r, nil, "[DEBUG] Base URL set to %s\n", baseUrl)
@@ -111,23 +111,11 @@ func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
 	return content.String()
 }
 
-func determineBaseURL(r *http.Request) string {
-	if r != nil {
-		if r.TLS == nil {
-			return fmt.Sprintf("http://%s/stream", r.Host)
-		} else {
-			return fmt.Sprintf("https://%s/stream", r.Host)
-		}
+func Handler(w http.ResponseWriter, r *http.Request) {
+	db, err := database.InitializeDb()
+	if err != nil {
+		log.Fatalf("Error initializing Redis database: %v", err)
 	}
-
-	if customBase, ok := os.LookupEnv("BASE_URL"); ok {
-		return fmt.Sprintf("%s/stream", strings.TrimSuffix(customBase, "/"))
-	}
-
-	return ""
-}
-
-func Handler(w http.ResponseWriter, r *http.Request, db *database.Instance) {
 	debug := isDebugMode()
 
 	if debug {

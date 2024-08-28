@@ -1,6 +1,11 @@
 package utils
 
-import "net/http"
+import (
+	"fmt"
+	"net/http"
+	"os"
+	"strings"
+)
 
 func CustomHttpRequest(method string, url string) (*http.Response, error) {
 	userAgent := GetEnv("USER_AGENT")
@@ -21,4 +26,20 @@ func CustomHttpRequest(method string, url string) (*http.Response, error) {
 	}
 
 	return resp, nil
+}
+
+func DetermineBaseURL(r *http.Request) string {
+	if r != nil {
+		if r.TLS == nil {
+			return fmt.Sprintf("http://%s/stream", r.Host)
+		} else {
+			return fmt.Sprintf("https://%s/stream", r.Host)
+		}
+	}
+
+	if customBase, ok := os.LookupEnv("BASE_URL"); ok {
+		return fmt.Sprintf("%s/stream", strings.TrimSuffix(customBase, "/"))
+	}
+
+	return ""
 }
