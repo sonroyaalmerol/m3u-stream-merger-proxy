@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +20,17 @@ import (
 
 	"github.com/gosimple/slug"
 )
+
+type Parser struct {
+	sync.Mutex
+	Streams map[string]*database.StreamInfo
+}
+
+func InitializeParser() *Parser {
+	return &Parser{
+		Streams: map[string]*database.StreamInfo{},
+	}
+}
 
 func parseLine(line string, nextLine string, m3uIndex int) database.StreamInfo {
 	debug := os.Getenv("DEBUG") == "true"
@@ -153,7 +165,17 @@ func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 	return nil
 }
 
-func ParseM3UFromURL(streams map[string]*database.StreamInfo, m3uURL string, m3uIndex int) error {
+func (instance *Parser) GetStreams() []*database.StreamInfo {
+	storeArray := []*database.StreamInfo{}
+	storeValues := maps.Values(instance.Streams)
+	if storeValues != nil {
+		storeArray = slices.Collect(storeValues)
+	}
+
+	return storeArray
+}
+
+func (instance *Parser) ParseURL(m3uURL string, m3uIndex int) error {
 	debug := os.Getenv("DEBUG") == "true"
 
 	maxRetries := 10
@@ -212,8 +234,6 @@ func ParseM3UFromURL(streams map[string]*database.StreamInfo, m3uURL string, m3u
 			numWorkers = 5
 		}
 
-		var mu sync.Mutex
-
 		for w := 0; w < numWorkers; w++ {
 			wg.Add(1)
 			go func() {
@@ -222,20 +242,21 @@ func ParseM3UFromURL(streams map[string]*database.StreamInfo, m3uURL string, m3u
 					if debug {
 						utils.SafeLogPrintf(nil, nil, "[DEBUG] Worker processing stream info: %s\n", streamInfo.Slug)
 					}
-					mu.Lock()
-					_, ok := streams[streamInfo.Title]
-					if !ok {
-						streams[streamInfo.Title] = &streamInfo
-					} else {
-      if streams[streamInfo.Title].URLs == nil {
-       streams[streamInfo.Title].URLs = map[int]string{}
-      }
 
-      if streamInfo.URLs != nil {
-						 maps.Copy(streams[streamInfo.Title].URLs, streamInfo.URLs)
-      }
-				 }
-					mu.Unlock()
+					instance.Lock()
+					_, ok := instance.Streams[streamInfo.Title]
+					if !ok {
+						instance.Streams[streamInfo.Title] = &streamInfo
+					} else {
+						if instance.Streams[streamInfo.Title].URLs == nil {
+							instance.Streams[streamInfo.Title].URLs = map[int]string{}
+						}
+
+						if streamInfo.URLs != nil {
+							maps.Copy(instance.Streams[streamInfo.Title].URLs, streamInfo.URLs)
+						}
+					}
+					instance.Unlock()
 				}
 			}()
 		}

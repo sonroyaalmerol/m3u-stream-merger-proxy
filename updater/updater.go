@@ -6,9 +6,7 @@ import (
 	"log"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/m3u"
-	"maps"
 	"os"
-	"slices"
 	"strings"
 	"sync"
 
@@ -17,9 +15,10 @@ import (
 
 type Updater struct {
 	sync.Mutex
-	ctx  context.Context
-	db   *database.Instance
-	Cron *cron.Cron
+	ctx       context.Context
+	db        *database.Instance
+	Cron      *cron.Cron
+	M3UParser *m3u.Parser
 }
 
 func Initialize(ctx context.Context) *Updater {
@@ -99,13 +98,14 @@ func Initialize(ctx context.Context) *Updater {
 	}
 
 	updateInstance.Cron = c
+	updateInstance.M3UParser = m3u.InitializeParser()
 
 	return updateInstance
 }
 
-func (instance *Updater) UpdateSource(tmpStore map[string]*database.StreamInfo, m3uUrl string, index int) {
+func (instance *Updater) UpdateSource(m3uUrl string, index int) {
 	log.Printf("Background process: Updating M3U #%d from %s\n", index+1, m3uUrl)
-	err := m3u.ParseM3UFromURL(tmpStore, m3uUrl, index)
+	err := instance.M3UParser.ParseURL(m3uUrl, index)
 	if err != nil {
 		log.Printf("Background process: Error updating M3U: %v\n", err)
 	} else {
@@ -123,8 +123,6 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 		log.Println("Background process: Failed to initialize db connection.")
 		return
 	}
-
-	tmpStore := map[string]*database.StreamInfo{}
 
 	select {
 	case <-ctx.Done():
@@ -146,7 +144,7 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 			go func(m3uUrl string, index int) {
 				log.Println(index)
 				defer wg.Done()
-				instance.UpdateSource(tmpStore, m3uUrl, index)
+				instance.UpdateSource(m3uUrl, index)
 			}(m3uUrl, index)
 
 			index++
@@ -155,13 +153,7 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 
 		log.Printf("Background process: M3U fetching complete. Saving to database...\n")
 
-		storeArray := []*database.StreamInfo{}
-		storeValues := maps.Values(tmpStore)
-		if storeValues != nil {
-			storeArray = slices.Collect(storeValues)
-		}
-
-		err := db.SaveToDb(storeArray)
+		err := db.SaveToDb(instance.M3UParser.GetStreams())
 		if err != nil {
 			log.Printf("Background process: Error updating M3U database: %v\n", err)
 		}
