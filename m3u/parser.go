@@ -227,8 +227,14 @@ func ParseM3UFromURL(streams map[string]*database.StreamInfo, m3uURL string, m3u
 					if !ok {
 						streams[streamInfo.Title] = &streamInfo
 					} else {
-						maps.Copy(streams[streamInfo.Title].URLs, streamInfo.URLs)
-					}
+      if streams[streamInfo.Title].URLs == nil {
+       streams[streamInfo.Title].URLs = map[int]string{}
+      }
+
+      if streamInfo.URLs != nil {
+						 maps.Copy(streams[streamInfo.Title].URLs, streamInfo.URLs)
+      }
+				 }
 					mu.Unlock()
 				}
 			}()
