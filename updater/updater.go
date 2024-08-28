@@ -153,10 +153,21 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 
 		log.Printf("Background process: M3U fetching complete. Saving to database...\n")
 
+		if err := db.ClearDb(); err != nil {
+			log.Printf("Background process: Error clearing database: %v\n", err)
+		}
+
 		err := db.SaveToDb(instance.M3UParser.GetStreams())
 		if err != nil {
 			log.Printf("Background process: Error updating M3U database: %v\n", err)
+			log.Println("Background process: Clearing database after error in attempt to fix issue after container restart.")
+
+			if err := db.ClearDb(); err != nil {
+				log.Printf("Background process: Error clearing database: %v\n", err)
+			}
 		}
+
+		m3u.ClearCache()
 
 		log.Println("Background process: Updated M3U database.")
 	}
