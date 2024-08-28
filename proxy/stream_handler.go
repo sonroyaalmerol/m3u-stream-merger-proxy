@@ -296,6 +296,8 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 						w.Header().Set(k, val)
 					}
 				}
+				w.WriteHeader(resp.StatusCode)
+
 				if debug {
 					utils.SafeLogPrintf(r, nil, "[DEBUG] Headers set for response: %v\n", w.Header())
 				}
