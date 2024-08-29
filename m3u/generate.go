@@ -165,7 +165,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[ERROR] Failed to write response: %v\n", err)
 		}
 
-		go InitCache(db)
+		InitCache(db)
 
 		return
 	}
