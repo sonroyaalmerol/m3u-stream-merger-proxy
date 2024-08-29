@@ -124,14 +124,13 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 	}
 
 	if r.Method != http.MethodGet || utils.EOFIsExpected(resp) {
-		tempBuffer := bytes.NewBuffer(buffer)
-		_, err := io.Copy(tempBuffer, resp.Body)
-		if err != nil {
-			log.Printf("Failed to write segment to tempBuffer: %v", err)
-			return
-		}
+		content, err := io.ReadAll(resp.Body)
 
 		if utils.EOFIsExpected(resp) {
+			if !bytes.HasPrefix(content, []byte("#EXTM3U\n")) {
+				log.Println("Invalid M3U8 detected. Returning response as is.")
+				return
+			}
 			base, err := url.Parse(resp.Request.URL.String())
 			if err != nil {
 				log.Printf("Invalid base URL for M3U8 stream: %v", err)
@@ -139,7 +138,7 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 			}
 
 			var output bytes.Buffer
-			scanner := bufio.NewScanner(bytes.NewReader(tempBuffer.Bytes()))
+			scanner := bufio.NewScanner(bytes.NewReader(content))
 
 			for scanner.Scan() {
 				line := scanner.Text()
@@ -161,10 +160,10 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 				}
 			}
 
-			tempBuffer = &output
+			content = output.Bytes()
 		}
 
-		_, err = io.Copy(w, tempBuffer)
+		_, err = io.Copy(w, bytes.NewBuffer(content))
 		if err != nil {
 			log.Printf("Failed to write tempBuffer to response: %v", err)
 			return
