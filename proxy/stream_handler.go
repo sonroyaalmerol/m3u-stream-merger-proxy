@@ -125,6 +125,10 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 
 	if r.Method != http.MethodGet || utils.EOFIsExpected(resp) {
 		content, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Printf("Error reading M3U8 stream content: %v", err)
+			return
+		}
 
 		if utils.EOFIsExpected(resp) {
 			if !bytes.HasPrefix(content, []byte("#EXTM3U\n")) {
@@ -330,7 +334,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			// HTTP header initialization
 			if firstWrite {
 				for k, v := range resp.Header {
-					if strings.ToLower(k) == "content-length" && !utils.EOFIsExpected(resp) {
+					if strings.ToLower(k) == "content-length" {
 						continue
 					}
 
