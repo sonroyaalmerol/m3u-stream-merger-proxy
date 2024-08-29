@@ -9,10 +9,10 @@ jobs:
     if: ${{ github.event.comment.body == '/publish' && github.event.issue.pull_request }}
     runs-on: ubuntu-latest
     outputs:
-      ref: ${{ steps.get-ref.outputs.result }}
+      sha: ${{ steps.get-sha.outputs.result }}
     steps:
-      - name: Get PR Ref
-        id: get-ref
+      - name: Get PR SHA
+        id: get-sha
         uses: actions/github-script@v6
         with:
           result-encoding: string
@@ -23,8 +23,8 @@ jobs:
               repo: context.repo.repo,
               pull_number: prNumber
             });
-            const ref = response.data.head.ref;
-            return ref;
+            const sha = response.data.head.sha;
+            return sha;
 
   build-and-push:
     needs: fetch-pr-details
@@ -34,7 +34,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.fetch-pr-details.outputs.ref }}
+          ref: ${{ needs.fetch-pr-details.outputs.sha }}
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
