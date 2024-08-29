@@ -2,7 +2,6 @@ package m3u
 
 import (
 	"fmt"
-	"log"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/utils"
 	"net/http"
@@ -30,7 +29,7 @@ func InitCache(db *database.Instance) {
 	if M3uCache.Revalidating {
 		M3uCache.Unlock()
 		if debug {
-			log.Println("[DEBUG] Cache revalidation is already in progress. Skipping.")
+			utils.SafeLogln("[DEBUG] Cache revalidation is already in progress. Skipping.")
 		}
 		return
 	}
@@ -40,7 +39,7 @@ func InitCache(db *database.Instance) {
 	content := GenerateAndCacheM3UContent(db, nil)
 	err := WriteCacheToFile(content)
 	if err != nil {
-		log.Printf("Error writing cache to file: %v\n", err)
+		utils.SafeLogf("Error writing cache to file: %v\n", err)
 	}
 }
 
@@ -67,13 +66,13 @@ func GenerateStreamURL(baseUrl string, slug string, sampleUrl string) string {
 func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
 	debug := isDebugMode()
 	if debug {
-		log.Println("[DEBUG] Regenerating M3U cache in the background")
+		utils.SafeLogln("[DEBUG] Regenerating M3U cache in the background")
 	}
 
 	baseUrl := utils.DetermineBaseURL(r)
 
 	if debug {
-		utils.SafeLogPrintf(r, nil, "[DEBUG] Base URL set to %s\n", baseUrl)
+		utils.SafeLogf("[DEBUG] Base URL set to %s\n", baseUrl)
 	}
 
 	var content strings.Builder
@@ -87,7 +86,7 @@ func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
 		}
 
 		if debug {
-			utils.SafeLogPrintf(nil, nil, "[DEBUG] Processing stream with TVG ID: %s\n", stream.TvgID)
+			utils.SafeLogf("[DEBUG] Processing stream with TVG ID: %s\n", stream.TvgID)
 		}
 
 		content.WriteString(fmt.Sprintf("#EXTINF:-1 channelID=\"x-ID.%s\" tvg-chno=\"%s\" tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
@@ -97,7 +96,7 @@ func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
 	}
 
 	if debug {
-		log.Println("[DEBUG] Finished generating M3U content")
+		utils.SafeLogln("[DEBUG] Finished generating M3U content")
 	}
 
 	// Update cache
@@ -115,12 +114,12 @@ func ClearCache() {
 	M3uCache.Lock()
 
 	if debug {
-		log.Println("[DEBUG] Clearing memory and disk M3U cache.")
+		utils.SafeLogln("[DEBUG] Clearing memory and disk M3U cache.")
 	}
 	M3uCache.data = ""
 	if err := DeleteCacheFile(); err != nil {
 		if debug {
-			log.Printf("[DEBUG] Cache file deletion failed: %v\n", err)
+			utils.SafeLogf("[DEBUG] Cache file deletion failed: %v\n", err)
 		}
 	}
 
@@ -130,12 +129,14 @@ func ClearCache() {
 func Handler(w http.ResponseWriter, r *http.Request) {
 	db, err := database.InitializeDb()
 	if err != nil {
-		log.Fatalf("Error initializing Redis database: %v", err)
+		utils.SafeLogf("Error initializing Redis database: %v", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 	debug := isDebugMode()
 
 	if debug {
-		log.Println("[DEBUG] Generating M3U content")
+		utils.SafeLogln("[DEBUG] Generating M3U content")
 	}
 
 	// Set response headers
@@ -159,10 +160,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	// serve old cache and regenerate in the background
 	if cacheData != "#EXTM3U\n" && cacheData != "" {
 		if debug {
-			log.Println("[DEBUG] Serving old cache and regenerating in background")
+			utils.SafeLogln("[DEBUG] Serving old cache and regenerating in background")
 		}
 		if _, err := w.Write([]byte(cacheData)); err != nil {
-			log.Printf("[ERROR] Failed to write response: %v\n", err)
+			utils.SafeLogf("[ERROR] Failed to write response: %v\n", err)
 		}
 
 		InitCache(db)
@@ -174,12 +175,12 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	content := GenerateAndCacheM3UContent(db, r)
 	go func() {
 		if err := WriteCacheToFile(content); err != nil {
-			log.Printf("[ERROR] Failed to write cache to file: %v\n", err)
+			utils.SafeLogf("[ERROR] Failed to write cache to file: %v\n", err)
 		}
 	}()
 
 	if _, err := w.Write([]byte(content)); err != nil {
-		log.Printf("[ERROR] Failed to write response: %v\n", err)
+		utils.SafeLogf("[ERROR] Failed to write response: %v\n", err)
 	}
 }
 

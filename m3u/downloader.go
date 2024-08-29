@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"strings"
 
@@ -14,14 +13,14 @@ import (
 func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 	debug := os.Getenv("DEBUG") == "true"
 	if debug {
-		utils.SafeLogPrintf(nil, &m3uURL, "[DEBUG] Downloading M3U from: %s\n", m3uURL)
+		utils.SafeLogf("[DEBUG] Downloading M3U from: %s\n", m3uURL)
 	}
 
 	var file io.Reader
 
 	if strings.HasPrefix(m3uURL, "file://") {
 		localPath := strings.TrimPrefix(m3uURL, "file://")
-		utils.SafeLogPrintf(nil, &localPath, "Reading M3U from local file: %s\n", localPath)
+		utils.SafeLogf("Reading M3U from local file: %s\n", localPath)
 
 		localFile, err := os.Open(localPath)
 		if err != nil {
@@ -31,7 +30,7 @@ func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 
 		file = localFile
 	} else {
-		utils.SafeLogPrintf(nil, &m3uURL, "Downloading M3U from URL: %s\n", m3uURL)
+		utils.SafeLogf("Downloading M3U from URL: %s\n", m3uURL)
 		resp, err := utils.CustomHttpRequest("GET", m3uURL)
 		if err != nil {
 			return fmt.Errorf("HTTP GET error: %v", err)
@@ -51,7 +50,7 @@ func downloadM3UToBuffer(m3uURL string, buffer *bytes.Buffer) (err error) {
 	}
 
 	if debug {
-		log.Println("[DEBUG] Successfully copied M3U content to buffer")
+		utils.SafeLogln("[DEBUG] Successfully copied M3U content to buffer")
 	}
 
 	return nil

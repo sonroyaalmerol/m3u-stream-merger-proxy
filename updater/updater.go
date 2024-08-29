@@ -3,9 +3,9 @@ package updater
 import (
 	"context"
 	"fmt"
-	"log"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/m3u"
+	"m3u-stream-merger/utils"
 	"os"
 	"strings"
 	"sync"
@@ -21,10 +21,11 @@ type Updater struct {
 	M3UParser *m3u.Parser
 }
 
-func Initialize(ctx context.Context) *Updater {
+func Initialize(ctx context.Context) (*Updater, error) {
 	db, err := database.InitializeDb()
 	if err != nil {
-		log.Fatalf("Error initializing Redis database: %v", err)
+		utils.SafeLogf("Error initializing Redis database: %v", err)
+		return nil, err
 	}
 
 	clearOnBoot := os.Getenv("CLEAR_ON_BOOT")
@@ -33,15 +34,16 @@ func Initialize(ctx context.Context) *Updater {
 	}
 
 	if clearOnBoot == "true" {
-		log.Println("CLEAR_ON_BOOT enabled. Clearing current database.")
+		utils.SafeLogln("CLEAR_ON_BOOT enabled. Clearing current database.")
 		if err := db.ClearDb(); err != nil {
-			log.Fatalf("Error clearing database: %v", err)
+			utils.SafeLogf("Error clearing database: %v", err)
+			return nil, err
 		}
 	}
 
 	cronSched := os.Getenv("SYNC_CRON")
 	if len(strings.TrimSpace(cronSched)) == 0 {
-		log.Println("SYNC_CRON not initialized. Defaulting to 0 0 * * * (12am every day).")
+		utils.SafeLogln("SYNC_CRON not initialized. Defaulting to 0 0 * * * (12am every day).")
 		cronSched = "0 0 * * *"
 	}
 
@@ -56,7 +58,8 @@ func Initialize(ctx context.Context) *Updater {
 		go updateInstance.UpdateSources(ctx)
 	})
 	if err != nil {
-		log.Fatalf("Error initializing background processes: %v", err)
+		utils.SafeLogf("Error initializing background processes: %v", err)
+		return nil, err
 	}
 	c.Start()
 
@@ -66,23 +69,23 @@ func Initialize(ctx context.Context) *Updater {
 	}
 
 	if syncOnBoot == "true" {
-		log.Println("SYNC_ON_BOOT enabled. Starting initial M3U update.")
+		utils.SafeLogln("SYNC_ON_BOOT enabled. Starting initial M3U update.")
 
 		go updateInstance.UpdateSources(ctx)
 	}
 
 	updateInstance.Cron = c
 
-	return updateInstance
+	return updateInstance, nil
 }
 
 func (instance *Updater) UpdateSource(m3uUrl string, index int) {
-	log.Printf("Background process: Updating M3U #%d from %s\n", index+1, m3uUrl)
+	utils.SafeLogf("Background process: Updating M3U #%d from %s\n", index+1, m3uUrl)
 	err := instance.M3UParser.ParseURL(m3uUrl, index)
 	if err != nil {
-		log.Printf("Background process: Error updating M3U: %v\n", err)
+		utils.SafeLogf("Background process: Error updating M3U: %v\n", err)
 	} else {
-		log.Printf("Background process: Updated M3U #%d from %s\n", index+1, m3uUrl)
+		utils.SafeLogf("Background process: Updated M3U #%d from %s\n", index+1, m3uUrl)
 	}
 }
 
@@ -93,7 +96,7 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 
 	db, err := database.InitializeDb()
 	if err != nil {
-		log.Println("Background process: Failed to initialize db connection.")
+		utils.SafeLogln("Background process: Failed to initialize db connection.")
 		return
 	}
 
@@ -101,7 +104,7 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 	case <-ctx.Done():
 		return
 	default:
-		log.Println("Background process: Checking M3U_URLs...")
+		utils.SafeLogln("Background process: Checking M3U_URLs...")
 		var wg sync.WaitGroup
 		index := 0
 
@@ -111,11 +114,10 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 				break
 			}
 
-			log.Printf("Background process: Fetching M3U_URL_%d...\n", index+1)
+			utils.SafeLogf("Background process: Fetching M3U_URL_%d...\n", index+1)
 			wg.Add(1)
 			// Start the goroutine for periodic updates
 			go func(m3uUrl string, index int) {
-				log.Println(index)
 				defer wg.Done()
 				instance.UpdateSource(m3uUrl, index)
 			}(m3uUrl, index)
@@ -124,15 +126,15 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 		}
 		wg.Wait()
 
-		log.Printf("Background process: M3U fetching complete. Saving to database...\n")
+		utils.SafeLogf("Background process: M3U fetching complete. Saving to database...\n")
 
 		err := db.SaveToDb(instance.M3UParser.GetStreams())
 		if err != nil {
-			log.Printf("Background process: Error updating M3U database: %v\n", err)
-			log.Println("Background process: Clearing database after error in attempt to fix issue after container restart.")
+			utils.SafeLogf("Background process: Error updating M3U database: %v\n", err)
+			utils.SafeLogln("Background process: Clearing database after error in attempt to fix issue after container restart.")
 
 			if err := db.ClearDb(); err != nil {
-				log.Printf("Background process: Error clearing database: %v\n", err)
+				utils.SafeLogf("Background process: Error clearing database: %v\n", err)
 			}
 		}
 
@@ -143,12 +145,12 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 			cacheOnSync = "false"
 		}
 
-		log.Println("Background process: Updated M3U database.")
+		utils.SafeLogln("Background process: Updated M3U database.")
 		if cacheOnSync == "true" {
 			if _, ok := os.LookupEnv("BASE_URL"); !ok {
-				log.Println("BASE_URL is required for CACHE_ON_SYNC to work.")
+				utils.SafeLogln("BASE_URL is required for CACHE_ON_SYNC to work.")
 			}
-			log.Println("CACHE_ON_SYNC enabled. Building cache.")
+			utils.SafeLogln("CACHE_ON_SYNC enabled. Building cache.")
 			m3u.InitCache(db)
 		}
 	}

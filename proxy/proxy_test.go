@@ -36,7 +36,10 @@ func TestStreamHandler(t *testing.T) {
 	os.Setenv("M3U_URL_1", "https://gist.githubusercontent.com/sonroyaalmerol/de1c90e8681af040924da5d15c7f530d/raw/06844df09e69ea278060252ca5aa8d767eb4543d/test-m3u.m3u")
 	os.Setenv("INCLUDE_GROUPS_1", "movies")
 
-	updater.Initialize(ctx)
+	_, err = updater.Initialize(ctx)
+	if err != nil {
+		t.Errorf("Updater returned error: %v", err)
+	}
 
 	streamChan := db.GetStreams()
 	streams := []database.StreamInfo{}

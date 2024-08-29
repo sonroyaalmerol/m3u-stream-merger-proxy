@@ -1,7 +1,6 @@
 package m3u
 
 import (
-	"log"
 	"m3u-stream-merger/utils"
 	"os"
 	"regexp"
@@ -22,7 +21,7 @@ func tvgNameParser(value string) string {
 	if substrFilter != "" {
 		re, err := regexp.Compile(substrFilter)
 		if err != nil {
-			log.Println("Error compiling character filter regex:", err)
+			utils.SafeLogf("Error compiling character filter regex: %v\n", err)
 		} else {
 			value = re.ReplaceAllString(value, "")
 		}
@@ -50,7 +49,7 @@ func tvgLogoParser(value string) string {
 func checkIncludeGroup(groups []string, line string) bool {
 	debug := os.Getenv("DEBUG") == "true"
 	if debug {
-		utils.SafeLogPrintf(nil, nil, "[DEBUG] Checking if line includes group: %s\n", line)
+		utils.SafeLogf("[DEBUG] Checking if line includes group: %s\n", line)
 	}
 
 	if len(groups) == 0 {
@@ -60,7 +59,7 @@ func checkIncludeGroup(groups []string, line string) bool {
 			toMatch := "group-title=" + "\"" + group + "\""
 			if strings.Contains(strings.ToLower(line), toMatch) {
 				if debug {
-					utils.SafeLogPrintf(nil, nil, "[DEBUG] Line matches group: %s\n", group)
+					utils.SafeLogf("[DEBUG] Line matches group: %s\n", group)
 				}
 				return true
 			}
