@@ -53,9 +53,6 @@ func Initialize(ctx context.Context) *Updater {
 
 	c := cron.New()
 	_, err = c.AddFunc(cronSched, func() {
-		var wg sync.WaitGroup
-
-		wg.Add(1)
 		go updateInstance.UpdateSources(ctx)
 	})
 	if err != nil {
