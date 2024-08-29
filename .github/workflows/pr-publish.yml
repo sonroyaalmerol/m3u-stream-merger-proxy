@@ -59,7 +59,7 @@ jobs:
       - name: Docker - Build and Push
         uses: docker/build-push-action@v5
         with:
-          context: "https://github.com/${{ github.repository }}.git#${{ needs.fetch-pr-details.outpus.sha }}:."
+          context: "https://github.com/${{ github.repository }}.git#${{ needs.fetch-pr-details.outputs.sha }}:."
           push: true
           tags: ${{ steps.meta.outputs.tags }}
 
