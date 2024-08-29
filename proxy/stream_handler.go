@@ -94,8 +94,10 @@ func (instance *StreamInstance) LoadBalancer(previous *[]int, method string) (*h
 				utils.SafeLogf("[DEBUG] Error fetching stream from %s: %s\n", url, err.Error())
 			}
 
-			_, _ = io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+			if resp.Body != nil {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+			}
 		}
 
 		if allSkipped {
