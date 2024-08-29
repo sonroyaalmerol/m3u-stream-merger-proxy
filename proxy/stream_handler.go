@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -8,6 +10,7 @@ import (
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/utils"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"sort"
@@ -111,21 +114,6 @@ func (instance *StreamInstance) LoadBalancer(previous *[]int, method string) (*h
 
 func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
 	debug := os.Getenv("DEBUG") == "true"
-
-	if r.Method != http.MethodGet || utils.EOFIsExpected(resp) {
-		_, err := io.Copy(w, resp.Body)
-		statusChan <- 4
-
-		if err != nil {
-			log.Printf("Failed to write segment to response: %v", err)
-			return
-		}
-		return
-	}
-
-	instance.Database.UpdateConcurrency(m3uIndex, true)
-	defer instance.Database.UpdateConcurrency(m3uIndex, false)
-
 	bufferMbInt, err := strconv.Atoi(os.Getenv("BUFFER_MB"))
 	if err != nil || bufferMbInt < 0 {
 		bufferMbInt = 0
@@ -134,6 +122,60 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 	if bufferMbInt > 0 {
 		buffer = make([]byte, bufferMbInt*1024*1024)
 	}
+
+	if r.Method != http.MethodGet || utils.EOFIsExpected(resp) {
+		tempBuffer := bytes.NewBuffer(buffer)
+		_, err := io.Copy(tempBuffer, resp.Body)
+		if err != nil {
+			log.Printf("Failed to write segment to tempBuffer: %v", err)
+			return
+		}
+
+		if utils.EOFIsExpected(resp) {
+			base, err := url.Parse(resp.Request.URL.String())
+			if err != nil {
+				log.Printf("Invalid base URL for M3U8 stream: %v", err)
+				return
+			}
+
+			var output bytes.Buffer
+			scanner := bufio.NewScanner(bytes.NewReader(tempBuffer.Bytes()))
+
+			for scanner.Scan() {
+				line := scanner.Text()
+				if strings.HasPrefix(line, "#") {
+					output.WriteString(line + "\n")
+				} else if strings.TrimSpace(line) != "" {
+					u, err := url.Parse(line)
+					if err != nil {
+						log.Printf("Failed to parse M3U8 URL in line: %v", err)
+						continue
+					}
+
+					if !u.IsAbs() {
+						u = base.ResolveReference(u)
+					}
+
+					output.WriteString(u.String() + "\n")
+				}
+			}
+
+			tempBuffer = &output
+		}
+
+		_, err = io.Copy(w, tempBuffer)
+		if err != nil {
+			log.Printf("Failed to write tempBuffer to response: %v", err)
+			return
+		}
+
+		statusChan <- 4
+
+		return
+	}
+
+	instance.Database.UpdateConcurrency(m3uIndex, true)
+	defer instance.Database.UpdateConcurrency(m3uIndex, false)
 
 	defer func() {
 		buffer = nil
