@@ -36,8 +36,8 @@ func InitializeDb() (*Instance, error) {
 			Addr:         addr,
 			DB:           db,
 			DialTimeout:  10 * time.Second,
-			ReadTimeout:  5 * time.Second,
-			WriteTimeout: 5 * time.Second,
+			ReadTimeout:  1 * time.Minute,
+			WriteTimeout: 1 * time.Minute,
 		}
 	} else {
 		redisOptions = &redis.Options{
@@ -45,8 +45,8 @@ func InitializeDb() (*Instance, error) {
 			Password:     password,
 			DB:           db,
 			DialTimeout:  10 * time.Second,
-			ReadTimeout:  5 * time.Second,
-			WriteTimeout: 5 * time.Second,
+			ReadTimeout:  1 * time.Minute,
+			WriteTimeout: 1 * time.Minute,
 		}
 	}
 
