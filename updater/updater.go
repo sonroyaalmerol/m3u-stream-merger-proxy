@@ -51,8 +51,9 @@ func Initialize(ctx context.Context) *Updater {
 	}
 
 	updateInstance := &Updater{
-		ctx: ctx,
-		db:  db,
+		ctx:       ctx,
+		db:        db,
+		M3UParser: m3u.InitializeParser(),
 	}
 
 	c := cron.New()
@@ -98,7 +99,6 @@ func Initialize(ctx context.Context) *Updater {
 	}
 
 	updateInstance.Cron = c
-	updateInstance.M3UParser = m3u.InitializeParser()
 
 	return updateInstance
 }
