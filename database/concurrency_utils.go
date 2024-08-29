@@ -29,11 +29,11 @@ func (db *Instance) CheckConcurrency(m3uIndex int) bool {
 
 	count, err := db.GetConcurrency(m3uIndex)
 	if err != nil {
-		utils.SafeLog("Error checking concurrency: %s\n", err.Error())
+		utils.SafeLogf("Error checking concurrency: %s\n", err.Error())
 		return false
 	}
 
-	utils.SafeLog("Current number of connections for M3U_%d: %d", m3uIndex+1, count)
+	utils.SafeLogf("Current number of connections for M3U_%d: %d", m3uIndex+1, count)
 	return count >= maxConcurrency
 }
 
@@ -45,12 +45,12 @@ func (db *Instance) UpdateConcurrency(m3uIndex int, incr bool) {
 		err = db.DecrementConcurrency(m3uIndex)
 	}
 	if err != nil {
-		utils.SafeLog("Error updating concurrency: %s\n", err.Error())
+		utils.SafeLogf("Error updating concurrency: %s\n", err.Error())
 	}
 
 	count, err := db.GetConcurrency(m3uIndex)
 	if err != nil {
-		utils.SafeLog("Error checking concurrency: %s\n", err.Error())
+		utils.SafeLogf("Error checking concurrency: %s\n", err.Error())
 	}
-	utils.SafeLog("Current number of connections for M3U_%d: %d", m3uIndex+1, count)
+	utils.SafeLogf("Current number of connections for M3U_%d: %d", m3uIndex+1, count)
 }

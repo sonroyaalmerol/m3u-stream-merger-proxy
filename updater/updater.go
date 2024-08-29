@@ -24,7 +24,7 @@ type Updater struct {
 func Initialize(ctx context.Context) (*Updater, error) {
 	db, err := database.InitializeDb()
 	if err != nil {
-		utils.SafeLog("Error initializing Redis database: %v", err)
+		utils.SafeLogf("Error initializing Redis database: %v", err)
 		return nil, err
 	}
 
@@ -36,7 +36,7 @@ func Initialize(ctx context.Context) (*Updater, error) {
 	if clearOnBoot == "true" {
 		utils.SafeLogln("CLEAR_ON_BOOT enabled. Clearing current database.")
 		if err := db.ClearDb(); err != nil {
-			utils.SafeLog("Error clearing database: %v", err)
+			utils.SafeLogf("Error clearing database: %v", err)
 			return nil, err
 		}
 	}
@@ -58,7 +58,7 @@ func Initialize(ctx context.Context) (*Updater, error) {
 		go updateInstance.UpdateSources(ctx)
 	})
 	if err != nil {
-		utils.SafeLog("Error initializing background processes: %v", err)
+		utils.SafeLogf("Error initializing background processes: %v", err)
 		return nil, err
 	}
 	c.Start()
@@ -80,12 +80,12 @@ func Initialize(ctx context.Context) (*Updater, error) {
 }
 
 func (instance *Updater) UpdateSource(m3uUrl string, index int) {
-	utils.SafeLog("Background process: Updating M3U #%d from %s\n", index+1, m3uUrl)
+	utils.SafeLogf("Background process: Updating M3U #%d from %s\n", index+1, m3uUrl)
 	err := instance.M3UParser.ParseURL(m3uUrl, index)
 	if err != nil {
-		utils.SafeLog("Background process: Error updating M3U: %v\n", err)
+		utils.SafeLogf("Background process: Error updating M3U: %v\n", err)
 	} else {
-		utils.SafeLog("Background process: Updated M3U #%d from %s\n", index+1, m3uUrl)
+		utils.SafeLogf("Background process: Updated M3U #%d from %s\n", index+1, m3uUrl)
 	}
 }
 
@@ -114,7 +114,7 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 				break
 			}
 
-			utils.SafeLog("Background process: Fetching M3U_URL_%d...\n", index+1)
+			utils.SafeLogf("Background process: Fetching M3U_URL_%d...\n", index+1)
 			wg.Add(1)
 			// Start the goroutine for periodic updates
 			go func(m3uUrl string, index int) {
@@ -126,15 +126,15 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 		}
 		wg.Wait()
 
-		utils.SafeLog("Background process: M3U fetching complete. Saving to database...\n")
+		utils.SafeLogf("Background process: M3U fetching complete. Saving to database...\n")
 
 		err := db.SaveToDb(instance.M3UParser.GetStreams())
 		if err != nil {
-			utils.SafeLog("Background process: Error updating M3U database: %v\n", err)
+			utils.SafeLogf("Background process: Error updating M3U database: %v\n", err)
 			utils.SafeLogln("Background process: Clearing database after error in attempt to fix issue after container restart.")
 
 			if err := db.ClearDb(); err != nil {
-				utils.SafeLog("Background process: Error clearing database: %v\n", err)
+				utils.SafeLogf("Background process: Error clearing database: %v\n", err)
 			}
 		}
 

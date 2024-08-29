@@ -20,13 +20,13 @@ func main() {
 	utils.SafeLogln("Checking database connection...")
 	db, err := database.InitializeDb()
 	if err != nil {
-		utils.SafeLogFatal("Error initializing Redis database: %v", err)
+		utils.SafeLogFatalf("Error initializing Redis database: %v", err)
 	}
 
 	utils.SafeLogln("Starting updater...")
 	_, err = updater.Initialize(ctx)
 	if err != nil {
-		utils.SafeLogFatal("Error initializing updater: %v", err)
+		utils.SafeLogFatalf("Error initializing updater: %v", err)
 	}
 
 	// manually set time zone
@@ -34,14 +34,14 @@ func main() {
 		var err error
 		time.Local, err = time.LoadLocation(tz)
 		if err != nil {
-			utils.SafeLog("error loading location '%s': %v\n", tz, err)
+			utils.SafeLogf("error loading location '%s': %v\n", tz, err)
 		}
 	}
 
 	utils.SafeLogln("Clearing stale concurrency data from database...")
 	err = db.ClearConcurrencies()
 	if err != nil {
-		utils.SafeLogFatal("Error clearing concurrency database: %v", err)
+		utils.SafeLogFatalf("Error clearing concurrency database: %v", err)
 	}
 
 	utils.SafeLogln("Setting up HTTP handlers...")
@@ -59,6 +59,6 @@ func main() {
 	utils.SafeLogln("Stream Endpoint is running (`/stream/{streamID}.{fileExt}`)")
 	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
-		utils.SafeLogFatal("HTTP server error: %v", err)
+		utils.SafeLogFatalf("HTTP server error: %v", err)
 	}
 }

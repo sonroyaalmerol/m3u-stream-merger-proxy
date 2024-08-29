@@ -7,31 +7,48 @@ import (
 	"regexp"
 )
 
-func safeLog(format string, v ...any) string {
-	safeLogs := os.Getenv("SAFE_LOGS") == "true"
-	safeString := ""
-	if len(v) == 0 {
-		safeString = format
-	} else {
-		safeString = fmt.Sprintf(format, v...)
-	}
-	if safeLogs {
-		urlRegex := `(https?|file):\/\/[^\s/$.?#].[^\s]*`
-		re := regexp.MustCompile(urlRegex)
+func cleanString(text string) string {
+	urlRegex := `(https?|file):\/\/[^\s/$.?#].[^\s]*`
+	re := regexp.MustCompile(urlRegex)
 
-		safeString = re.ReplaceAllString(safeString, "[redacted url]")
+	safeString := re.ReplaceAllString(text, "[redacted url]")
+	return safeString
+}
+
+func safeLog(format string) string {
+	safeLogs := os.Getenv("SAFE_LOGS") == "true"
+	safeString := format
+	if safeLogs {
+		cleanString(safeString)
 	}
 	return safeString
 }
 
-func SafeLog(format string, v ...any) {
-	log.Print(safeLog(format, v...))
+func safeLogf(format string, v ...any) string {
+	safeLogs := os.Getenv("SAFE_LOGS") == "true"
+	safeString := fmt.Sprintf(format, v...)
+	if safeLogs {
+		cleanString(safeString)
+	}
+	return safeString
+}
+
+func SafeLogf(format string, v ...any) {
+	log.Print(safeLogf(format, v...))
+}
+
+func SafeLog(format string) {
+	log.Print(safeLog(format))
 }
 
 func SafeLogln(format string) {
 	log.Println(safeLog(format))
 }
 
-func SafeLogFatal(format string, v ...any) {
-	log.Fatalf(safeLog(format, v...))
+func SafeLogFatal(format string) {
+	log.Fatalf(safeLogf(format))
+}
+
+func SafeLogFatalf(format string, v ...any) {
+	log.Fatalf(safeLogf(format, v...))
 }

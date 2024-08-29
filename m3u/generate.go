@@ -39,7 +39,7 @@ func InitCache(db *database.Instance) {
 	content := GenerateAndCacheM3UContent(db, nil)
 	err := WriteCacheToFile(content)
 	if err != nil {
-		utils.SafeLog("Error writing cache to file: %v\n", err)
+		utils.SafeLogf("Error writing cache to file: %v\n", err)
 	}
 }
 
@@ -72,7 +72,7 @@ func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
 	baseUrl := utils.DetermineBaseURL(r)
 
 	if debug {
-		utils.SafeLog("[DEBUG] Base URL set to %s\n", baseUrl)
+		utils.SafeLogf("[DEBUG] Base URL set to %s\n", baseUrl)
 	}
 
 	var content strings.Builder
@@ -86,7 +86,7 @@ func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
 		}
 
 		if debug {
-			utils.SafeLog("[DEBUG] Processing stream with TVG ID: %s\n", stream.TvgID)
+			utils.SafeLogf("[DEBUG] Processing stream with TVG ID: %s\n", stream.TvgID)
 		}
 
 		content.WriteString(fmt.Sprintf("#EXTINF:-1 channelID=\"x-ID.%s\" tvg-chno=\"%s\" tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
@@ -119,7 +119,7 @@ func ClearCache() {
 	M3uCache.data = ""
 	if err := DeleteCacheFile(); err != nil {
 		if debug {
-			utils.SafeLog("[DEBUG] Cache file deletion failed: %v\n", err)
+			utils.SafeLogf("[DEBUG] Cache file deletion failed: %v\n", err)
 		}
 	}
 
@@ -129,7 +129,7 @@ func ClearCache() {
 func Handler(w http.ResponseWriter, r *http.Request) {
 	db, err := database.InitializeDb()
 	if err != nil {
-		utils.SafeLog("Error initializing Redis database: %v", err)
+		utils.SafeLogf("Error initializing Redis database: %v", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -163,7 +163,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			utils.SafeLogln("[DEBUG] Serving old cache and regenerating in background")
 		}
 		if _, err := w.Write([]byte(cacheData)); err != nil {
-			utils.SafeLog("[ERROR] Failed to write response: %v\n", err)
+			utils.SafeLogf("[ERROR] Failed to write response: %v\n", err)
 		}
 
 		InitCache(db)
@@ -175,12 +175,12 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	content := GenerateAndCacheM3UContent(db, r)
 	go func() {
 		if err := WriteCacheToFile(content); err != nil {
-			utils.SafeLog("[ERROR] Failed to write cache to file: %v\n", err)
+			utils.SafeLogf("[ERROR] Failed to write cache to file: %v\n", err)
 		}
 	}()
 
 	if _, err := w.Write([]byte(content)); err != nil {
-		utils.SafeLog("[ERROR] Failed to write response: %v\n", err)
+		utils.SafeLogf("[ERROR] Failed to write response: %v\n", err)
 	}
 }
 

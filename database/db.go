@@ -88,7 +88,7 @@ func (db *Instance) SaveToDb(streams []*StreamInfo) error {
 		}
 
 		if debug {
-			utils.SafeLog("[DEBUG] Preparing to set data for stream key %s: %v\n", streamKey, s)
+			utils.SafeLogf("[DEBUG] Preparing to set data for stream key %s: %v\n", streamKey, s)
 		}
 
 		pipeline.Set(db.Ctx, streamKey, string(streamDataJson), 0)
@@ -97,7 +97,7 @@ func (db *Instance) SaveToDb(streams []*StreamInfo) error {
 		sortScore := calculateSortScore(*s)
 
 		if debug {
-			utils.SafeLog("[DEBUG] Adding to sorted set with score %f and member %s\n", sortScore, streamKey)
+			utils.SafeLogf("[DEBUG] Adding to sorted set with score %f and member %s\n", sortScore, streamKey)
 		}
 
 		pipeline.ZAdd(db.Ctx, "streams_sorted", redis.Z{
@@ -171,7 +171,7 @@ func (db *Instance) GetStreams() <-chan StreamInfo {
 
 		keys, err := db.Redis.ZRange(db.Ctx, "streams_sorted", 0, -1).Result()
 		if err != nil {
-			utils.SafeLog("error retrieving streams: %v", err)
+			utils.SafeLogf("error retrieving streams: %v", err)
 			return
 		}
 
@@ -179,7 +179,7 @@ func (db *Instance) GetStreams() <-chan StreamInfo {
 		for _, key := range keys {
 			streamDataJson, err := db.Redis.Get(db.Ctx, key).Result()
 			if err != nil {
-				utils.SafeLog("error retrieving stream data: %v", err)
+				utils.SafeLogf("error retrieving stream data: %v", err)
 				return
 			}
 
@@ -187,12 +187,12 @@ func (db *Instance) GetStreams() <-chan StreamInfo {
 
 			err = json.Unmarshal([]byte(streamDataJson), &stream)
 			if err != nil {
-				utils.SafeLog("error retrieving stream data: %v", err)
+				utils.SafeLogf("error retrieving stream data: %v", err)
 				return
 			}
 
 			if debug {
-				utils.SafeLog("[DEBUG] Processing stream: %v\n", stream)
+				utils.SafeLogf("[DEBUG] Processing stream: %v\n", stream)
 			}
 
 			// Send the stream to the channel
