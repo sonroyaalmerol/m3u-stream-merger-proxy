@@ -39,11 +39,6 @@ func Initialize(ctx context.Context) *Updater {
 		}
 	}
 
-	cacheOnSync := os.Getenv("CACHE_ON_SYNC")
-	if len(strings.TrimSpace(cacheOnSync)) == 0 {
-		cacheOnSync = "false"
-	}
-
 	cronSched := os.Getenv("SYNC_CRON")
 	if len(strings.TrimSpace(cronSched)) == 0 {
 		log.Println("SYNC_CRON not initialized. Defaulting to 0 0 * * * (12am every day).")
@@ -58,18 +53,7 @@ func Initialize(ctx context.Context) *Updater {
 
 	c := cron.New()
 	_, err = c.AddFunc(cronSched, func() {
-		var wg sync.WaitGroup
-
-		wg.Add(1)
 		go updateInstance.UpdateSources(ctx)
-		if cacheOnSync == "true" {
-			if _, ok := os.LookupEnv("BASE_URL"); !ok {
-				log.Println("BASE_URL is required for CACHE_ON_SYNC to work.")
-			}
-			wg.Wait()
-			log.Println("CACHE_ON_SYNC enabled. Building cache.")
-			m3u.InitCache(db)
-		}
 	})
 	if err != nil {
 		log.Fatalf("Error initializing background processes: %v", err)
@@ -84,18 +68,7 @@ func Initialize(ctx context.Context) *Updater {
 	if syncOnBoot == "true" {
 		log.Println("SYNC_ON_BOOT enabled. Starting initial M3U update.")
 
-		var wg sync.WaitGroup
-
-		wg.Add(1)
 		go updateInstance.UpdateSources(ctx)
-		if cacheOnSync == "true" {
-			if _, ok := os.LookupEnv("BASE_URL"); !ok {
-				log.Println("BASE_URL is required for CACHE_ON_SYNC to work.")
-			}
-			wg.Wait()
-			log.Println("CACHE_ON_SYNC enabled. Building cache.")
-			m3u.InitCache(db)
-		}
 	}
 
 	updateInstance.Cron = c
@@ -141,11 +114,11 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 			log.Printf("Background process: Fetching M3U_URL_%d...\n", index+1)
 			wg.Add(1)
 			// Start the goroutine for periodic updates
-			go func(m3uUrl string, index int) {
+			go func() {
 				log.Println(index)
 				defer wg.Done()
 				instance.UpdateSource(m3uUrl, index)
-			}(m3uUrl, index)
+			}()
 
 			index++
 		}
@@ -165,6 +138,18 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 
 		m3u.ClearCache()
 
+		cacheOnSync := os.Getenv("CACHE_ON_SYNC")
+		if len(strings.TrimSpace(cacheOnSync)) == 0 {
+			cacheOnSync = "false"
+		}
+
 		log.Println("Background process: Updated M3U database.")
+		if cacheOnSync == "true" {
+			if _, ok := os.LookupEnv("BASE_URL"); !ok {
+				log.Println("BASE_URL is required for CACHE_ON_SYNC to work.")
+			}
+			log.Println("CACHE_ON_SYNC enabled. Building cache.")
+			m3u.InitCache(db)
+		}
 	}
 }
