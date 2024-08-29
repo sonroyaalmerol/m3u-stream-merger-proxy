@@ -114,11 +114,11 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 			log.Printf("Background process: Fetching M3U_URL_%d...\n", index+1)
 			wg.Add(1)
 			// Start the goroutine for periodic updates
-			go func(m3uUrl string, index int) {
+			go func() {
 				log.Println(index)
 				defer wg.Done()
 				instance.UpdateSource(m3uUrl, index)
-			}(m3uUrl, index)
+			}()
 
 			index++
 		}
