@@ -17,6 +17,11 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	db, err := database.InitializeDb()
+	if err != nil {
+		log.Fatalf("Error initializing Redis database: %v", err)
+	}
+
 	updater.Initialize(ctx)
 
 	// manually set time zone
@@ -26,12 +31,6 @@ func main() {
 		if err != nil {
 			log.Printf("error loading location '%s': %v\n", tz, err)
 		}
-	}
-
-	var err error
-	db, err := database.InitializeDb()
-	if err != nil {
-		log.Fatalf("Error initializing Redis database: %v", err)
 	}
 
 	err = db.ClearConcurrencies()

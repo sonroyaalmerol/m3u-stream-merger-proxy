@@ -21,6 +21,8 @@ type Instance struct {
 }
 
 func InitializeDb() (*Instance, error) {
+	ctx := context.Background()
+
 	addr := os.Getenv("REDIS_ADDR")
 	password := os.Getenv("REDIS_PASS")
 	db := 0
@@ -34,28 +36,33 @@ func InitializeDb() (*Instance, error) {
 		redisOptions = &redis.Options{
 			Addr:         addr,
 			DB:           db,
-			DialTimeout:  1 * time.Minute,
-			ReadTimeout:  1 * time.Minute,
-			WriteTimeout: 1 * time.Minute,
+			DialTimeout:  10 * time.Second,
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: 5 * time.Second,
 		}
 	} else {
 		redisOptions = &redis.Options{
 			Addr:         addr,
 			Password:     password,
 			DB:           db,
-			DialTimeout:  1 * time.Minute,
-			ReadTimeout:  1 * time.Minute,
-			WriteTimeout: 1 * time.Minute,
+			DialTimeout:  10 * time.Second,
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: 5 * time.Second,
 		}
 	}
 
 	redisInstance := redis.NewClient(redisOptions)
 
-	if err := redisInstance.Ping(context.Background()).Err(); err != nil {
-		return nil, fmt.Errorf("error connecting to Redis: %v", err)
+	for {
+		err := redisInstance.Ping(ctx).Err()
+		if err == nil {
+			break
+		}
+		fmt.Printf("Error connecting to Redis: %v. Retrying...\n", err)
+		time.Sleep(2 * time.Second)
 	}
 
-	return &Instance{Redis: redisInstance, Ctx: context.Background()}, nil
+	return &Instance{Redis: redisInstance, Ctx: ctx}, nil
 }
 
 func (db *Instance) ClearDb() error {
