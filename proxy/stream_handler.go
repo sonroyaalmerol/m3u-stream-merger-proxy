@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -124,58 +123,50 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 	}
 
 	if r.Method != http.MethodGet || utils.EOFIsExpected(resp) {
-		var content []byte
-		content, err = io.ReadAll(resp.Body)
+		scanner := bufio.NewScanner(resp.Body)
+		base, err := url.Parse(resp.Request.URL.String())
 		if err != nil {
-			log.Printf("Error reading M3U8 stream content: %v", err)
+			log.Printf("Invalid base URL for M3U8 stream: %v", err)
+			statusChan <- 4
 			return
 		}
 
-		if utils.EOFIsExpected(resp) {
-			if !bytes.HasPrefix(content, []byte("#EXTM3U\n")) {
-				log.Println("Invalid M3U8 detected. Returning response as is.")
-				return
-			}
-			base, err := url.Parse(resp.Request.URL.String())
-			if err != nil {
-				log.Printf("Invalid base URL for M3U8 stream: %v", err)
-				return
-			}
-
-			var output bytes.Buffer
-			scanner := bufio.NewScanner(bytes.NewReader(content))
-
-			for scanner.Scan() {
-				line := scanner.Text()
-				if strings.HasPrefix(line, "#") {
-					output.WriteString(line + "\n")
-				} else if strings.TrimSpace(line) != "" {
-					u, err := url.Parse(line)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "#") {
+				_, err := w.Write([]byte(line + "\n"))
+				if err != nil {
+					log.Printf("Failed to write line to response: %v", err)
+					statusChan <- 4
+					return
+				}
+			} else if strings.TrimSpace(line) != "" {
+				u, err := url.Parse(line)
+				if err != nil {
+					log.Printf("Failed to parse M3U8 URL in line: %v", err)
+					_, err := w.Write([]byte(line + "\n"))
 					if err != nil {
-						log.Printf("Failed to parse M3U8 URL in line: %v", err)
-						output.WriteString(line + "\n")
-						continue
+						log.Printf("Failed to write line to response: %v", err)
+						statusChan <- 4
+						return
 					}
+					continue
+				}
 
-					if !u.IsAbs() {
-						u = base.ResolveReference(u)
-					}
+				if !u.IsAbs() {
+					u = base.ResolveReference(u)
+				}
 
-					output.WriteString(u.String() + "\n")
+				_, err = w.Write([]byte(u.String() + "\n"))
+				if err != nil {
+					log.Printf("Failed to write URL to response: %v", err)
+					statusChan <- 4
+					return
 				}
 			}
-
-			content = output.Bytes()
-		}
-
-		_, err = io.Copy(w, bytes.NewBuffer(content))
-		if err != nil {
-			log.Printf("Failed to write tempBuffer to response: %v", err)
-			return
 		}
 
 		statusChan <- 4
-
 		return
 	}
 
