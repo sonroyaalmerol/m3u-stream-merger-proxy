@@ -124,7 +124,8 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 	}
 
 	if r.Method != http.MethodGet || utils.EOFIsExpected(resp) {
-		content, err := io.ReadAll(resp.Body)
+		var content []byte
+		content, err = io.ReadAll(resp.Body)
 		if err != nil {
 			log.Printf("Error reading M3U8 stream content: %v", err)
 			return
