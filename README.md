@@ -52,8 +52,8 @@ Uses the channel title or `tvg-name` (as fallback) to merge multiple identical c
 Deploy with ease using the provided `docker-compose.yml`:
 
 ```yaml
-version: '3'
 
+version: '3'
 services:
   m3u-stream-merger-proxy:
     image: sonroyaalmerol/m3u-stream-merger-proxy:latest
@@ -70,9 +70,16 @@ services:
       - M3U_MAX_CONCURRENCY_2=1
       - M3U_URL_X=
     restart: always
+    depends_on:
+      - redis
   redis:
     image: redis
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 1s
+      timeout: 3s
+      retries: 5
     # Redis persistence is OPTIONAL. This will allow you to reuse the database across restarts.
     # command: redis-server --save 60 1
     # volumes:
