@@ -37,13 +37,11 @@ func InitCache(db *database.Instance) {
 	M3uCache.Revalidating = true
 	M3uCache.Unlock()
 
-	go func() {
-		content := GenerateAndCacheM3UContent(db, nil)
-		err := WriteCacheToFile(content)
-		if err != nil {
-			log.Printf("Error writing cache to file: %v\n", err)
-		}
-	}()
+	content := GenerateAndCacheM3UContent(db, nil)
+	err := WriteCacheToFile(content)
+	if err != nil {
+		log.Printf("Error writing cache to file: %v\n", err)
+	}
 }
 
 func isDebugMode() bool {
@@ -167,7 +165,8 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[ERROR] Failed to write response: %v\n", err)
 		}
 
-		InitCache(db)
+		go InitCache(db)
+
 		return
 	}
 
