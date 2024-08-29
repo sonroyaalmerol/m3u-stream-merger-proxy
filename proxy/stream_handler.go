@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/utils"
 	"net/http"
@@ -26,7 +25,8 @@ type StreamInstance struct {
 func InitializeStream(streamUrl string) (*StreamInstance, error) {
 	initDb, err := database.InitializeDb()
 	if err != nil {
-		log.Fatalf("Error initializing Redis database: %v", err)
+		utils.SafeLog("Error initializing Redis database: %v", err)
+		return nil, err
 	}
 
 	stream, err := initDb.GetStreamBySlug(streamUrl)
@@ -59,24 +59,24 @@ func (instance *StreamInstance) LoadBalancer(previous *[]int, method string) (*h
 
 	for lap < maxLaps || maxLaps == 0 {
 		if debug {
-			utils.SafeLogPrintf(nil, nil, "[DEBUG] Stream attempt %d out of %d\n", lap+1, maxLaps)
+			utils.SafeLog("[DEBUG] Stream attempt %d out of %d\n", lap+1, maxLaps)
 		}
 		allSkipped := true // Assume all URLs might be skipped
 
 		for _, index := range m3uIndexes {
 			if slices.Contains(*previous, index) {
-				utils.SafeLogPrintf(nil, nil, "Skipping M3U_%d: marked as previous stream\n", index+1)
+				utils.SafeLog("Skipping M3U_%d: marked as previous stream\n", index+1)
 				continue
 			}
 
 			url, ok := instance.Info.URLs[index]
 			if !ok {
-				utils.SafeLogPrintf(nil, nil, "Channel not found from M3U_%d: %s\n", index+1, instance.Info.Title)
+				utils.SafeLog("Channel not found from M3U_%d: %s\n", index+1, instance.Info.Title)
 				continue
 			}
 
 			if instance.Database.CheckConcurrency(index) {
-				utils.SafeLogPrintf(nil, &url, "Concurrency limit reached for M3U_%d: %s\n", index+1, url)
+				utils.SafeLog("Concurrency limit reached for M3U_%d: %s\n", index+1, url)
 				continue
 			}
 
@@ -85,13 +85,13 @@ func (instance *StreamInstance) LoadBalancer(previous *[]int, method string) (*h
 			resp, err := utils.CustomHttpRequest(method, url)
 			if err == nil {
 				if debug {
-					utils.SafeLogPrintf(nil, &url, "[DEBUG] Successfully fetched stream from %s\n", url)
+					utils.SafeLog("[DEBUG] Successfully fetched stream from %s\n", url)
 				}
 				return resp, url, index, nil
 			}
-			utils.SafeLogPrintf(nil, &url, "Error fetching stream: %s\n", err.Error())
+			utils.SafeLog("Error fetching stream: %s\n", err.Error())
 			if debug {
-				utils.SafeLogPrintf(nil, &url, "[DEBUG] Error fetching stream from %s: %s\n", url, err.Error())
+				utils.SafeLog("[DEBUG] Error fetching stream from %s: %s\n", url, err.Error())
 			}
 
 			_, _ = io.Copy(io.Discard, resp.Body)
@@ -100,7 +100,7 @@ func (instance *StreamInstance) LoadBalancer(previous *[]int, method string) (*h
 
 		if allSkipped {
 			if debug {
-				utils.SafeLogPrintf(nil, nil, "[DEBUG] All streams skipped in lap %d\n", lap)
+				utils.SafeLog("[DEBUG] All streams skipped in lap %d\n", lap)
 			}
 			*previous = []int{}
 		}
@@ -126,7 +126,7 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 		scanner := bufio.NewScanner(resp.Body)
 		base, err := url.Parse(resp.Request.URL.String())
 		if err != nil {
-			log.Printf("Invalid base URL for M3U8 stream: %v", err)
+			utils.SafeLog("Invalid base URL for M3U8 stream: %v", err)
 			statusChan <- 4
 			return
 		}
@@ -136,17 +136,17 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 			if strings.HasPrefix(line, "#") {
 				_, err := w.Write([]byte(line + "\n"))
 				if err != nil {
-					log.Printf("Failed to write line to response: %v", err)
+					utils.SafeLog("Failed to write line to response: %v", err)
 					statusChan <- 4
 					return
 				}
 			} else if strings.TrimSpace(line) != "" {
 				u, err := url.Parse(line)
 				if err != nil {
-					log.Printf("Failed to parse M3U8 URL in line: %v", err)
+					utils.SafeLog("Failed to parse M3U8 URL in line: %v", err)
 					_, err := w.Write([]byte(line + "\n"))
 					if err != nil {
-						log.Printf("Failed to write line to response: %v", err)
+						utils.SafeLog("Failed to write line to response: %v", err)
 						statusChan <- 4
 						return
 					}
@@ -159,7 +159,7 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 
 				_, err = w.Write([]byte(u.String() + "\n"))
 				if err != nil {
-					log.Printf("Failed to write URL to response: %v", err)
+					utils.SafeLog("Failed to write URL to response: %v", err)
 					statusChan <- 4
 					return
 				}
@@ -202,27 +202,27 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 	for {
 		select {
 		case <-ctx.Done(): // handle context cancellation
-			utils.SafeLogPrintf(r, nil, "Context canceled for stream: %s\n", r.RemoteAddr)
+			utils.SafeLog("Context canceled for stream: %s\n", r.RemoteAddr)
 			statusChan <- 0
 			return
 		case <-timer.C:
-			utils.SafeLogPrintf(r, nil, "Timeout reached while trying to stream: %s\n", r.RemoteAddr)
+			utils.SafeLog("Timeout reached while trying to stream: %s\n", r.RemoteAddr)
 			statusChan <- returnStatus
 			return
 		default:
 			n, err := resp.Body.Read(buffer)
 			if err != nil {
 				if err == io.EOF {
-					utils.SafeLogPrintf(r, nil, "Stream ended (EOF reached): %s\n", r.RemoteAddr)
+					utils.SafeLog("Stream ended (EOF reached): %s\n", r.RemoteAddr)
 					if utils.EOFIsExpected(resp) || timeoutSecond == 0 {
 						statusChan <- 2
 						return
 					}
 
 					returnStatus = 2
-					utils.SafeLogPrintf(nil, nil, "Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
+					utils.SafeLog("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
 					if debug {
-						utils.SafeLogPrintf(nil, nil, "[DEBUG] Retrying same stream with backoff of %v...\n", currentBackoff)
+						utils.SafeLog("[DEBUG] Retrying same stream with backoff of %v...\n", currentBackoff)
 					}
 
 					time.Sleep(currentBackoff)
@@ -234,7 +234,7 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 					continue
 				}
 
-				utils.SafeLogPrintf(r, nil, "Error reading stream: %s\n", err.Error())
+				utils.SafeLog("Error reading stream: %s\n", err.Error())
 
 				returnStatus = 1
 
@@ -244,7 +244,7 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 				}
 
 				if debug {
-					utils.SafeLogPrintf(nil, nil, "[DEBUG] Retrying same stream with backoff of %v...\n", currentBackoff)
+					utils.SafeLog("[DEBUG] Retrying same stream with backoff of %v...\n", currentBackoff)
 				}
 
 				time.Sleep(currentBackoff)
@@ -257,7 +257,7 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 			}
 
 			if _, err := w.Write(buffer[:n]); err != nil {
-				utils.SafeLogPrintf(r, nil, "Error writing to response: %s\n", err.Error())
+				utils.SafeLog("Error writing to response: %s\n", err.Error())
 				statusChan <- 0
 				return
 			}
@@ -287,18 +287,18 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	utils.SafeLogPrintf(r, nil, "Received request from %s for URL: %s\n", r.RemoteAddr, r.URL.Path)
+	utils.SafeLog("Received request from %s for URL: %s\n", r.RemoteAddr, r.URL.Path)
 
 	streamUrl := strings.Split(strings.TrimPrefix(r.URL.Path, "/stream/"), ".")[0]
 	if streamUrl == "" {
-		utils.SafeLogPrintf(r, nil, "Invalid m3uID for request from %s: %s\n", r.RemoteAddr, r.URL.Path)
+		utils.SafeLog("Invalid m3uID for request from %s: %s\n", r.RemoteAddr, r.URL.Path)
 		http.NotFound(w, r)
 		return
 	}
 
 	stream, err := InitializeStream(strings.TrimPrefix(streamUrl, "/"))
 	if err != nil {
-		utils.SafeLogPrintf(r, nil, "Error retrieving stream for slug %s: %v\n", streamUrl, err)
+		utils.SafeLog("Error retrieving stream for slug %s: %v\n", streamUrl, err)
 		http.NotFound(w, r)
 		return
 	}
@@ -314,12 +314,12 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-ctx.Done():
-			utils.SafeLogPrintf(r, nil, "Client disconnected: %s\n", r.RemoteAddr)
+			utils.SafeLog("Client disconnected: %s\n", r.RemoteAddr)
 			return
 		default:
 			resp, selectedUrl, selectedIndex, err = stream.LoadBalancer(&testedIndexes, r.Method)
 			if err != nil {
-				utils.SafeLogPrintf(r, nil, "Error reloading stream for %s: %v\n", streamUrl, err)
+				utils.SafeLog("Error reloading stream for %s: %v\n", streamUrl, err)
 				return
 			}
 
@@ -337,32 +337,32 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(resp.StatusCode)
 
 				if debug {
-					utils.SafeLogPrintf(r, nil, "[DEBUG] Headers set for response: %v\n", w.Header())
+					utils.SafeLog("[DEBUG] Headers set for response: %v\n", w.Header())
 				}
 				firstWrite = false
 			}
 
 			exitStatus := make(chan int)
 
-			utils.SafeLogPrintf(r, &selectedUrl, "Proxying %s to %s\n", r.RemoteAddr, selectedUrl)
+			utils.SafeLog("Proxying %s to %s\n", r.RemoteAddr, selectedUrl)
 			go stream.ProxyStream(ctx, selectedIndex, resp, r, w, exitStatus)
 			testedIndexes = append(testedIndexes, selectedIndex)
 
 			streamExitCode := <-exitStatus
-			utils.SafeLogPrintf(r, &selectedUrl, "Exit code %d received from %s\n", streamExitCode, selectedUrl)
+			utils.SafeLog("Exit code %d received from %s\n", streamExitCode, selectedUrl)
 
 			if streamExitCode == 2 && utils.EOFIsExpected(resp) {
-				utils.SafeLogPrintf(r, nil, "Successfully proxied playlist: %s\n", r.RemoteAddr)
+				utils.SafeLog("Successfully proxied playlist: %s\n", r.RemoteAddr)
 				cancel()
 			} else if streamExitCode == 1 || streamExitCode == 2 {
 				// Retry on server-side connection errors
-				utils.SafeLogPrintf(r, nil, "Retrying other servers...\n")
+				utils.SafeLog("Retrying other servers...\n")
 			} else if streamExitCode == 4 {
-				utils.SafeLogPrintf(r, nil, "Finished handling %s request: %s\n", r.Method, r.RemoteAddr)
+				utils.SafeLog("Finished handling %s request: %s\n", r.Method, r.RemoteAddr)
 				cancel()
 			} else {
 				// Consider client-side connection errors as complete closure
-				utils.SafeLogPrintf(r, nil, "Client has closed the stream: %s\n", r.RemoteAddr)
+				utils.SafeLog("Client has closed the stream: %s\n", r.RemoteAddr)
 				cancel()
 			}
 

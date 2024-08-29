@@ -2,7 +2,7 @@ package database
 
 import (
 	"fmt"
-	"log"
+	"m3u-stream-merger/utils"
 	"os"
 	"strconv"
 )
@@ -29,11 +29,11 @@ func (db *Instance) CheckConcurrency(m3uIndex int) bool {
 
 	count, err := db.GetConcurrency(m3uIndex)
 	if err != nil {
-		log.Printf("Error checking concurrency: %s\n", err.Error())
+		utils.SafeLog("Error checking concurrency: %s\n", err.Error())
 		return false
 	}
 
-	log.Printf("Current number of connections for M3U_%d: %d", m3uIndex+1, count)
+	utils.SafeLog("Current number of connections for M3U_%d: %d", m3uIndex+1, count)
 	return count >= maxConcurrency
 }
 
@@ -45,12 +45,12 @@ func (db *Instance) UpdateConcurrency(m3uIndex int, incr bool) {
 		err = db.DecrementConcurrency(m3uIndex)
 	}
 	if err != nil {
-		log.Printf("Error updating concurrency: %s\n", err.Error())
+		utils.SafeLog("Error updating concurrency: %s\n", err.Error())
 	}
 
 	count, err := db.GetConcurrency(m3uIndex)
 	if err != nil {
-		log.Printf("Error checking concurrency: %s\n", err.Error())
+		utils.SafeLog("Error checking concurrency: %s\n", err.Error())
 	}
-	log.Printf("Current number of connections for M3U_%d: %d", m3uIndex+1, count)
+	utils.SafeLog("Current number of connections for M3U_%d: %d", m3uIndex+1, count)
 }

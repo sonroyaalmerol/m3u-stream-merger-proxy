@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"m3u-stream-merger/utils"
 	"math"
 	"os"
@@ -89,7 +88,7 @@ func (db *Instance) SaveToDb(streams []*StreamInfo) error {
 		}
 
 		if debug {
-			utils.SafeLogPrintf(nil, nil, "[DEBUG] Preparing to set data for stream key %s: %v\n", streamKey, s)
+			utils.SafeLog("[DEBUG] Preparing to set data for stream key %s: %v\n", streamKey, s)
 		}
 
 		pipeline.Set(db.Ctx, streamKey, string(streamDataJson), 0)
@@ -98,7 +97,7 @@ func (db *Instance) SaveToDb(streams []*StreamInfo) error {
 		sortScore := calculateSortScore(*s)
 
 		if debug {
-			utils.SafeLogPrintf(nil, nil, "[DEBUG] Adding to sorted set with score %f and member %s\n", sortScore, streamKey)
+			utils.SafeLog("[DEBUG] Adding to sorted set with score %f and member %s\n", sortScore, streamKey)
 		}
 
 		pipeline.ZAdd(db.Ctx, "streams_sorted", redis.Z{
@@ -109,7 +108,7 @@ func (db *Instance) SaveToDb(streams []*StreamInfo) error {
 
 	if len(streams) > 0 {
 		if debug {
-			log.Println("[DEBUG] Executing pipeline...")
+			utils.SafeLogln("[DEBUG] Executing pipeline...")
 		}
 
 		_, err := pipeline.Exec(db.Ctx)
@@ -118,7 +117,7 @@ func (db *Instance) SaveToDb(streams []*StreamInfo) error {
 		}
 
 		if debug {
-			log.Println("[DEBUG] Pipeline executed successfully.")
+			utils.SafeLogln("[DEBUG] Pipeline executed successfully.")
 		}
 	}
 
@@ -172,7 +171,7 @@ func (db *Instance) GetStreams() <-chan StreamInfo {
 
 		keys, err := db.Redis.ZRange(db.Ctx, "streams_sorted", 0, -1).Result()
 		if err != nil {
-			utils.SafeLogPrintf(nil, nil, "error retrieving streams: %v", err)
+			utils.SafeLog("error retrieving streams: %v", err)
 			return
 		}
 
@@ -180,7 +179,7 @@ func (db *Instance) GetStreams() <-chan StreamInfo {
 		for _, key := range keys {
 			streamDataJson, err := db.Redis.Get(db.Ctx, key).Result()
 			if err != nil {
-				utils.SafeLogPrintf(nil, nil, "error retrieving stream data: %v", err)
+				utils.SafeLog("error retrieving stream data: %v", err)
 				return
 			}
 
@@ -188,12 +187,12 @@ func (db *Instance) GetStreams() <-chan StreamInfo {
 
 			err = json.Unmarshal([]byte(streamDataJson), &stream)
 			if err != nil {
-				utils.SafeLogPrintf(nil, nil, "error retrieving stream data: %v", err)
+				utils.SafeLog("error retrieving stream data: %v", err)
 				return
 			}
 
 			if debug {
-				utils.SafeLogPrintf(nil, nil, "[DEBUG] Processing stream: %v\n", stream)
+				utils.SafeLog("[DEBUG] Processing stream: %v\n", stream)
 			}
 
 			// Send the stream to the channel
@@ -201,7 +200,7 @@ func (db *Instance) GetStreams() <-chan StreamInfo {
 		}
 
 		if debug {
-			log.Println("[DEBUG] Streams retrieved successfully.")
+			utils.SafeLogln("[DEBUG] Streams retrieved successfully.")
 		}
 	}()
 
