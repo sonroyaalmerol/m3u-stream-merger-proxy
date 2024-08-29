@@ -8,7 +8,7 @@ import (
 )
 
 func cleanString(text string) string {
-	urlRegex := `(https?|file):\/\/[^\s/$.?#].[^\s]*`
+	urlRegex := `(https?|file):\/\/[^\s/$.?#].[^\s]*(?=\s|$)`
 	re := regexp.MustCompile(urlRegex)
 
 	safeString := re.ReplaceAllString(text, "[redacted url]")
