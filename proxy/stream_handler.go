@@ -149,6 +149,7 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 					u, err := url.Parse(line)
 					if err != nil {
 						log.Printf("Failed to parse M3U8 URL in line: %v", err)
+						output.WriteString(line + "\n")
 						continue
 					}
 
