@@ -46,9 +46,9 @@ func SafeLogln(format string) {
 }
 
 func SafeLogFatal(format string) {
-	log.Fatalf(safeLogf(format))
+	log.Fatal(safeLog(format))
 }
 
 func SafeLogFatalf(format string, v ...any) {
-	log.Fatalf(safeLogf(format, v...))
+	log.Fatal(safeLogf(format, v...))
 }
