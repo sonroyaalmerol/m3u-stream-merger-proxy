@@ -17,11 +17,13 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	log.Println("Checking database connection...")
 	db, err := database.InitializeDb()
 	if err != nil {
 		log.Fatalf("Error initializing Redis database: %v", err)
 	}
 
+	log.Println("Starting updater...")
 	updater.Initialize(ctx)
 
 	// manually set time zone
@@ -33,11 +35,13 @@ func main() {
 		}
 	}
 
+	log.Println("Clearing stale concurrency data from database...")
 	err = db.ClearConcurrencies()
 	if err != nil {
 		log.Fatalf("Error clearing concurrency database: %v", err)
 	}
 
+	log.Println("Setting up HTTP handlers...")
 	// HTTP handlers
 	http.HandleFunc("/playlist.m3u", func(w http.ResponseWriter, r *http.Request) {
 		m3u.Handler(w, r)
