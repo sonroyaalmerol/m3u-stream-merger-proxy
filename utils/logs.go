@@ -9,7 +9,12 @@ import (
 
 func safeLog(format string, v ...any) string {
 	safeLogs := os.Getenv("SAFE_LOGS") == "true"
-	safeString := fmt.Sprintf(format, v...)
+	safeString := ""
+	if len(v) == 0 {
+		safeString = format
+	} else {
+		safeString = fmt.Sprintf(format, v...)
+	}
 	if safeLogs {
 		urlRegex := `(https?|file):\/\/[^\s/$.?#].[^\s]*`
 		re := regexp.MustCompile(urlRegex)
