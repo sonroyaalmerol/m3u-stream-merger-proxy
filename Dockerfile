@@ -52,4 +52,4 @@ ENV PUID=1000
 ENV PGID=1000
 
 # The container entrypoint
-ENTRYPOINT ["/m3u-proxy/entrypoint.sh"]
+ENTRYPOINT ["/m3u-proxy/entrypoint.sh", "/m3u-proxy/m3u-proxy"]
