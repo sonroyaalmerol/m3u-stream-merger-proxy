@@ -89,9 +89,26 @@ func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
 			utils.SafeLogf("[DEBUG] Processing stream with TVG ID: %s\n", stream.TvgID)
 		}
 
-		content.WriteString(fmt.Sprintf("#EXTINF:-1 channelID=\"x-ID.%s\" tvg-chno=\"%s\" tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n",
-			stream.TvgID, stream.TvgChNo, stream.TvgID, stream.Title, stream.LogoURL, stream.Group, stream.Title))
+		extInfTags := []string{
+			"#EXTINF:-1",
+		}
 
+		if len(stream.TvgID) > 0 {
+			extInfTags = append(extInfTags, fmt.Sprintf("tvg-id=\"%s\"", stream.TvgID))
+		}
+
+		if len(stream.TvgChNo) > 0 {
+			extInfTags = append(extInfTags, fmt.Sprintf("tvg-chno=\"%s\"", stream.TvgChNo))
+		}
+
+		if len(stream.LogoURL) > 0 {
+			extInfTags = append(extInfTags, fmt.Sprintf("tvg-logo=\"%s\"", stream.LogoURL))
+		}
+
+		extInfTags = append(extInfTags, fmt.Sprintf("tvg-name=\"%s\"", stream.Title))
+		extInfTags = append(extInfTags, fmt.Sprintf("group-title=\"%s\"", stream.Group))
+
+		content.WriteString(fmt.Sprintf("%s,%s\n", strings.Join(extInfTags, " "), stream.Title))
 		content.WriteString(GenerateStreamURL(baseUrl, stream.Slug, stream.URLs[0]))
 	}
 
