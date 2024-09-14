@@ -123,16 +123,6 @@ func (instance *Parser) ParseURL(m3uURL string, m3uIndex int) error {
 	}
 
 	var buffer bytes.Buffer
-	var grps []string
-
-	includeGroups := os.Getenv(fmt.Sprintf("INCLUDE_GROUPS_%d", m3uIndex+1))
-	if includeGroups != "" {
-		grps = strings.Split(includeGroups, ",")
-		if debug {
-			utils.SafeLogf("[DEBUG] Include groups: %v\n", grps)
-		}
-	}
-
 	for i := 0; i <= maxRetries; i++ {
 		if debug {
 			utils.SafeLogf("[DEBUG] Attempt %d to download M3U\n", i+1)
@@ -204,7 +194,7 @@ func (instance *Parser) ParseURL(m3uURL string, m3uIndex int) error {
 				utils.SafeLogf("[DEBUG] Scanning line: %s\n", line)
 			}
 
-			if strings.HasPrefix(line, "#EXTINF:") && checkIncludeGroup(grps, line) {
+			if strings.HasPrefix(line, "#EXTINF:") {
 				if scanner.Scan() {
 					nextLine := scanner.Text()
 
@@ -213,8 +203,15 @@ func (instance *Parser) ParseURL(m3uURL string, m3uIndex int) error {
 					}
 
 					streamInfo := parseLine(line, nextLine, m3uIndex)
-					utils.SafeLogf("Stream Info: %v\n", streamInfo)
-					streamInfoCh <- streamInfo
+
+					if checkFilter(streamInfo) {
+						utils.SafeLogf("Stream Info: %v\n", streamInfo)
+						streamInfoCh <- streamInfo
+					} else {
+						if debug {
+							utils.SafeLogf("[DEBUG] Skipping due to filter: %s\n", streamInfo.Title)
+						}
+					}
 				}
 			}
 		}
