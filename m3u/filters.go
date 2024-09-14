@@ -6,26 +6,37 @@ import (
 	"regexp"
 )
 
+var includeFilters [][]string
+var excludeFilters [][]string
+var filtersInitialized bool
+
 func checkFilter(stream database.StreamInfo) bool {
-	excludeTitleFilters := utils.GetFilters("EXCLUDE_TITLE")
-	includeTitleFilters := utils.GetFilters("INCLUDE_TITLE")
-	excludeGroupFilters := utils.GetFilters("EXCLUDE_GROUPS")
-	includeGroupFilters := utils.GetFilters("INCLUDE_GROUPS")
+	if !filtersInitialized {
+		excludeFilters = [][]string{
+			utils.GetFilters("EXCLUDE_GROUPS"),
+			utils.GetFilters("EXCLUDE_TITLE"),
+		}
+		includeFilters = [][]string{
+			utils.GetFilters("INCLUDE_GROUPS"),
+			utils.GetFilters("INCLUDE_TITLE"),
+		}
+		filtersInitialized = true
+	}
 
-	if allFiltersEmpty(excludeTitleFilters, includeTitleFilters, excludeGroupFilters, includeGroupFilters) {
+	if allFiltersEmpty(append(excludeFilters, includeFilters...)...) {
 		return true
 	}
 
-	if matchAny(includeGroupFilters, stream.Group) || matchAny(includeTitleFilters, stream.Title) {
+	if matchAny(includeFilters[0], stream.Group) || matchAny(includeFilters[1], stream.Title) {
 		return true
 	}
 
-	if matchAny(excludeGroupFilters, stream.Group) || matchAny(excludeTitleFilters, stream.Title) {
+	if matchAny(excludeFilters[0], stream.Group) || matchAny(excludeFilters[1], stream.Title) {
 		return false
 	}
 
 	// If there are only include filters and none matched, return false
-	return len(includeGroupFilters) == 0 && len(includeTitleFilters) == 0
+	return len(includeFilters[0]) == 0 && len(includeFilters[1]) == 0
 }
 
 func allFiltersEmpty(filters ...[]string) bool {
