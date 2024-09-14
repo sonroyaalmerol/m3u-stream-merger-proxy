@@ -32,7 +32,8 @@ FROM alpine:latest
 # hadolint ignore=DL3018
 RUN apk --no-cache add tzdata \
   ca-certificates \
-  && update-ca-certificates
+  && update-ca-certificates \
+  && su-exec
 
 # set the current workdir
 WORKDIR /m3u-proxy

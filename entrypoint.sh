@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # Add a group with the specified PGID if it doesn't already exist
 if ! getent group appgroup > /dev/null 2>&1; then
