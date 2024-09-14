@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -34,4 +35,20 @@ func GetM3UIndexes() []int {
 		}
 	}
 	return m3uIndexes
+}
+
+func GetFilters(baseEnv string) []string {
+	filters := []string{}
+	for _, env := range os.Environ() {
+		pair := strings.SplitN(env, "=", 2)
+		if strings.HasPrefix(pair[0], baseEnv) {
+			indexString := strings.TrimPrefix(pair[0], fmt.Sprintf("%s_", baseEnv))
+			_, err := strconv.Atoi(indexString)
+			if err != nil {
+				continue
+			}
+			filters = append(filters, pair[1])
+		}
+	}
+	return filters
 }

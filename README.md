@@ -104,7 +104,10 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | ~~LOAD_BALANCING_MODE~~ (removed on version 0.10.0)                | Set load balancing algorithm to a specific mode | brute-force    | brute-force/round-robin   |
 | PARSER_WORKERS | Set number of workers to spawn for M3U parsing. | 5 | Any positive integer |
 | BUFFER_MB | Set buffer size in mb. | 0 (no buffer) | Any positive integer |
-| INCLUDE_GROUPS_1, INCLUDE_GROUPS_2, INCLUDE_GROUPS_X    | Set channel groups to include | all    | Comma-separated values   |
+| INCLUDE_GROUPS_1, INCLUDE_GROUPS_2, INCLUDE_GROUPS_X    | Set channels to include based on groups (Takes precedence over EXCLUDE_GROUPS_X) | N/A | Go regexp |
+| EXCLUDE_GROUPS_1, EXCLUDE_GROUPS_2, EXCLUDE_GROUPS_X    | Set channels to exclude based on groups | N/A | Go regexp |
+| INCLUDE_TITLE_1, INCLUDE_TITLE_2, INCLUDE_TITLE_X    | Set channels to include based on title (Takes precedence over EXCLUDE_TITLE_X) | N/A | Go regexp |
+| EXCLUDE_TITLE_1, EXCLUDE_TITLE_2, EXCLUDE_TITLE_X    | Set channels to exclude based on title | N/A | Go regexp |
 | TITLE_SUBSTR_FILTER | Sets a regex pattern used to exclude substrings from channel titles | none    | Go regexp   |
 | BASE_URL | Sets the base URL for the stream URls in the M3U file to be generated. | http/s://<request_hostname> (e.g. <http://192.168.1.10:8080>)    | Any string that follows the URL format  |
 | TZ                          | Set timezone                                           | Etc/UTC     | [TZ Identifiers](https://nodatime.org/TimeZones) |
