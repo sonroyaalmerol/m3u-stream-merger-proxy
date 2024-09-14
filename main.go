@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/m3u"
 	"m3u-stream-merger/proxy"
@@ -52,6 +53,13 @@ func main() {
 	http.HandleFunc("/stream/", func(w http.ResponseWriter, r *http.Request) {
 		proxy.Handler(w, r)
 	})
+
+	customPaths := utils.GetCustomPaths()
+	for path := range customPaths {
+		http.HandleFunc(fmt.Sprintf("/%s/", path), func(w http.ResponseWriter, r *http.Request) {
+			proxy.Handler(w, r)
+		})
+	}
 
 	// Start the server
 	utils.SafeLogln("Server is running on port 8080...")

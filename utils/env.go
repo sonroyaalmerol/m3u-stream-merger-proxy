@@ -21,8 +21,14 @@ func GetEnv(env string) string {
 	}
 }
 
+var m3uIndexes []int
+var m3uIndexesInitialized bool
+
 func GetM3UIndexes() []int {
-	m3uIndexes := []int{}
+	if m3uIndexesInitialized {
+		return m3uIndexes
+	}
+	m3uIndexes = []int{}
 	for _, env := range os.Environ() {
 		pair := strings.SplitN(env, "=", 2)
 		if strings.HasPrefix(pair[0], "M3U_URL_") {
@@ -34,11 +40,18 @@ func GetM3UIndexes() []int {
 			m3uIndexes = append(m3uIndexes, index-1)
 		}
 	}
+	m3uIndexesInitialized = true
 	return m3uIndexes
 }
 
+var filters []string
+var filtersInitialized bool
+
 func GetFilters(baseEnv string) []string {
-	filters := []string{}
+	if filtersInitialized {
+		return filters
+	}
+	filters = []string{}
 	for _, env := range os.Environ() {
 		pair := strings.SplitN(env, "=", 2)
 		if strings.HasPrefix(pair[0], baseEnv) {
@@ -50,5 +63,25 @@ func GetFilters(baseEnv string) []string {
 			filters = append(filters, pair[1])
 		}
 	}
+	filtersInitialized = true
 	return filters
+}
+
+var customPaths map[string]string
+var customPathsInitialized bool
+
+func GetCustomPaths() map[string]string {
+	if customPathsInitialized {
+		return customPaths
+	}
+	customPaths = map[string]string{}
+	for _, env := range os.Environ() {
+		pair := strings.SplitN(env, "=", 2)
+		if strings.HasPrefix(pair[0], "CUSTOM_PATH_") {
+			path := strings.TrimPrefix(pair[0], "CUSTOM_PATH_")
+			customPaths[path] = pair[1]
+		}
+	}
+	customPathsInitialized = true
+	return customPaths
 }
