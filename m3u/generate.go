@@ -20,7 +20,7 @@ type Cache struct {
 
 var M3uCache = &Cache{}
 
-const cacheFilePath = "/cache.m3u"
+const cacheFilePath = "/m3u-proxy/cache.m3u"
 
 func InitCache(db *database.Instance) {
 	debug := isDebugMode()
