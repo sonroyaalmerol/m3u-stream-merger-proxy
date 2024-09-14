@@ -60,6 +60,8 @@ services:
     ports:
       - "8080:8080"
     environment:
+      - PUID=1000
+      - PGID=1000
       - TZ=America/Toronto
       - REDIS_ADDR=redis:6379
       - SYNC_ON_BOOT=true
@@ -92,6 +94,8 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 
 | ENV VAR                     | Description                                              | Default Value | Possible Values                                |
 |-----------------------------|----------------------------------------------------------|---------------|------------------------------------------------|
+| PUID | Set UID of user running the container.                  |   1000 |   Any valid UID |
+| PGID | Set GID of user running the container.                  |   1000 |   Any valid GID |
 | M3U_URL_1, M3U_URL_2, M3U_URL_X | Set M3U URLs as environment variables.                  |   N/A            |   Any valid M3U URLs                                             |
 | M3U_MAX_CONCURRENCY_1, M3U_MAX_CONCURRENCY_2, M3U_MAX_CONCURRENCY_X | Set max concurrency.                                 |  1             |   Any integer                                             |
 | MAX_RETRIES | Set max number of retries (loop) across all M3Us while streaming. 0 to never stop retrying (beware of throttling from provider). | 5 | Any integer greater than or equal 0 |

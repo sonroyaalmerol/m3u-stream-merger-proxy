@@ -22,7 +22,7 @@ RUN \
     redis-server --daemonize yes && \
     go test ./...; \
   fi && \
-  go build -ldflags='-s -w' -o main .
+  go build -ldflags='-s -w' -o m3u-proxy .
 
 # End from the latest alpine image
 # hadolint ignore=DL3007
@@ -35,10 +35,20 @@ RUN apk --no-cache add tzdata \
   && update-ca-certificates
 
 # set the current workdir
-WORKDIR /app
+WORKDIR /m3u-proxy
 
 # copy in our compiled GO app
-COPY --from=build /app/main /app/
+COPY --from=build /app/m3u-proxy /m3u-proxy/
 
-# the containers entrypoint
-ENTRYPOINT [ "/app/main" ]
+# Copy the entrypoint script
+COPY entrypoint.sh /m3u-proxy/entrypoint.sh
+
+# Make the entrypoint script executable
+RUN chmod +x /m3u-proxy/entrypoint.sh
+
+# Set PUID and PGID as environment variables
+ENV PUID=1000
+ENV PGID=1000
+
+# The container entrypoint
+ENTRYPOINT ["/m3u-proxy/entrypoint.sh"]
