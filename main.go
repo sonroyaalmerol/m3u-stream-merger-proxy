@@ -54,8 +54,15 @@ func main() {
 		proxy.Handler(w, r)
 	})
 
-	customPaths := utils.GetCustomPaths()
-	for path := range customPaths {
+	customPathsByGroup := utils.GetCustomPathsByGroup()
+	for path := range customPathsByGroup {
+		http.HandleFunc(fmt.Sprintf("/%s/", path), func(w http.ResponseWriter, r *http.Request) {
+			proxy.Handler(w, r)
+		})
+	}
+
+	customPathsByTitle := utils.GetCustomPathsByTitle()
+	for path := range customPathsByTitle {
 		http.HandleFunc(fmt.Sprintf("/%s/", path), func(w http.ResponseWriter, r *http.Request) {
 			proxy.Handler(w, r)
 		})
@@ -65,6 +72,12 @@ func main() {
 	utils.SafeLogln("Server is running on port 8080...")
 	utils.SafeLogln("Playlist Endpoint is running (`/playlist.m3u`)")
 	utils.SafeLogln("Stream Endpoint is running (`/stream/{streamID}.{fileExt}`)")
+	for path := range customPathsByGroup {
+		utils.SafeLogf("Stream Endpoint is running (`/%s/{streamID}.{fileExt}`)\n", path)
+	}
+	for path := range customPathsByTitle {
+		utils.SafeLogf("Stream Endpoint is running (`/%s/{streamID}.{fileExt}`)\n", path)
+	}
 	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
 		utils.SafeLogFatalf("HTTP server error: %v", err)

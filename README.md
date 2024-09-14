@@ -96,6 +96,7 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 |-----------------------------|----------------------------------------------------------|---------------|------------------------------------------------|
 | PUID | Set UID of user running the container.                  |   1000 |   Any valid UID |
 | PGID | Set GID of user running the container.                  |   1000 |   Any valid GID |
+| TZ                          | Set timezone                                           | Etc/UTC     | [TZ Identifiers](https://nodatime.org/TimeZones) |
 | M3U_URL_1, M3U_URL_2, M3U_URL_X | Set M3U URLs as environment variables.                  |   N/A            |   Any valid M3U URLs                                             |
 | M3U_MAX_CONCURRENCY_1, M3U_MAX_CONCURRENCY_2, M3U_MAX_CONCURRENCY_X | Set max concurrency.                                 |  1             |   Any integer                                             |
 | MAX_RETRIES | Set max number of retries (loop) across all M3Us while streaming. 0 to never stop retrying (beware of throttling from provider). | 5 | Any integer greater than or equal 0 |
@@ -114,7 +115,8 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | EXCLUDE_TITLE_1, EXCLUDE_TITLE_2, EXCLUDE_TITLE_X    | Set channels to exclude based on title | N/A | Go regexp |
 | TITLE_SUBSTR_FILTER | Sets a regex pattern used to exclude substrings from channel titles | none    | Go regexp   |
 | BASE_URL | Sets the base URL for the stream URls in the M3U file to be generated. | http/s://<request_hostname> (e.g. <http://192.168.1.10:8080>)    | Any string that follows the URL format  |
-| TZ                          | Set timezone                                           | Etc/UTC     | [TZ Identifiers](https://nodatime.org/TimeZones) |
+| CUSTOM_PATH_GROUP_<subpath> | Sets a custom base path based on a regex pattern validated on the stream's group string. For example, `CUSTOM_PATH_GROUP_MOVIES="movies"` will force the path for all streams with `tvg-group="movies"` to be served at path `/movies/<stream-slug>`. (Takes precedence over `CUSTOM_PATH_TITLE_<subpath>`) | N/A (subpath is "stream" by default)    | Go regexp  |
+| CUSTOM_PATH_TITLE_<subpath> | Sets a custom base path based on a regex pattern validated on the stream's title string. For example, `CUSTOM_PATH_TITLE_MOVIES="VOD"` will force the path for all streams that has a title that contains "VOD" to be served at path `/movies/<stream-slug>`. | N/A (subpath is "stream" by default)    | Go regexp  |
 | SYNC_CRON                   | Set cron schedule expression of the background updates. | 0 0 * * *   |  Any valid cron expression    |
 | SYNC_ON_BOOT                | Set if an initial background syncing will be executed on boot | true    | true/false   |
 | CACHE_ON_SYNC               | Set if an initial background cache building will be executed after sync. Requires BASE_URL to be set. | false | true/false   |

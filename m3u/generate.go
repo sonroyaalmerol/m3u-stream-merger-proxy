@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -55,12 +56,28 @@ func getFileExtensionFromUrl(rawUrl string) (string, error) {
 	return path.Ext(u.Path), nil
 }
 
-func GenerateStreamURL(baseUrl string, slug string, sampleUrl string) string {
-	ext, err := getFileExtensionFromUrl(sampleUrl)
-	if err != nil {
-		return fmt.Sprintf("%s/%s\n", baseUrl, slug)
+func GenerateStreamURL(baseUrl string, stream database.StreamInfo) string {
+	subPath := "stream"
+
+	for path, pattern := range utils.GetCustomPathsByTitle() {
+		if matched, _ := regexp.MatchString(pattern, stream.Title); matched {
+			subPath = path
+			break
+		}
 	}
-	return fmt.Sprintf("%s/%s%s\n", baseUrl, slug, ext)
+
+	for path, pattern := range utils.GetCustomPathsByGroup() {
+		if matched, _ := regexp.MatchString(pattern, stream.Group); matched {
+			subPath = path
+			break
+		}
+	}
+
+	ext, err := getFileExtensionFromUrl(stream.URLs[0])
+	if err != nil {
+		return fmt.Sprintf("%s/%s/%s\n", baseUrl, subPath, stream.Slug)
+	}
+	return fmt.Sprintf("%s/%s/%s%s\n", baseUrl, subPath, stream.Slug, ext)
 }
 
 func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
@@ -109,7 +126,7 @@ func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
 		extInfTags = append(extInfTags, fmt.Sprintf("group-title=\"%s\"", stream.Group))
 
 		content.WriteString(fmt.Sprintf("%s,%s\n", strings.Join(extInfTags, " "), stream.Title))
-		content.WriteString(GenerateStreamURL(baseUrl, stream.Slug, stream.URLs[0]))
+		content.WriteString(GenerateStreamURL(baseUrl, stream))
 	}
 
 	if debug {

@@ -67,21 +67,40 @@ func GetFilters(baseEnv string) []string {
 	return filters
 }
 
-var customPaths map[string]string
-var customPathsInitialized bool
+var customPathsByTitle map[string]string
+var customPathsByTitleInitialized bool
 
-func GetCustomPaths() map[string]string {
-	if customPathsInitialized {
-		return customPaths
+func GetCustomPathsByTitle() map[string]string {
+	if customPathsByTitleInitialized {
+		return customPathsByTitle
 	}
-	customPaths = map[string]string{}
+	customPathsByTitle = map[string]string{}
 	for _, env := range os.Environ() {
 		pair := strings.SplitN(env, "=", 2)
-		if strings.HasPrefix(pair[0], "CUSTOM_PATH_") {
-			path := strings.TrimPrefix(pair[0], "CUSTOM_PATH_")
-			customPaths[path] = pair[1]
+		if strings.HasPrefix(pair[0], "CUSTOM_PATH_TITLE_") {
+			path := strings.ToLower(strings.TrimPrefix(pair[0], "CUSTOM_PATH_TITLE_"))
+			customPathsByTitle[path] = pair[1]
 		}
 	}
-	customPathsInitialized = true
-	return customPaths
+	customPathsByTitleInitialized = true
+	return customPathsByTitle
+}
+
+var customPathsByGroup map[string]string
+var customPathsByGroupInitialized bool
+
+func GetCustomPathsByGroup() map[string]string {
+	if customPathsByGroupInitialized {
+		return customPathsByGroup
+	}
+	customPathsByGroup = map[string]string{}
+	for _, env := range os.Environ() {
+		pair := strings.SplitN(env, "=", 2)
+		if strings.HasPrefix(pair[0], "CUSTOM_PATH_GROUP_") {
+			path := strings.ToLower(strings.TrimPrefix(pair[0], "CUSTOM_PATH_GROUP_"))
+			customPathsByGroup[path] = pair[1]
+		}
+	}
+	customPathsByGroupInitialized = true
+	return customPathsByGroup
 }

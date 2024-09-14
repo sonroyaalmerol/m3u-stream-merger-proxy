@@ -69,7 +69,7 @@ func TestGenerateM3UContent(t *testing.T) {
 	// Check the generated M3U content
 	expectedContent := fmt.Sprintf(`#EXTM3U
 #EXTINF:-1 tvg-id="1" tvg-logo="http://example.com/logo.png" tvg-name="TestStream" group-title="TestGroup",TestStream
-%s`, GenerateStreamURL("http:///stream", "test-stream", stream.URLs[0]))
+%s`, GenerateStreamURL("http:///stream", stream))
 	if rr.Body.String() != expectedContent {
 		t.Errorf("handler returned unexpected body: got %v want %v",
 			rr.Body.String(), expectedContent)
