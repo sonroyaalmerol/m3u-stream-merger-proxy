@@ -74,25 +74,20 @@ func getSubPathFromUrl(rawUrl string) (string, error) {
 func GenerateStreamURL(baseUrl string, stream database.StreamInfo) string {
 	var subPath string
 	var err error
-	urlIndex := 0
-	for {
-		if urlIndex >= len(stream.URLs) {
-			subPath = "stream"
-			urlIndex = 0
-		} else {
-			subPath, err = getSubPathFromUrl(stream.URLs[urlIndex])
-			if err != nil {
-				urlIndex += 1
-				continue
-			}
+	for _, srcUrl := range stream.URLs {
+		subPath, err = getSubPathFromUrl(srcUrl)
+		if err != nil {
+			continue
 		}
 
-		ext, err := getFileExtensionFromUrl(stream.URLs[urlIndex])
+		ext, err := getFileExtensionFromUrl(srcUrl)
 		if err != nil {
 			return fmt.Sprintf("%s/proxy/%s/%s\n", baseUrl, subPath, stream.Slug)
 		}
+
 		return fmt.Sprintf("%s/proxy/%s/%s%s\n", baseUrl, subPath, stream.Slug, ext)
 	}
+	return fmt.Sprintf("%s/proxy/stream/%s\n", baseUrl, stream.Slug)
 }
 
 func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
