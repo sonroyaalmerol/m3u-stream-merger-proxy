@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"slices"
 	"sort"
 	"strconv"
@@ -286,7 +287,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	utils.SafeLogf("Received request from %s for URL: %s\n", r.RemoteAddr, r.URL.Path)
 
-	streamUrl := strings.Split(strings.TrimPrefix(r.URL.Path, "/stream/"), ".")[0]
+	streamUrl := strings.Split(path.Base(r.URL.Path), ".")[0]
 	if streamUrl == "" {
 		utils.SafeLogf("Invalid m3uID for request from %s: %s\n", r.RemoteAddr, r.URL.Path)
 		http.NotFound(w, r)

@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"path"
-	"regexp"
 	"strings"
 	"sync"
 )
@@ -56,28 +55,44 @@ func getFileExtensionFromUrl(rawUrl string) (string, error) {
 	return path.Ext(u.Path), nil
 }
 
-func GenerateStreamURL(baseUrl string, stream database.StreamInfo) string {
-	subPath := "stream"
-
-	for path, pattern := range utils.GetCustomPathsByTitle() {
-		if matched, _ := regexp.MatchString(pattern, stream.Title); matched {
-			subPath = path
-			break
-		}
-	}
-
-	for path, pattern := range utils.GetCustomPathsByGroup() {
-		if matched, _ := regexp.MatchString(pattern, stream.Group); matched {
-			subPath = path
-			break
-		}
-	}
-
-	ext, err := getFileExtensionFromUrl(stream.URLs[0])
+func getSubPathFromUrl(rawUrl string) (string, error) {
+	parsedURL, err := url.Parse(rawUrl)
 	if err != nil {
-		return fmt.Sprintf("%s/%s/%s\n", baseUrl, subPath, stream.Slug)
+		return "", err
 	}
-	return fmt.Sprintf("%s/%s/%s%s\n", baseUrl, subPath, stream.Slug, ext)
+
+	pathSegments := strings.Split(parsedURL.Path, "/")
+
+	if len(pathSegments) <= 1 {
+		return "stream", nil
+	}
+
+	basePath := strings.Join(pathSegments[1:len(pathSegments)-1], "/")
+	return basePath, nil
+}
+
+func GenerateStreamURL(baseUrl string, stream database.StreamInfo) string {
+	var subPath string
+	var err error
+	urlIndex := 0
+	for {
+		if urlIndex >= len(stream.URLs) {
+			subPath = "stream"
+			urlIndex = 0
+		} else {
+			subPath, err = getSubPathFromUrl(stream.URLs[urlIndex])
+			if err != nil {
+				urlIndex += 1
+				continue
+			}
+		}
+
+		ext, err := getFileExtensionFromUrl(stream.URLs[urlIndex])
+		if err != nil {
+			return fmt.Sprintf("%s/proxy/%s/%s\n", baseUrl, subPath, stream.Slug)
+		}
+		return fmt.Sprintf("%s/proxy/%s/%s%s\n", baseUrl, subPath, stream.Slug, ext)
+	}
 }
 
 func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {

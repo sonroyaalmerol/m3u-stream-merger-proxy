@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/m3u"
 	"m3u-stream-merger/proxy"
@@ -50,34 +49,14 @@ func main() {
 	http.HandleFunc("/playlist.m3u", func(w http.ResponseWriter, r *http.Request) {
 		m3u.Handler(w, r)
 	})
-	http.HandleFunc("/stream/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/proxy/", func(w http.ResponseWriter, r *http.Request) {
 		proxy.Handler(w, r)
 	})
-
-	customPathsByGroup := utils.GetCustomPathsByGroup()
-	for path := range customPathsByGroup {
-		http.HandleFunc(fmt.Sprintf("/%s/", path), func(w http.ResponseWriter, r *http.Request) {
-			proxy.Handler(w, r)
-		})
-	}
-
-	customPathsByTitle := utils.GetCustomPathsByTitle()
-	for path := range customPathsByTitle {
-		http.HandleFunc(fmt.Sprintf("/%s/", path), func(w http.ResponseWriter, r *http.Request) {
-			proxy.Handler(w, r)
-		})
-	}
 
 	// Start the server
 	utils.SafeLogln("Server is running on port 8080...")
 	utils.SafeLogln("Playlist Endpoint is running (`/playlist.m3u`)")
-	utils.SafeLogln("Stream Endpoint is running (`/stream/{streamID}.{fileExt}`)")
-	for path := range customPathsByGroup {
-		utils.SafeLogf("Stream Endpoint is running (`/%s/{streamID}.{fileExt}`)\n", path)
-	}
-	for path := range customPathsByTitle {
-		utils.SafeLogf("Stream Endpoint is running (`/%s/{streamID}.{fileExt}`)\n", path)
-	}
+	utils.SafeLogln("Stream Endpoint is running (`/proxy/{originalBasePath}/{streamID}.{fileExt}`)")
 	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
 		utils.SafeLogFatalf("HTTP server error: %v", err)
