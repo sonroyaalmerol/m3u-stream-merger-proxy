@@ -197,6 +197,9 @@ func (instance *Parser) ParseURL(m3uURL string, m3uIndex int) error {
 			if strings.HasPrefix(line, "#EXTINF:") {
 				if scanner.Scan() {
 					nextLine := scanner.Text()
+					for strings.HasPrefix(nextLine, "#") {
+						nextLine = scanner.Text()
+					}
 
 					if debug {
 						utils.SafeLogf("[DEBUG] Found next line for EXTINF: %s\n", nextLine)
