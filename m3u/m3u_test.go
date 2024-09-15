@@ -80,10 +80,13 @@ func TestParseM3UFromURL(t *testing.T) {
 	testM3UContent := `
 #EXTM3U
 #EXTINF:-1 channelID="x-ID.bcc1" tvg-chno="0.0" tvg-id="bbc1" tvg-name="BBC One" group-title="UK",BBC One
+#EXTVLCOPT:http-user-agent=HbbTV/1.6.1
 http://example.com/bbc1
 #EXTINF:-1 channelID="x-ID.bcc2" tvg-chno="0.0" tvg-id="bbc2" tvg-name="BBC Two" group-title="UK",BBC Two
+#EXTVLCOPT:http-user-agent=HbbTV/1.6.1
 http://example.com/bbc2
 #EXTINF:-1 channelID="x-ID.cnn" tvg-chno="0.0" tvg-id="cnn" tvg-name="CNN International" group-title="News",CNN International
+#EXTVLCOPT:http-user-agent=HbbTV/1.6.1
 http://example.com/cnn
 #EXTVLCOPT:logo=http://example.com/bbc_logo.png
 #EXTINF:-1 channelID="x-ID.fox" tvg-chno="0.0" tvg-name="FOX" group-title="Entertainment",FOX
