@@ -198,7 +198,11 @@ func (instance *Parser) ParseURL(m3uURL string, m3uIndex int) error {
 				if scanner.Scan() {
 					nextLine := scanner.Text()
 					for strings.HasPrefix(nextLine, "#") {
-						nextLine = scanner.Text()
+						if scanner.Scan() {
+							nextLine = scanner.Text()
+						} else {
+							break
+						}
 					}
 
 					if debug {
