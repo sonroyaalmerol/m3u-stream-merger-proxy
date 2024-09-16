@@ -30,14 +30,14 @@ func CustomHttpRequest(method string, url string) (*http.Response, error) {
 
 func DetermineBaseURL(r *http.Request) string {
 	if customBase, ok := os.LookupEnv("BASE_URL"); ok {
-		return fmt.Sprintf("%s/stream", strings.TrimSuffix(customBase, "/"))
+		return strings.TrimSuffix(customBase, "/")
 	}
 
 	if r != nil {
 		if r.TLS == nil {
-			return fmt.Sprintf("http://%s/stream", r.Host)
+			return fmt.Sprintf("http://%s", r.Host)
 		} else {
-			return fmt.Sprintf("https://%s/stream", r.Host)
+			return fmt.Sprintf("https://%s", r.Host)
 		}
 	}
 

@@ -55,12 +55,39 @@ func getFileExtensionFromUrl(rawUrl string) (string, error) {
 	return path.Ext(u.Path), nil
 }
 
-func GenerateStreamURL(baseUrl string, slug string, sampleUrl string) string {
-	ext, err := getFileExtensionFromUrl(sampleUrl)
+func getSubPathFromUrl(rawUrl string) (string, error) {
+	parsedURL, err := url.Parse(rawUrl)
 	if err != nil {
-		return fmt.Sprintf("%s/%s\n", baseUrl, slug)
+		return "", err
 	}
-	return fmt.Sprintf("%s/%s%s\n", baseUrl, slug, ext)
+
+	pathSegments := strings.Split(parsedURL.Path, "/")
+
+	if len(pathSegments) <= 1 {
+		return "stream", nil
+	}
+
+	basePath := strings.Join(pathSegments[1:len(pathSegments)-1], "/")
+	return basePath, nil
+}
+
+func GenerateStreamURL(baseUrl string, stream database.StreamInfo) string {
+	var subPath string
+	var err error
+	for _, srcUrl := range stream.URLs {
+		subPath, err = getSubPathFromUrl(srcUrl)
+		if err != nil {
+			continue
+		}
+
+		ext, err := getFileExtensionFromUrl(srcUrl)
+		if err != nil {
+			return fmt.Sprintf("%s/proxy/%s/%s\n", baseUrl, subPath, stream.Slug)
+		}
+
+		return fmt.Sprintf("%s/proxy/%s/%s%s\n", baseUrl, subPath, stream.Slug, ext)
+	}
+	return fmt.Sprintf("%s/proxy/stream/%s\n", baseUrl, stream.Slug)
 }
 
 func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
@@ -109,7 +136,7 @@ func GenerateAndCacheM3UContent(db *database.Instance, r *http.Request) string {
 		extInfTags = append(extInfTags, fmt.Sprintf("group-title=\"%s\"", stream.Group))
 
 		content.WriteString(fmt.Sprintf("%s,%s\n", strings.Join(extInfTags, " "), stream.Title))
-		content.WriteString(GenerateStreamURL(baseUrl, stream.Slug, stream.URLs[0]))
+		content.WriteString(GenerateStreamURL(baseUrl, stream))
 	}
 
 	if debug {

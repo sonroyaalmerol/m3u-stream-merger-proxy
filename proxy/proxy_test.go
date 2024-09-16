@@ -62,7 +62,7 @@ func TestStreamHandler(t *testing.T) {
 
 	for _, stream := range streams {
 		log.Printf("Stream (%s): %v", stream.Title, stream)
-		genStreamUrl := strings.TrimSpace(m3u.GenerateStreamURL("", stream.Slug, stream.URLs[0]))
+		genStreamUrl := strings.TrimSpace(m3u.GenerateStreamURL("", stream))
 
 		req := httptest.NewRequest("GET", genStreamUrl, nil)
 		w := httptest.NewRecorder()

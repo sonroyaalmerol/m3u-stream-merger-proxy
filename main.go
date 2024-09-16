@@ -49,14 +49,14 @@ func main() {
 	http.HandleFunc("/playlist.m3u", func(w http.ResponseWriter, r *http.Request) {
 		m3u.Handler(w, r)
 	})
-	http.HandleFunc("/stream/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/proxy/", func(w http.ResponseWriter, r *http.Request) {
 		proxy.Handler(w, r)
 	})
 
 	// Start the server
 	utils.SafeLogln("Server is running on port 8080...")
 	utils.SafeLogln("Playlist Endpoint is running (`/playlist.m3u`)")
-	utils.SafeLogln("Stream Endpoint is running (`/stream/{streamID}.{fileExt}`)")
+	utils.SafeLogln("Stream Endpoint is running (`/proxy/{originalBasePath}/{streamID}.{fileExt}`)")
 	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
 		utils.SafeLogFatalf("HTTP server error: %v", err)
