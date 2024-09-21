@@ -135,7 +135,7 @@ func (instance *Parser) ParseURL(m3uURL string, m3uIndex int) error {
 	var buffer bytes.Buffer
 	for i := 0; i <= maxRetries; i++ {
 		if i > 0 && retryWait > 0 {
-			utils.SafeLogf("Retrying in %d secs... (error: %v)\n", retryWait, err)
+			utils.SafeLogf("Retrying in %d secs...\n", retryWait)
 			time.Sleep(time.Duration(retryWait) * time.Second)
 		}
 
