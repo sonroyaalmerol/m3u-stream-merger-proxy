@@ -109,6 +109,8 @@ func (instance *Parser) ParseURL(m3uURL string, m3uIndex int) error {
 	debug := os.Getenv("DEBUG") == "true"
 
 	maxRetries := 10
+	retryWait := 0
+
 	var err error
 	maxRetriesStr, maxRetriesExists := os.LookupEnv("MAX_RETRIES")
 	if maxRetriesExists {
@@ -118,19 +120,31 @@ func (instance *Parser) ParseURL(m3uURL string, m3uIndex int) error {
 		}
 	}
 
+	retryWaitStr, retryWaitExists := os.LookupEnv("RETRY_WAIT")
+	if retryWaitExists {
+		retryWait, err = strconv.Atoi(retryWaitStr)
+		if err != nil {
+			retryWait = 0
+		}
+	}
+
 	if debug {
 		utils.SafeLogf("[DEBUG] Max retries set to %d\n", maxRetries)
 	}
 
 	var buffer bytes.Buffer
 	for i := 0; i <= maxRetries; i++ {
+		if i > 0 && retryWait > 0 {
+			utils.SafeLogf("Retrying in %d secs... (error: %v)\n", retryWait, err)
+			time.Sleep(time.Duration(retryWait) * time.Second)
+		}
+
 		if debug {
 			utils.SafeLogf("[DEBUG] Attempt %d to download M3U\n", i+1)
 		}
 		err := downloadM3UToBuffer(m3uURL, &buffer)
 		if err != nil {
-			utils.SafeLogf("downloadM3UToBuffer error. Retrying in 5 secs... (error: %v)\n", err)
-			time.Sleep(5 * time.Second)
+			utils.SafeLogf("downloadM3UToBuffer error: %v\n", err)
 			continue
 		}
 
