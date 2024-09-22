@@ -100,6 +100,7 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | M3U_URL_1, M3U_URL_2, M3U_URL_X | Set M3U URLs as environment variables.                  |   N/A            |   Any valid M3U URLs                                             |
 | M3U_MAX_CONCURRENCY_1, M3U_MAX_CONCURRENCY_2, M3U_MAX_CONCURRENCY_X | Set max concurrency.                                 |  1             |   Any integer                                             |
 | MAX_RETRIES | Set max number of retries (loop) across all M3Us while streaming. 0 to never stop retrying (beware of throttling from provider). | 5 | Any integer greater than or equal 0 |
+| RETRY_WAIT | Set a wait time before retrying (looping) across all M3Us on stream initialization error. | 0 | Any integer greater than or equal 0 |
 | STREAM_TIMEOUT | Set timeout duration in seconds of retrying on error before a stream is considered down. | 3 | Any positive integer greater than 0 |
 | REDIS_ADDR | Set Redis server address | N/A | e.g. localhost:6379 |
 | REDIS_PASS | Set Redis server password | N/A | Any string |
