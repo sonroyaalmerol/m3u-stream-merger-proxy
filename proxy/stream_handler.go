@@ -304,6 +304,8 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}()
+			go stream.StreamBuffer(ctx, w)
+
 			stream.Buffer.testedIndexes = append(stream.Buffer.testedIndexes, selectedIndex)
 
 			streamExitCode := <-exitStatus
