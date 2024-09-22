@@ -192,9 +192,7 @@ func (instance *StreamInstance) StreamBuffer(ctx context.Context, w http.Respons
 		default:
 			bufferSize := 1024
 			bufferMbInt, err := strconv.Atoi(os.Getenv("BUFFER_MB"))
-			if err != nil || bufferMbInt < 0 {
-				bufferMbInt = 0
-			} else {
+			if err == nil && bufferMbInt > 0 {
 				bufferSize = bufferMbInt * 1024 * 1024
 			}
 
