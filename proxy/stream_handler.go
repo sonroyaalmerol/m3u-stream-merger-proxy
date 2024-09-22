@@ -3,7 +3,6 @@ package proxy
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/utils"
@@ -11,8 +10,6 @@ import (
 	"net/url"
 	"os"
 	"path"
-	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +18,7 @@ import (
 type StreamInstance struct {
 	Database *database.Instance
 	Info     database.StreamInfo
+	Buffer   *Buffer
 }
 
 func InitializeStream(streamUrl string) (*StreamInstance, error) {
@@ -28,6 +26,16 @@ func InitializeStream(streamUrl string) (*StreamInstance, error) {
 	if err != nil {
 		utils.SafeLogf("Error initializing Redis database: %v", err)
 		return nil, err
+	}
+
+	if globalBuffers == nil {
+		globalBuffers = make(map[string]*Buffer)
+	}
+
+	buffer, ok := globalBuffers[streamUrl]
+	if !ok {
+		buffer = NewBuffer()
+		globalBuffers[streamUrl] = buffer
 	}
 
 	stream, err := initDb.GetStreamBySlug(streamUrl)
@@ -38,87 +46,12 @@ func InitializeStream(streamUrl string) (*StreamInstance, error) {
 	return &StreamInstance{
 		Database: initDb,
 		Info:     stream,
+		Buffer:   buffer,
 	}, nil
 }
 
-func (instance *StreamInstance) LoadBalancer(previous *[]int, method string) (*http.Response, string, int, error) {
+func (instance *StreamInstance) BufferStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, statusChan chan int) {
 	debug := os.Getenv("DEBUG") == "true"
-
-	m3uIndexes := utils.GetM3UIndexes()
-
-	sort.Slice(m3uIndexes, func(i, j int) bool {
-		return instance.Database.ConcurrencyPriorityValue(i) > instance.Database.ConcurrencyPriorityValue(j)
-	})
-
-	maxLapsString := os.Getenv("MAX_RETRIES")
-	maxLaps, err := strconv.Atoi(strings.TrimSpace(maxLapsString))
-	if err != nil || maxLaps < 0 {
-		maxLaps = 5
-	}
-
-	lap := 0
-
-	for lap < maxLaps || maxLaps == 0 {
-		if debug {
-			utils.SafeLogf("[DEBUG] Stream attempt %d out of %d\n", lap+1, maxLaps)
-		}
-		allSkipped := true // Assume all URLs might be skipped
-
-		for _, index := range m3uIndexes {
-			if slices.Contains(*previous, index) {
-				utils.SafeLogf("Skipping M3U_%d: marked as previous stream\n", index+1)
-				continue
-			}
-
-			url, ok := instance.Info.URLs[index]
-			if !ok {
-				utils.SafeLogf("Channel not found from M3U_%d: %s\n", index+1, instance.Info.Title)
-				continue
-			}
-
-			if instance.Database.CheckConcurrency(index) {
-				utils.SafeLogf("Concurrency limit reached for M3U_%d: %s\n", index+1, url)
-				continue
-			}
-
-			allSkipped = false // At least one URL is not skipped
-
-			resp, err := utils.CustomHttpRequest(method, url)
-			if err == nil {
-				if debug {
-					utils.SafeLogf("[DEBUG] Successfully fetched stream from %s\n", url)
-				}
-				return resp, url, index, nil
-			}
-			utils.SafeLogf("Error fetching stream: %s\n", err.Error())
-			if debug {
-				utils.SafeLogf("[DEBUG] Error fetching stream from %s: %s\n", url, err.Error())
-			}
-		}
-
-		if allSkipped {
-			if debug {
-				utils.SafeLogf("[DEBUG] All streams skipped in lap %d\n", lap)
-			}
-			*previous = []int{}
-		}
-
-		lap++
-	}
-
-	return nil, "", -1, fmt.Errorf("Error fetching stream. Exhausted all streams.")
-}
-
-func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
-	debug := os.Getenv("DEBUG") == "true"
-	bufferMbInt, err := strconv.Atoi(os.Getenv("BUFFER_MB"))
-	if err != nil || bufferMbInt < 0 {
-		bufferMbInt = 0
-	}
-	buffer := make([]byte, 1024)
-	if bufferMbInt > 0 {
-		buffer = make([]byte, bufferMbInt*1024*1024)
-	}
 
 	if r.Method != http.MethodGet || utils.EOFIsExpected(resp) {
 		scanner := bufio.NewScanner(resp.Body)
@@ -132,22 +65,12 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 		for scanner.Scan() {
 			line := scanner.Text()
 			if strings.HasPrefix(line, "#") {
-				_, err := w.Write([]byte(line + "\n"))
-				if err != nil {
-					utils.SafeLogf("Failed to write line to response: %v", err)
-					statusChan <- 4
-					return
-				}
+				instance.Buffer.Write([]byte(line + "\n"))
 			} else if strings.TrimSpace(line) != "" {
 				u, err := url.Parse(line)
 				if err != nil {
 					utils.SafeLogf("Failed to parse M3U8 URL in line: %v", err)
-					_, err := w.Write([]byte(line + "\n"))
-					if err != nil {
-						utils.SafeLogf("Failed to write line to response: %v", err)
-						statusChan <- 4
-						return
-					}
+					instance.Buffer.Write([]byte(line + "\n"))
 					continue
 				}
 
@@ -155,12 +78,7 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 					u = base.ResolveReference(u)
 				}
 
-				_, err = w.Write([]byte(u.String() + "\n"))
-				if err != nil {
-					utils.SafeLogf("Failed to write URL to response: %v", err)
-					statusChan <- 4
-					return
-				}
+				instance.Buffer.Write([]byte(u.String() + "\n"))
 			}
 		}
 
@@ -170,13 +88,6 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 
 	instance.Database.UpdateConcurrency(m3uIndex, true)
 	defer instance.Database.UpdateConcurrency(m3uIndex, false)
-
-	defer func() {
-		buffer = nil
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
-	}()
 
 	timeoutSecond, err := strconv.Atoi(os.Getenv("STREAM_TIMEOUT"))
 	if err != nil || timeoutSecond < 0 {
@@ -197,6 +108,8 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 
 	returnStatus := 0
 
+	sourceChunk := make([]byte, 1024)
+
 	for {
 		select {
 		case <-ctx.Done(): // handle context cancellation
@@ -208,7 +121,7 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 			statusChan <- returnStatus
 			return
 		default:
-			n, err := resp.Body.Read(buffer)
+			n, err := resp.Body.Read(sourceChunk)
 			if err != nil {
 				if err == io.EOF {
 					utils.SafeLogf("Stream ended (EOF reached): %s\n", r.RemoteAddr)
@@ -254,15 +167,7 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 				continue
 			}
 
-			if _, err := w.Write(buffer[:n]); err != nil {
-				utils.SafeLogf("Error writing to response: %s\n", err.Error())
-				statusChan <- 0
-				return
-			}
-
-			if flusher, ok := w.(http.Flusher); ok {
-				flusher.Flush()
-			}
+			instance.Buffer.Write(sourceChunk[:n])
 
 			// Reset the timer on each successful write and backoff
 			if !timer.Stop() {
@@ -275,6 +180,37 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 
 			// Reset the backoff duration after successful read/write
 			currentBackoff = initialBackoff
+		}
+	}
+}
+
+func (instance *StreamInstance) StreamBuffer(ctx context.Context, w http.ResponseWriter) {
+	for {
+		select {
+		case <-ctx.Done(): // handle context cancellation
+			return
+		default:
+			bufferSize := 1024
+			bufferMbInt, err := strconv.Atoi(os.Getenv("BUFFER_MB"))
+			if err != nil || bufferMbInt < 0 {
+				bufferMbInt = 0
+			} else {
+				bufferSize = bufferMbInt * 1024 * 1024
+			}
+
+			chunk, ok := instance.Buffer.ReadChunk(bufferSize)
+			if !ok {
+				time.Sleep(100 * time.Millisecond) // Wait a bit before checking buffer again
+				continue
+			}
+
+			_, err = w.Write(chunk)
+			if err != nil {
+				utils.SafeLogf("Error writing to client: %v", err)
+				return
+			}
+
+			w.(http.Flusher).Flush() // Make sure data is sent immediately
 		}
 	}
 }
@@ -304,7 +240,6 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	var selectedIndex int
 	var selectedUrl string
 
-	testedIndexes := []int{}
 	firstWrite := true
 
 	var resp *http.Response
@@ -315,7 +250,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			utils.SafeLogf("Client disconnected: %s\n", r.RemoteAddr)
 			return
 		default:
-			resp, selectedUrl, selectedIndex, err = stream.LoadBalancer(&testedIndexes, r.Method)
+			resp, selectedUrl, selectedIndex, err = stream.LoadBalancer(&stream.Buffer.testedIndexes, r.Method)
 			if err != nil {
 				utils.SafeLogf("Error reloading stream for %s: %v\n", streamUrl, err)
 				return
@@ -343,8 +278,33 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			exitStatus := make(chan int)
 
 			utils.SafeLogf("Proxying %s to %s\n", r.RemoteAddr, selectedUrl)
-			go stream.ProxyStream(ctx, selectedIndex, resp, r, w, exitStatus)
-			testedIndexes = append(testedIndexes, selectedIndex)
+			go func() {
+				stream.Buffer.clients += 1
+				defer func() {
+					stream.Buffer.clients -= 1
+					if stream.Buffer.clients == 0 {
+						stream.Buffer.Clear()
+					}
+				}()
+
+				for {
+					select {
+					case <-ctx.Done():
+						exitStatus <- 0
+						return
+					default:
+						if !stream.Buffer.ingest.TryLock() {
+							continue
+						}
+
+						defer stream.Buffer.ingest.Unlock()
+
+						stream.BufferStream(ctx, selectedIndex, resp, r, exitStatus)
+						return
+					}
+				}
+			}()
+			stream.Buffer.testedIndexes = append(stream.Buffer.testedIndexes, selectedIndex)
 
 			streamExitCode := <-exitStatus
 			utils.SafeLogf("Exit code %d received from %s\n", streamExitCode, selectedUrl)
