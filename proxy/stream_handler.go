@@ -210,7 +210,9 @@ func (instance *StreamInstance) StreamBuffer(ctx context.Context, w http.Respons
 				return
 			}
 
-			w.(http.Flusher).Flush() // Make sure data is sent immediately
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
 		}
 	}
 }
