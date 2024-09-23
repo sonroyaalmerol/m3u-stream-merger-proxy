@@ -33,13 +33,15 @@ func (b *Buffer) Write(data []byte) {
 	b.cond.Broadcast() // Notify all waiting clients that new data is available
 }
 
-func (b *Buffer) ReadChunk(size int) ([]byte, bool) {
+func (b *Buffer) ReadChunk(size int, force bool) ([]byte, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	// Wait for buffer to have enough data
-	for len(b.data) < size {
-		b.cond.Wait()
+	if !force {
+		for len(b.data) < size {
+			b.cond.Wait()
+		}
 	}
 
 	chunk := b.data[:size]

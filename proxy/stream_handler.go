@@ -184,7 +184,7 @@ func (instance *StreamInstance) BufferStream(ctx context.Context, m3uIndex int, 
 	}
 }
 
-func (instance *StreamInstance) StreamBuffer(ctx context.Context, w http.ResponseWriter) {
+func (instance *StreamInstance) StreamBuffer(ctx context.Context, resp *http.Response, r *http.Request, w http.ResponseWriter) {
 	for {
 		select {
 		case <-ctx.Done(): // handle context cancellation
@@ -196,9 +196,13 @@ func (instance *StreamInstance) StreamBuffer(ctx context.Context, w http.Respons
 				bufferSize = bufferMbInt * 1024 * 1024
 			}
 
-			chunk, ok := instance.Buffer.ReadChunk(bufferSize)
+			forceRead := r.Method != http.MethodGet || utils.EOFIsExpected(resp)
+
+			chunk, ok := instance.Buffer.ReadChunk(bufferSize, forceRead)
 			if !ok {
-				time.Sleep(100 * time.Millisecond) // Wait a bit before checking buffer again
+				if !forceRead {
+					time.Sleep(100 * time.Millisecond) // Wait a bit before checking buffer again
+				}
 				continue
 			}
 
@@ -304,7 +308,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}()
-			go stream.StreamBuffer(ctx, w)
+			go stream.StreamBuffer(ctx, resp, r, w)
 
 			stream.Buffer.testedIndexes = append(stream.Buffer.testedIndexes, selectedIndex)
 
