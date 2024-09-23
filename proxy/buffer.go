@@ -41,6 +41,7 @@ func (b *Buffer) Write(data []byte) {
 func (b *Buffer) Subscribe(ctx context.Context) chan []byte {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
 	clientID := b.clientNextId
 	b.clientNextId++
 
@@ -72,8 +73,9 @@ func (b *Buffer) Subscribe(ctx context.Context) chan []byte {
 				b.mu.Lock()
 				defer b.mu.Unlock()
 
+				pos := b.clientPositions[clientID]
 				if len(b.data) >= bufferSize {
-					chunk := b.data[:bufferSize]
+					chunk := b.data[pos : pos+bufferSize]
 
 					// Send the chunk to the client
 					b.clients[clientID] <- chunk
