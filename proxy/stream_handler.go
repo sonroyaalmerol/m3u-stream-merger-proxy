@@ -21,7 +21,7 @@ type StreamInstance struct {
 	Buffer   *Buffer
 }
 
-func InitializeStream(streamUrl string) (*StreamInstance, error) {
+func InitializeStream(ctx context.Context, streamUrl string) (*StreamInstance, error) {
 	initDb, err := database.InitializeDb()
 	if err != nil {
 		utils.SafeLogf("Error initializing Redis database: %v", err)
@@ -199,24 +199,15 @@ func (instance *StreamInstance) BufferStream(ctx context.Context, m3uIndex int, 
 }
 
 func (instance *StreamInstance) StreamBuffer(ctx context.Context, w http.ResponseWriter) {
+	clientId, streamCh := instance.Buffer.Subscribe()
+	defer instance.Buffer.Unsubscribe(clientId)
+
 	for {
 		select {
 		case <-ctx.Done(): // handle context cancellation
 			return
-		default:
-			bufferSize := 1024
-			bufferMbInt, err := strconv.Atoi(os.Getenv("BUFFER_MB"))
-			if err == nil && bufferMbInt > 0 {
-				bufferSize = bufferMbInt * 1024 * 1024
-			}
-
-			chunk, ok := instance.Buffer.ReadChunk(bufferSize)
-			if !ok {
-				time.Sleep(100 * time.Millisecond) // Wait a bit before checking buffer again
-				continue
-			}
-
-			_, err = w.Write(chunk)
+		case chunk := <-streamCh:
+			_, err := w.Write(chunk)
 			if err != nil {
 				utils.SafeLogf("Error writing to client: %v", err)
 				return
@@ -225,6 +216,7 @@ func (instance *StreamInstance) StreamBuffer(ctx context.Context, w http.Respons
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
 			}
+		default:
 		}
 	}
 }
@@ -244,7 +236,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stream, err := InitializeStream(strings.TrimPrefix(streamUrl, "/"))
+	stream, err := InitializeStream(ctx, strings.TrimPrefix(streamUrl, "/"))
 	if err != nil {
 		utils.SafeLogf("Error retrieving stream for slug %s: %v\n", streamUrl, err)
 		http.NotFound(w, r)
@@ -297,14 +289,6 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 				go stream.DirectProxy(ctx, resp, w, exitStatus)
 			} else {
 				go func() {
-					stream.Buffer.clients += 1
-					defer func() {
-						stream.Buffer.clients -= 1
-						if stream.Buffer.clients == 0 {
-							stream.Buffer.Clear()
-						}
-					}()
-
 					alreadyLogged := false
 					for {
 						select {
