@@ -215,7 +215,6 @@ func (instance *StreamInstance) StreamBuffer(ctx context.Context, w http.Respons
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
 			}
-		default:
 		}
 	}
 }
