@@ -97,7 +97,7 @@ func (b *Buffer) Subscribe(ctx context.Context) *chan []byte {
 		}
 	}()
 
-	return ch
+	return &ch
 }
 
 func (b *Buffer) Clear() {
