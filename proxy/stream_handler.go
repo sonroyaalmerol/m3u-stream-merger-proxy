@@ -95,7 +95,6 @@ func (instance *StreamInstance) DirectProxy(ctx context.Context, resp *http.Resp
 	}
 
 	statusChan <- 4
-	return
 }
 
 func (instance *StreamInstance) BufferStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
