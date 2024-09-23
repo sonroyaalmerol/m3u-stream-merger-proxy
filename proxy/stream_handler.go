@@ -50,7 +50,7 @@ func InitializeStream(streamUrl string) (*StreamInstance, error) {
 	}, nil
 }
 
-func (instance *StreamInstance) BufferStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, statusChan chan int) {
+func (instance *StreamInstance) BufferStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
 	debug := os.Getenv("DEBUG") == "true"
 
 	if r.Method != http.MethodGet || utils.EOFIsExpected(resp) {
@@ -65,12 +65,22 @@ func (instance *StreamInstance) BufferStream(ctx context.Context, m3uIndex int, 
 		for scanner.Scan() {
 			line := scanner.Text()
 			if strings.HasPrefix(line, "#") {
-				instance.Buffer.Write([]byte(line + "\n"))
+				_, err := w.Write([]byte(line + "\n"))
+				if err != nil {
+					utils.SafeLogf("Failed to write line to response: %v", err)
+					statusChan <- 4
+					return
+				}
 			} else if strings.TrimSpace(line) != "" {
 				u, err := url.Parse(line)
 				if err != nil {
 					utils.SafeLogf("Failed to parse M3U8 URL in line: %v", err)
-					instance.Buffer.Write([]byte(line + "\n"))
+					_, err := w.Write([]byte(line + "\n"))
+					if err != nil {
+						utils.SafeLogf("Failed to write line to response: %v", err)
+						statusChan <- 4
+						return
+					}
 					continue
 				}
 
@@ -78,7 +88,12 @@ func (instance *StreamInstance) BufferStream(ctx context.Context, m3uIndex int, 
 					u = base.ResolveReference(u)
 				}
 
-				instance.Buffer.Write([]byte(u.String() + "\n"))
+				_, err = w.Write([]byte(u.String() + "\n"))
+				if err != nil {
+					utils.SafeLogf("Failed to write line to response: %v", err)
+					statusChan <- 4
+					return
+				}
 			}
 		}
 
@@ -184,7 +199,7 @@ func (instance *StreamInstance) BufferStream(ctx context.Context, m3uIndex int, 
 	}
 }
 
-func (instance *StreamInstance) StreamBuffer(ctx context.Context, resp *http.Response, r *http.Request, w http.ResponseWriter) {
+func (instance *StreamInstance) StreamBuffer(ctx context.Context, w http.ResponseWriter) {
 	for {
 		select {
 		case <-ctx.Done(): // handle context cancellation
@@ -196,13 +211,9 @@ func (instance *StreamInstance) StreamBuffer(ctx context.Context, resp *http.Res
 				bufferSize = bufferMbInt * 1024 * 1024
 			}
 
-			forceRead := r.Method != http.MethodGet || utils.EOFIsExpected(resp)
-
-			chunk, ok := instance.Buffer.ReadChunk(bufferSize, forceRead)
+			chunk, ok := instance.Buffer.ReadChunk(bufferSize)
 			if !ok {
-				if !forceRead {
-					time.Sleep(100 * time.Millisecond) // Wait a bit before checking buffer again
-				}
+				time.Sleep(100 * time.Millisecond) // Wait a bit before checking buffer again
 				continue
 			}
 
@@ -308,12 +319,12 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 						defer stream.Buffer.ingest.Unlock()
 
-						stream.BufferStream(ctx, selectedIndex, resp, r, exitStatus)
+						stream.BufferStream(ctx, selectedIndex, resp, r, w, exitStatus)
 						return
 					}
 				}
 			}()
-			go stream.StreamBuffer(ctx, resp, r, w)
+			go stream.StreamBuffer(ctx, w)
 
 			stream.Buffer.testedIndexes = append(stream.Buffer.testedIndexes, selectedIndex)
 

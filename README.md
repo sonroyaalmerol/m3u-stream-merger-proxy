@@ -109,7 +109,7 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | USER_AGENT                  | Set the User-Agent of HTTP requests.                    | IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)    |  Any valid user agent        |
 | ~~LOAD_BALANCING_MODE~~ (removed on version 0.10.0)                | Set load balancing algorithm to a specific mode | brute-force    | brute-force/round-robin   |
 | PARSER_WORKERS | Set number of workers to spawn for M3U parsing. | 5 | Any positive integer |
-| BUFFER_MB | Set buffer size in mb. | 0 (no buffer) | Any positive integer |
+| BUFFER_MB | Set buffer size in mb. Maximum suggested value would be 4 MB. | 0 (no buffer) | Any positive integer |
 | INCLUDE_GROUPS_1, INCLUDE_GROUPS_2, INCLUDE_GROUPS_X    | Set channels to include based on groups (Takes precedence over EXCLUDE_GROUPS_X) | N/A | Go regexp |
 | EXCLUDE_GROUPS_1, EXCLUDE_GROUPS_2, EXCLUDE_GROUPS_X    | Set channels to exclude based on groups | N/A | Go regexp |
 | INCLUDE_TITLE_1, INCLUDE_TITLE_2, INCLUDE_TITLE_X    | Set channels to include based on title (Takes precedence over EXCLUDE_TITLE_X) | N/A | Go regexp |
