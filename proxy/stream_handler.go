@@ -291,6 +291,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 					}
 				}()
 
+				alreadyLogged := false
 				for {
 					select {
 					case <-ctx.Done():
@@ -298,6 +299,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 						return
 					default:
 						if !stream.Buffer.ingest.TryLock() {
+							if !alreadyLogged {
+								utils.SafeLogf("Using shared stream buffer with other existing clients for %s\n", r.URL.Path)
+								alreadyLogged = true
+							}
 							continue
 						}
 
