@@ -50,56 +50,56 @@ func InitializeStream(streamUrl string) (*StreamInstance, error) {
 	}, nil
 }
 
-func (instance *StreamInstance) BufferStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
-	debug := os.Getenv("DEBUG") == "true"
+func (instance *StreamInstance) DirectProxy(ctx context.Context, resp *http.Response, w http.ResponseWriter, statusChan chan int) {
+	scanner := bufio.NewScanner(resp.Body)
+	base, err := url.Parse(resp.Request.URL.String())
+	if err != nil {
+		utils.SafeLogf("Invalid base URL for M3U8 stream: %v", err)
+		statusChan <- 4
+		return
+	}
 
-	if r.Method != http.MethodGet || utils.EOFIsExpected(resp) {
-		scanner := bufio.NewScanner(resp.Body)
-		base, err := url.Parse(resp.Request.URL.String())
-		if err != nil {
-			utils.SafeLogf("Invalid base URL for M3U8 stream: %v", err)
-			statusChan <- 4
-			return
-		}
-
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.HasPrefix(line, "#") {
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "#") {
+			_, err := w.Write([]byte(line + "\n"))
+			if err != nil {
+				utils.SafeLogf("Failed to write line to response: %v", err)
+				statusChan <- 4
+				return
+			}
+		} else if strings.TrimSpace(line) != "" {
+			u, err := url.Parse(line)
+			if err != nil {
+				utils.SafeLogf("Failed to parse M3U8 URL in line: %v", err)
 				_, err := w.Write([]byte(line + "\n"))
 				if err != nil {
 					utils.SafeLogf("Failed to write line to response: %v", err)
 					statusChan <- 4
 					return
 				}
-			} else if strings.TrimSpace(line) != "" {
-				u, err := url.Parse(line)
-				if err != nil {
-					utils.SafeLogf("Failed to parse M3U8 URL in line: %v", err)
-					_, err := w.Write([]byte(line + "\n"))
-					if err != nil {
-						utils.SafeLogf("Failed to write line to response: %v", err)
-						statusChan <- 4
-						return
-					}
-					continue
-				}
+				continue
+			}
 
-				if !u.IsAbs() {
-					u = base.ResolveReference(u)
-				}
+			if !u.IsAbs() {
+				u = base.ResolveReference(u)
+			}
 
-				_, err = w.Write([]byte(u.String() + "\n"))
-				if err != nil {
-					utils.SafeLogf("Failed to write line to response: %v", err)
-					statusChan <- 4
-					return
-				}
+			_, err = w.Write([]byte(u.String() + "\n"))
+			if err != nil {
+				utils.SafeLogf("Failed to write line to response: %v", err)
+				statusChan <- 4
+				return
 			}
 		}
-
-		statusChan <- 4
-		return
 	}
+
+	statusChan <- 4
+	return
+}
+
+func (instance *StreamInstance) BufferStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
+	debug := os.Getenv("DEBUG") == "true"
 
 	instance.Database.UpdateConcurrency(m3uIndex, true)
 	defer instance.Database.UpdateConcurrency(m3uIndex, false)
@@ -140,7 +140,7 @@ func (instance *StreamInstance) BufferStream(ctx context.Context, m3uIndex int, 
 			if err != nil {
 				if err == io.EOF {
 					utils.SafeLogf("Stream ended (EOF reached): %s\n", r.RemoteAddr)
-					if utils.EOFIsExpected(resp) || timeoutSecond == 0 {
+					if timeoutSecond == 0 {
 						statusChan <- 2
 						return
 					}
@@ -293,38 +293,43 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			exitStatus := make(chan int)
 
 			utils.SafeLogf("Proxying %s to %s\n", r.RemoteAddr, selectedUrl)
-			go func() {
-				stream.Buffer.clients += 1
-				defer func() {
-					stream.Buffer.clients -= 1
-					if stream.Buffer.clients == 0 {
-						stream.Buffer.Clear()
+
+			if r.Method != http.MethodGet || utils.EOFIsExpected(resp) {
+				go stream.DirectProxy(ctx, resp, w, exitStatus)
+			} else {
+				go func() {
+					stream.Buffer.clients += 1
+					defer func() {
+						stream.Buffer.clients -= 1
+						if stream.Buffer.clients == 0 {
+							stream.Buffer.Clear()
+						}
+					}()
+
+					alreadyLogged := false
+					for {
+						select {
+						case <-ctx.Done():
+							exitStatus <- 0
+							return
+						default:
+							if !stream.Buffer.ingest.TryLock() {
+								if !alreadyLogged {
+									utils.SafeLogf("Using shared stream buffer with other existing clients for %s\n", r.URL.Path)
+									alreadyLogged = true
+								}
+								continue
+							}
+
+							defer stream.Buffer.ingest.Unlock()
+
+							stream.BufferStream(ctx, selectedIndex, resp, r, w, exitStatus)
+							return
+						}
 					}
 				}()
-
-				alreadyLogged := false
-				for {
-					select {
-					case <-ctx.Done():
-						exitStatus <- 0
-						return
-					default:
-						if !stream.Buffer.ingest.TryLock() {
-							if !alreadyLogged {
-								utils.SafeLogf("Using shared stream buffer with other existing clients for %s\n", r.URL.Path)
-								alreadyLogged = true
-							}
-							continue
-						}
-
-						defer stream.Buffer.ingest.Unlock()
-
-						stream.BufferStream(ctx, selectedIndex, resp, r, w, exitStatus)
-						return
-					}
-				}
-			}()
-			go stream.StreamBuffer(ctx, w)
+				go stream.StreamBuffer(ctx, w)
+			}
 
 			stream.Buffer.testedIndexes = append(stream.Buffer.testedIndexes, selectedIndex)
 
