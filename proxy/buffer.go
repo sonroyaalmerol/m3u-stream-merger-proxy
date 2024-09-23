@@ -63,6 +63,7 @@ func (b *Buffer) Subscribe(ctx context.Context) chan []byte {
 				if ch, exists := b.clients[clientID]; exists {
 					close(ch) // close the channel when unsubscribing
 					delete(b.clients, clientID)
+					delete(b.clientPositions, clientID)
 				}
 				if len(b.clients) == 0 {
 					b.Clear()
@@ -115,7 +116,4 @@ func (b *Buffer) Clear() {
 	defer b.mu.Unlock()
 	b.data = nil // Reset the buffer to empty
 	b.data = []byte{}
-
-	b.clientPositions = nil
-	b.clientPositions = make(map[int]int)
 }
