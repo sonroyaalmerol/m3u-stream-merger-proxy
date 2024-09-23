@@ -11,7 +11,7 @@ import (
 type Buffer struct {
 	data            []byte
 	testedIndexes   []int
-	clients         map[int]chan []byte
+	clients         map[int]*chan []byte
 	clientPositions map[int]int
 	clientNextId    int
 	ingest          sync.Mutex
@@ -24,7 +24,7 @@ var globalBuffers map[string]*Buffer
 func NewBuffer() *Buffer {
 	buf := &Buffer{
 		data:            []byte{},
-		clients:         make(map[int]chan []byte),
+		clients:         make(map[int]*chan []byte),
 		clientPositions: make(map[int]int),
 		testedIndexes:   []int{},
 	}
@@ -38,12 +38,12 @@ func (b *Buffer) Write(data []byte) {
 	b.data = append(b.data, data...)
 }
 
-func (b *Buffer) Subscribe(ctx context.Context) chan []byte {
+func (b *Buffer) Subscribe(ctx context.Context) *chan []byte {
 	clientID := b.clientNextId
 	b.clientNextId++
 
 	ch := make(chan []byte)
-	b.clients[clientID] = ch
+	b.clients[clientID] = &ch
 
 	bufferSize := 1024
 	bufferMbInt, err := strconv.Atoi(os.Getenv("BUFFER_MB"))
@@ -58,7 +58,7 @@ func (b *Buffer) Subscribe(ctx context.Context) chan []byte {
 			select {
 			case <-ctx.Done():
 				if ch, exists := b.clients[clientID]; exists {
-					close(ch) // close the channel when unsubscribing
+					close(*ch) // close the channel when unsubscribing
 					delete(b.clients, clientID)
 					delete(b.clientPositions, clientID)
 				}
@@ -75,7 +75,7 @@ func (b *Buffer) Subscribe(ctx context.Context) chan []byte {
 
 				if len(b.data) >= bufferSize {
 					chunk := b.data[pos : pos+bufferSize]
-					b.clients[clientID] <- chunk
+					*b.clients[clientID] <- chunk
 					b.clientPositions[clientID] += bufferSize
 
 					if len(b.data) > maxBufferSize && b.mu.TryLock() {
