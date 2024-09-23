@@ -32,16 +32,10 @@ func NewBuffer() *Buffer {
 }
 
 func (b *Buffer) Write(data []byte) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	b.data = append(b.data, data...)
 }
 
 func (b *Buffer) Subscribe(ctx context.Context) chan []byte {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	clientID := b.clientNextId
 	b.clientNextId++
 
@@ -71,10 +65,11 @@ func (b *Buffer) Subscribe(ctx context.Context) chan []byte {
 
 				return
 			default:
-				b.mu.Lock()
-				defer b.mu.Unlock()
+				pos, ok := b.clientPositions[clientID]
+				if !ok {
+					pos = 0
+				}
 
-				pos := b.clientPositions[clientID]
 				if len(b.data) >= bufferSize {
 					chunk := b.data[pos : pos+bufferSize]
 
@@ -86,6 +81,8 @@ func (b *Buffer) Subscribe(ctx context.Context) chan []byte {
 
 					// Check if the buffer exceeds the maximum allowed size
 					if len(b.data) > maxBufferSize {
+						b.mu.Lock()
+
 						// Calculate how much we need to trim from the buffer
 						trimSize := len(b.data) - maxBufferSize
 
@@ -102,6 +99,8 @@ func (b *Buffer) Subscribe(ctx context.Context) chan []byte {
 								b.clientPositions[id] -= trimSize
 							}
 						}
+
+						b.mu.Unlock()
 					}
 				}
 			}
@@ -114,6 +113,7 @@ func (b *Buffer) Subscribe(ctx context.Context) chan []byte {
 func (b *Buffer) Clear() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
 	b.data = nil // Reset the buffer to empty
 	b.data = []byte{}
 }
