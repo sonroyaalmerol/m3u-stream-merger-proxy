@@ -39,6 +39,8 @@ func (b *Buffer) Write(data []byte) {
 }
 
 func (b *Buffer) Subscribe(ctx context.Context) *chan []byte {
+	b.mu.Lock()
+
 	clientID := b.clientNextId
 	b.clientNextId++
 
@@ -52,6 +54,8 @@ func (b *Buffer) Subscribe(ctx context.Context) *chan []byte {
 	}
 
 	maxBufferSize := 100 * 1024 * 1024
+
+	b.mu.Unlock()
 
 	go func() {
 		for {
@@ -68,7 +72,9 @@ func (b *Buffer) Subscribe(ctx context.Context) *chan []byte {
 
 				return
 			default:
+				b.mu.Lock()
 				pos, ok := b.clientPositions[clientID]
+
 				if !ok {
 					pos = 0
 				}
@@ -78,7 +84,7 @@ func (b *Buffer) Subscribe(ctx context.Context) *chan []byte {
 					*b.clients[clientID] <- chunk
 					b.clientPositions[clientID] += bufferSize
 
-					if len(b.data) > maxBufferSize && b.mu.TryLock() {
+					if len(b.data) > maxBufferSize {
 						trimSize := len(b.data) - maxBufferSize
 						b.data = b.data[trimSize:]
 
@@ -90,9 +96,10 @@ func (b *Buffer) Subscribe(ctx context.Context) *chan []byte {
 							}
 						}
 
-						b.mu.Unlock()
 					}
 				}
+
+				b.mu.Unlock()
 			}
 		}
 	}()
