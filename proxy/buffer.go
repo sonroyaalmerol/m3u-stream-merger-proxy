@@ -13,6 +13,7 @@ type Buffer struct {
 	testedIndexes   []int
 	clients         map[int]*chan []byte
 	clientPositions map[int]int
+	slowestClient   int
 	clientNextId    int
 	ingest          sync.Mutex
 	mu              sync.Mutex
@@ -53,8 +54,6 @@ func (b *Buffer) Subscribe(ctx context.Context) *chan []byte {
 		bufferSize = bufferMbInt * 1024 * 1024
 	}
 
-	maxBufferSize := 100 * 1024 * 1024
-
 	b.mu.Unlock()
 
 	go func() {
@@ -88,18 +87,14 @@ func (b *Buffer) Subscribe(ctx context.Context) *chan []byte {
 					*b.clients[clientID] <- chunk
 					b.clientPositions[clientID] += bufferSize
 
-					if len(b.data) > maxBufferSize {
-						trimSize := len(b.data) - maxBufferSize
-						b.data = b.data[trimSize:]
+					if b.clientPositions[clientID] < b.clientPositions[b.slowestClient] {
+						b.slowestClient = clientID
+					}
 
-						for id, pos := range b.clientPositions {
-							if pos < trimSize {
-								b.clientPositions[id] = 0
-							} else {
-								b.clientPositions[id] -= trimSize
-							}
-						}
+					b.data = b.data[b.clientPositions[b.slowestClient]:]
 
+					for id := range b.clientPositions {
+						b.clientPositions[id] -= b.clientPositions[b.slowestClient]
 					}
 				}
 
