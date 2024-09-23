@@ -199,8 +199,7 @@ func (instance *StreamInstance) BufferStream(ctx context.Context, m3uIndex int, 
 }
 
 func (instance *StreamInstance) StreamBuffer(ctx context.Context, w http.ResponseWriter) {
-	clientId, streamCh := instance.Buffer.Subscribe()
-	defer instance.Buffer.Unsubscribe(clientId)
+	streamCh := instance.Buffer.Subscribe(ctx)
 
 	for {
 		select {
