@@ -38,9 +38,11 @@ func (b *Buffer) ReadChunk(size int, force bool) ([]byte, bool) {
 	defer b.mu.Unlock()
 
 	// Wait for buffer to have enough data
-	if !force {
-		for len(b.data) < size {
-			b.cond.Wait()
+	for len(b.data) < size {
+		b.cond.Wait()
+		if force {
+			size = len(b.data)
+			break
 		}
 	}
 
