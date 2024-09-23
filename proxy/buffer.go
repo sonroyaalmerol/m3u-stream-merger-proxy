@@ -61,14 +61,18 @@ func (b *Buffer) Subscribe(ctx context.Context) *chan []byte {
 		for {
 			select {
 			case <-ctx.Done():
+				b.mu.Lock()
 				if ch, exists := b.clients[clientID]; exists {
 					close(*ch) // close the channel when unsubscribing
 					delete(b.clients, clientID)
 					delete(b.clientPositions, clientID)
 				}
 				if len(b.clients) == 0 {
-					b.Clear()
+					b.data = nil // Reset the buffer to empty
+					b.data = []byte{}
 				}
+
+				b.mu.Unlock()
 
 				return
 			default:
@@ -105,12 +109,4 @@ func (b *Buffer) Subscribe(ctx context.Context) *chan []byte {
 	}()
 
 	return &ch
-}
-
-func (b *Buffer) Clear() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	b.data = nil // Reset the buffer to empty
-	b.data = []byte{}
 }
