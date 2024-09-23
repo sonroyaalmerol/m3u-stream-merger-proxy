@@ -115,4 +115,7 @@ func (b *Buffer) Clear() {
 	defer b.mu.Unlock()
 	b.data = nil // Reset the buffer to empty
 	b.data = []byte{}
+
+	b.clientPositions = nil
+	b.clientPositions = make(map[int]int)
 }
