@@ -73,7 +73,7 @@ func (b *Buffer) Subscribe(ctx context.Context) *chan []byte {
 					pos = 0
 				}
 
-				if len(b.data) >= bufferSize {
+				if len(b.data) >= pos+bufferSize {
 					chunk := b.data[pos : pos+bufferSize]
 					*b.clients[clientID] <- chunk
 					b.clientPositions[clientID] += bufferSize
