@@ -44,14 +44,14 @@ func GetM3UIndexes() []int {
 	return m3uIndexes
 }
 
-var filters []string
-var filtersInitialized bool
+var filters map[string][]string
+var filtersInitialized map[string]bool
 
 func GetFilters(baseEnv string) []string {
-	if filtersInitialized {
-		return filters
+	if filtersInitialized[baseEnv] {
+		return filters[baseEnv]
 	}
-	filters = []string{}
+	envFilters := []string{}
 	for _, env := range os.Environ() {
 		pair := strings.SplitN(env, "=", 2)
 		if strings.HasPrefix(pair[0], baseEnv) {
@@ -60,9 +60,9 @@ func GetFilters(baseEnv string) []string {
 			if err != nil {
 				continue
 			}
-			filters = append(filters, pair[1])
+			envFilters = append(envFilters, pair[1])
 		}
 	}
-	filtersInitialized = true
-	return filters
+	filtersInitialized[baseEnv] = true
+	return filters[baseEnv]
 }
