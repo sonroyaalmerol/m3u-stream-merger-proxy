@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 func GetEnv(env string) string {
@@ -44,13 +45,24 @@ func GetM3UIndexes() []int {
 	return m3uIndexes
 }
 
-var filters map[string][]string
-var filtersInitialized map[string]bool
+var (
+	filters            = make(map[string][]string)
+	filtersInitialized = make(map[string]bool)
+	filterMutex        sync.RWMutex
+)
 
 func GetFilters(baseEnv string) []string {
+	filterMutex.RLock()
 	if filtersInitialized[baseEnv] {
-		return filters[baseEnv]
+		result := filters[baseEnv]
+		filterMutex.RUnlock()
+		return result
 	}
+	filterMutex.RUnlock()
+
+	filterMutex.Lock()
+	defer filterMutex.Unlock()
+
 	envFilters := []string{}
 	for _, env := range os.Environ() {
 		pair := strings.SplitN(env, "=", 2)
@@ -64,5 +76,6 @@ func GetFilters(baseEnv string) []string {
 		}
 	}
 	filtersInitialized[baseEnv] = true
+	filters[baseEnv] = envFilters
 	return filters[baseEnv]
 }
