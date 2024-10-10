@@ -364,7 +364,6 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 				cancel()
 			}
 
-			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 		}
 	}
