@@ -177,7 +177,10 @@ func (instance *StreamInstance) BufferStream(ctx context.Context, m3uIndex int, 
 				continue
 			}
 
-			instance.Buffer.Write(sourceChunk[:n])
+			err = instance.Buffer.Write(sourceChunk[:n])
+			if err != nil {
+				utils.SafeLogf("Failed to store buffer: %s\n", err.Error())
+			}
 
 			// Reset the timer on each successful write and backoff
 			if !timer.Stop() {
