@@ -177,7 +177,7 @@ func (instance *StreamInstance) BufferStream(ctx context.Context, m3uIndex int, 
 				continue
 			}
 
-			err = instance.Buffer.Write(sourceChunk[:n])
+			err = instance.Buffer.Write(ctx, sourceChunk[:n])
 			if err != nil {
 				utils.SafeLogf("Failed to store buffer: %s\n", err.Error())
 			}
@@ -208,7 +208,7 @@ func (instance *StreamInstance) StreamBuffer(ctx context.Context, w http.Respons
 		select {
 		case <-ctx.Done(): // handle context cancellation
 			return
-		case chunk := <-streamCh:
+		case chunk := <-*streamCh:
 			_, err := w.Write(chunk)
 			if err != nil {
 				utils.SafeLogf("Error writing to client: %v", err)

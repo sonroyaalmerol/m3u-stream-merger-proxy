@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"m3u-stream-merger/database"
+	"m3u-stream-merger/utils"
 	"sync"
 	"time"
 
@@ -29,8 +30,8 @@ func NewBuffer(db *database.Instance, id string) (*Buffer, error) {
 }
 
 // Write writes data to the Redis stream
-func (b *Buffer) Write(data []byte) error {
-	msgId, err := b.db.Redis.XAdd(context.Background(), &redis.XAddArgs{
+func (b *Buffer) Write(ctx context.Context, data []byte) error {
+	msgId, err := b.db.Redis.XAdd(ctx, &redis.XAddArgs{
 		Stream: b.streamKey,
 		Values: map[string]interface{}{"data": data},
 		MaxLen: 4096,
@@ -39,14 +40,16 @@ func (b *Buffer) Write(data []byte) error {
 		return err
 	}
 
+	utils.SafeLogf("written msg: %s\n", msgId)
+
 	b.latestMsgId = msgId
 
-	_, err = b.db.Redis.Expire(context.Background(), b.streamKey, time.Minute).Result()
+	_, err = b.db.Redis.Expire(ctx, b.streamKey, time.Minute).Result()
 	return err
 }
 
 // Subscribe subscribes a client to the Redis stream and manages real-time data flow
-func (b *Buffer) Subscribe(ctx context.Context) (<-chan []byte, error) {
+func (b *Buffer) Subscribe(ctx context.Context) (*chan []byte, error) {
 	ch := make(chan []byte)
 
 	go func() {
@@ -60,9 +63,8 @@ func (b *Buffer) Subscribe(ctx context.Context) (<-chan []byte, error) {
 				return // Exit the goroutine if the client unsubscribes
 			default:
 				// Use Redis Streams to read new messages from the stream, starting from lastID
-				streams, err := b.db.Redis.XRead(context.Background(), &redis.XReadArgs{
+				streams, err := b.db.Redis.XRead(ctx, &redis.XReadArgs{
 					Streams: []string{b.streamKey, lastID},
-					Block:   time.Second, // Block for a second before retrying
 				}).Result()
 
 				if err != nil {
@@ -74,8 +76,8 @@ func (b *Buffer) Subscribe(ctx context.Context) (<-chan []byte, error) {
 				// Process new messages and update lastID
 				for _, stream := range streams {
 					for _, message := range stream.Messages {
-						if data, ok := message.Values["data"].([]byte); ok {
-							ch <- data
+						if data, ok := message.Values["data"].(string); ok {
+							ch <- []byte(data)
 							lastID = message.ID // Update lastID to track client progress
 						}
 					}
@@ -83,5 +85,6 @@ func (b *Buffer) Subscribe(ctx context.Context) (<-chan []byte, error) {
 			}
 		}
 	}()
-	return ch, nil
+
+	return &ch, nil
 }
