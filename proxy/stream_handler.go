@@ -297,7 +297,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 							exitStatus <- 0
 							return
 						default:
-							if !stream.Buffer.ingest.TryLock() {
+							if !stream.Buffer.TryLock() {
 								if !alreadyLogged {
 									utils.SafeLogf("Using shared stream buffer with other existing clients for %s\n", r.URL.Path)
 									alreadyLogged = true
@@ -305,7 +305,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 								continue
 							}
 
-							defer stream.Buffer.ingest.Unlock()
+							defer stream.Buffer.Unlock()
 
 							stream.BufferStream(ctx, selectedIndex, resp, r, w, exitStatus)
 							return

@@ -2,11 +2,12 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"m3u-stream-merger/database"
+	"m3u-stream-merger/utils"
 	"os"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -15,9 +16,9 @@ import (
 // Buffer struct using Redis Streams
 type Buffer struct {
 	streamKey     string
+	lockKey       string
 	db            *database.Instance
 	testedIndexes []int
-	ingest        sync.Mutex
 	latestMsgId   string
 	bufferSize    int64
 }
@@ -33,6 +34,7 @@ func NewBuffer(db *database.Instance, id string) (*Buffer, error) {
 	return &Buffer{
 		db:            db,
 		streamKey:     "streambuffer:" + id,
+		lockKey:       "streambuffer:" + id + ":streaming",
 		testedIndexes: []int{},
 		bufferSize:    int64(bufferSize),
 	}, nil
@@ -94,4 +96,30 @@ func (b *Buffer) Subscribe(ctx context.Context) (*chan []byte, error) {
 	}()
 
 	return &ch, nil
+}
+
+func (b *Buffer) TryLock() bool {
+	_, err := b.db.Redis.Get(context.Background(), b.lockKey).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			_, err := b.db.Redis.Set(context.Background(), b.lockKey, true, 0).Result()
+			if err != nil {
+				utils.SafeLogf("Setting lock error: %v\n", err)
+				return false
+			}
+			return true
+		}
+
+		utils.SafeLogf("Getting lock status error: %v\n", err)
+		return false
+	}
+
+	return false
+}
+
+func (b *Buffer) Unlock() {
+	_, err := b.db.Redis.Del(context.Background(), b.lockKey).Result()
+	if err != nil {
+		utils.SafeLogf("Error unlocking: %v\n", err)
+	}
 }
