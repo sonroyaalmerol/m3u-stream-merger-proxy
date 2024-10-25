@@ -3,6 +3,7 @@ module m3u-stream-merger
 go 1.23.0
 
 require (
+	github.com/bsm/redislock v0.9.4
 	github.com/gosimple/slug v1.14.0
 	github.com/redis/go-redis/v9 v9.7.0
 	github.com/robfig/cron/v3 v3.0.1
