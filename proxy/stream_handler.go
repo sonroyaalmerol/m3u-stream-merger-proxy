@@ -28,14 +28,10 @@ func InitializeStream(ctx context.Context, streamUrl string) (*StreamInstance, e
 		return nil, err
 	}
 
-	if globalBuffers == nil {
-		globalBuffers = make(map[string]*Buffer)
-	}
-
-	buffer, ok := globalBuffers[streamUrl]
-	if !ok {
-		buffer = NewBuffer()
-		globalBuffers[streamUrl] = buffer
+	buffer, err := NewBuffer(initDb, streamUrl)
+	if err != nil {
+		utils.SafeLogf("Error initializing stream buffer: %v", err)
+		return nil, err
 	}
 
 	stream, err := initDb.GetStreamBySlug(streamUrl)
@@ -199,13 +195,17 @@ func (instance *StreamInstance) BufferStream(ctx context.Context, m3uIndex int, 
 }
 
 func (instance *StreamInstance) StreamBuffer(ctx context.Context, w http.ResponseWriter) {
-	streamCh := instance.Buffer.Subscribe(ctx)
+	streamCh, err := instance.Buffer.Subscribe(ctx)
+	if err != nil {
+		utils.SafeLogf("Error subscribing client: %v", err)
+		return
+	}
 
 	for {
 		select {
 		case <-ctx.Done(): // handle context cancellation
 			return
-		case chunk := <-*streamCh:
+		case chunk := <-streamCh:
 			_, err := w.Write(chunk)
 			if err != nil {
 				utils.SafeLogf("Error writing to client: %v", err)
@@ -332,7 +332,6 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 				cancel()
 			}
 
-			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 		}
 	}
