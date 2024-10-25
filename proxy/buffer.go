@@ -100,9 +100,19 @@ func (b *Buffer) Subscribe(ctx context.Context) (*chan []byte, error) {
 }
 
 func (b *Buffer) TryLock() bool {
+	if b.lock != nil {
+		err := b.lock.Refresh(context.Background(), time.Minute, nil)
+		if err != nil {
+			utils.SafeLogf("Refreshing lock error: %v\n", err)
+			b.Unlock()
+		} else {
+			return true
+		}
+	}
+
 	locker := redislock.New(b.db.Redis)
 
-	lock, err := locker.Obtain(context.Background(), b.lockKey, 0, nil)
+	lock, err := locker.Obtain(context.Background(), b.lockKey, time.Minute, nil)
 	if err == redislock.ErrNotObtained {
 		return false
 	} else if err != nil {
