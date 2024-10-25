@@ -123,4 +123,6 @@ func (b *Buffer) Unlock() {
 	if err != nil {
 		utils.SafeLogf("Error unlocking: %v\n", err)
 	}
+
+	b.lock = nil
 }
