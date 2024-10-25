@@ -52,15 +52,7 @@ func (b *Buffer) Subscribe(ctx context.Context) (<-chan []byte, error) {
 	go func() {
 		defer close(ch) // Ensure the channel is closed when the goroutine exits
 
-		lastID := ""
-
-		// Wait for first write
-		for {
-			lastID = b.latestMsgId
-			if lastID != "" {
-				break
-			}
-		}
+		lastID := "0"
 
 		for {
 			select {
