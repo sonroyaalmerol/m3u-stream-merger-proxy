@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/utils"
 	"net/http"
@@ -12,44 +13,29 @@ import (
 	"strings"
 )
 
-type StreamInstance struct {
+var streamStatusChans map[string]*chan int
+
+type ClientInstance struct {
 	Database *database.Instance
-	Info     database.StreamInfo
-	Buffer   *Buffer
 }
 
-func InitializeStream(ctx context.Context, streamUrl string) (*StreamInstance, error) {
+func InitializeClient(ctx context.Context, streamUrl string) (*ClientInstance, error) {
 	initDb, err := database.InitializeDb()
 	if err != nil {
 		utils.SafeLogf("Error initializing Redis database: %v", err)
 		return nil, err
 	}
 
-	buffer, err := NewBuffer(initDb, streamUrl)
-	if err != nil {
-		utils.SafeLogf("Error initializing stream buffer: %v", err)
-		return nil, err
-	}
-
-	stream, err := initDb.GetStreamBySlug(streamUrl)
-	if err != nil {
-		return nil, err
-	}
-
-	return &StreamInstance{
+	return &ClientInstance{
 		Database: initDb,
-		Info:     stream,
-		Buffer:   buffer,
 	}, nil
 }
 
-func (instance *StreamInstance) DirectProxy(ctx context.Context, resp *http.Response, w http.ResponseWriter, statusChan chan int) {
+func (instance *ClientInstance) DirectProxy(ctx context.Context, resp *http.Response, w http.ResponseWriter) error {
 	scanner := bufio.NewScanner(resp.Body)
 	base, err := url.Parse(resp.Request.URL.String())
 	if err != nil {
-		utils.SafeLogf("Invalid base URL for M3U8 stream: %v", err)
-		statusChan <- 4
-		return
+		return fmt.Errorf("Invalid base URL for M3U8 stream: %v", err)
 	}
 
 	for scanner.Scan() {
@@ -57,9 +43,7 @@ func (instance *StreamInstance) DirectProxy(ctx context.Context, resp *http.Resp
 		if strings.HasPrefix(line, "#") {
 			_, err := w.Write([]byte(line + "\n"))
 			if err != nil {
-				utils.SafeLogf("Failed to write line to response: %v", err)
-				statusChan <- 4
-				return
+				return fmt.Errorf("Failed to write line to response: %v", err)
 			}
 		} else if strings.TrimSpace(line) != "" {
 			u, err := url.Parse(line)
@@ -67,9 +51,7 @@ func (instance *StreamInstance) DirectProxy(ctx context.Context, resp *http.Resp
 				utils.SafeLogf("Failed to parse M3U8 URL in line: %v", err)
 				_, err := w.Write([]byte(line + "\n"))
 				if err != nil {
-					utils.SafeLogf("Failed to write line to response: %v", err)
-					statusChan <- 4
-					return
+					return fmt.Errorf("Failed to write line to response: %v", err)
 				}
 				continue
 			}
@@ -80,30 +62,27 @@ func (instance *StreamInstance) DirectProxy(ctx context.Context, resp *http.Resp
 
 			_, err = w.Write([]byte(u.String() + "\n"))
 			if err != nil {
-				utils.SafeLogf("Failed to write line to response: %v", err)
-				statusChan <- 4
-				return
+				return fmt.Errorf("Failed to write line to response: %v", err)
 			}
 		}
 	}
 
-	statusChan <- 4
+	return nil
 }
 
-func (instance *StreamInstance) StreamBuffer(ctx context.Context, w http.ResponseWriter) {
+func (instance *ClientInstance) StreamBuffer(ctx context.Context, buffer *Buffer, w http.ResponseWriter) error {
 	debug := os.Getenv("DEBUG") == "true"
 
-	streamCh, err := instance.Buffer.Subscribe(ctx)
+	streamCh, err := buffer.Subscribe(ctx)
 	if err != nil {
-		utils.SafeLogf("Error subscribing client: %v", err)
-		return
+		return fmt.Errorf("Error subscribing client: %v", err)
 	}
-	err = instance.Database.IncrementBufferUser(instance.Buffer.streamKey)
+	err = instance.Database.IncrementBufferUser(buffer.streamKey)
 	if err != nil && debug {
 		utils.SafeLogf("Error incrementing buffer user: %v\n", err)
 	}
 	defer func() {
-		err = instance.Database.DecrementBufferUser(instance.Buffer.streamKey)
+		err = instance.Database.DecrementBufferUser(buffer.streamKey)
 		if err != nil && debug {
 			utils.SafeLogf("Error decrementing buffer user: %v\n", err)
 		}
@@ -112,12 +91,11 @@ func (instance *StreamInstance) StreamBuffer(ctx context.Context, w http.Respons
 	for {
 		select {
 		case <-ctx.Done(): // handle context cancellation
-			return
+			return nil
 		case chunk := <-*streamCh:
 			_, err := w.Write(chunk)
 			if err != nil {
-				utils.SafeLogf("Error writing to client: %v", err)
-				return
+				return fmt.Errorf("Error writing to client: %v", err)
 			}
 
 			if flusher, ok := w.(http.Flusher); ok {
@@ -133,6 +111,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
+	if streamStatusChans == nil {
+		streamStatusChans = make(map[string]*chan int)
+	}
+
 	utils.SafeLogf("Received request from %s for URL: %s\n", r.RemoteAddr, r.URL.Path)
 
 	streamUrl := strings.Split(path.Base(r.URL.Path), ".")[0]
@@ -142,83 +124,52 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stream, err := InitializeStream(ctx, strings.TrimPrefix(streamUrl, "/"))
+	streamUrl = strings.TrimPrefix(streamUrl, "/")
+
+	client, err := InitializeClient(ctx, streamUrl)
 	if err != nil {
 		utils.SafeLogf("Error retrieving stream for slug %s: %v\n", streamUrl, err)
 		http.NotFound(w, r)
 		return
 	}
 
-	var selectedIndex int
-	var selectedUrl string
+	stream, err := InitializeBufferStream(streamUrl)
+	if err != nil {
+		utils.SafeLogf("Error retrieving buffer stream for slug %s: %v\n", streamUrl, err)
+		http.NotFound(w, r)
+		return
+	}
 
-	firstWrite := true
+	err = stream.Start(r)
+	if err != nil {
+		utils.SafeLogf("Error starting buffer stream for slug %s: %v\n", streamUrl, err)
+		http.NotFound(w, r)
+		return
+	}
 
-	var resp *http.Response
+	utils.SafeLogf("Proxying %s to %s\n", stream.Info.Title, r.RemoteAddr)
 
-	for {
-		select {
-		case <-ctx.Done():
-			utils.SafeLogf("Client disconnected: %s\n", r.RemoteAddr)
-			return
-		default:
-			resp, selectedUrl, selectedIndex, err = stream.LoadBalancer(&stream.Buffer.testedIndexes, r.Method)
-			if err != nil {
-				utils.SafeLogf("Error reloading stream for %s: %v\n", streamUrl, err)
-				return
-			}
+	for k, v := range stream.Response.Header {
+		if strings.ToLower(k) == "content-length" {
+			continue
+		}
 
-			// HTTP header initialization
-			if firstWrite {
-				for k, v := range resp.Header {
-					if strings.ToLower(k) == "content-length" {
-						continue
-					}
-
-					for _, val := range v {
-						w.Header().Set(k, val)
-					}
-				}
-				w.WriteHeader(resp.StatusCode)
-
-				if debug {
-					utils.SafeLogf("[DEBUG] Headers set for response: %v\n", w.Header())
-				}
-				firstWrite = false
-			}
-
-			exitStatus := make(chan int)
-
-			utils.SafeLogf("Proxying %s to %s\n", r.RemoteAddr, selectedUrl)
-
-			if r.Method != http.MethodGet || utils.EOFIsExpected(resp) {
-				go stream.DirectProxy(ctx, resp, w, exitStatus)
-			} else {
-				go stream.StreamBuffer(ctx, w)
-				go BufferStream(stream, selectedIndex, resp, r, w, exitStatus)
-			}
-
-			stream.Buffer.testedIndexes = append(stream.Buffer.testedIndexes, selectedIndex)
-
-			streamExitCode := <-exitStatus
-			utils.SafeLogf("Exit code %d received from %s\n", streamExitCode, selectedUrl)
-
-			if streamExitCode == 2 && utils.EOFIsExpected(resp) {
-				utils.SafeLogf("Successfully proxied playlist: %s\n", r.RemoteAddr)
-				cancel()
-			} else if streamExitCode == 1 || streamExitCode == 2 {
-				// Retry on server-side connection errors
-				utils.SafeLogf("Retrying other servers...\n")
-			} else if streamExitCode == 4 {
-				utils.SafeLogf("Finished handling %s request: %s\n", r.Method, r.RemoteAddr)
-				cancel()
-			} else {
-				// Consider client-side connection errors as complete closure
-				utils.SafeLogf("Client has closed the stream: %s\n", r.RemoteAddr)
-				cancel()
-			}
-
-			resp.Body.Close()
+		for _, val := range v {
+			w.Header().Set(k, val)
 		}
 	}
+	w.WriteHeader(stream.Response.StatusCode)
+
+	if debug {
+		utils.SafeLogf("[DEBUG] Headers set for response: %v\n", w.Header())
+	}
+
+	if r.Method != http.MethodGet || utils.EOFIsExpected(stream.Response) {
+		err = client.DirectProxy(ctx, stream.Response, w)
+	} else {
+		err = client.StreamBuffer(ctx, stream.Buffer, w)
+	}
+
+	utils.SafeLogf("Error stream for slug %s: %v\n", streamUrl, err)
+	http.Error(w, err.Error(), http.StatusInternalServerError)
 }
