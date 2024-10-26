@@ -140,9 +140,9 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = stream.Start(r)
+	err = stream.GetInitialResponse(r)
 	if err != nil {
-		utils.SafeLogf("Error starting buffer stream for slug %s: %v\n", streamUrl, err)
+		utils.SafeLogf("Error getting initial response for slug %s: %v\n", streamUrl, err)
 		http.NotFound(w, r)
 		return
 	}
@@ -167,6 +167,13 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet || utils.EOFIsExpected(stream.Response) {
 		err = client.DirectProxy(ctx, stream.Response, w)
 	} else {
+		err = stream.Start(r)
+		if err != nil {
+			utils.SafeLogf("Error starting buffer stream for slug %s: %v\n", streamUrl, err)
+			http.NotFound(w, r)
+			return
+		}
+
 		err = client.StreamBuffer(ctx, stream.Buffer, w)
 	}
 

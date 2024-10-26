@@ -24,6 +24,7 @@ type BufferStream struct {
 	Database      *database.Instance
 	Started       bool
 	Response      *http.Response
+	CurrentIndex  int
 }
 
 func InitializeBufferStream(streamUrl string) (*BufferStream, error) {
@@ -62,6 +63,18 @@ func InitializeBufferStream(streamUrl string) (*BufferStream, error) {
 	return BufferStreams[streamUrl], nil
 }
 
+func (stream *BufferStream) GetInitialResponse(r *http.Request) error {
+	resp, selectedIndex, err := stream.LoadBalancer(r.Method)
+	if err != nil {
+		return err
+	}
+
+	stream.Response = resp
+	stream.CurrentIndex = selectedIndex
+
+	return nil
+}
+
 func (stream *BufferStream) Start(r *http.Request) error {
 	debug := os.Getenv("DEBUG") == "true"
 	ctx, cancel := context.WithCancel(context.Background())
@@ -76,14 +89,11 @@ func (stream *BufferStream) Start(r *http.Request) error {
 		stream.Started = false
 	}()
 
-	resp, selectedIndex, err := stream.LoadBalancer(r.Method)
-	if err != nil {
-		return err
-	}
-
-	stream.Response = resp
-
 	firstIteration := true
+
+	resp := stream.Response
+	selectedIndex := stream.CurrentIndex
+	var err error
 
 	go func() {
 		for {
@@ -100,6 +110,7 @@ func (stream *BufferStream) Start(r *http.Request) error {
 						return
 					}
 					stream.Response = resp
+					stream.CurrentIndex = selectedIndex
 				} else {
 					firstIteration = false
 				}
