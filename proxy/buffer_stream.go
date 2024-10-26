@@ -176,7 +176,7 @@ func (stream *BufferStream) streamToBuffer(ctx context.Context, resp *http.Respo
 				utils.SafeLogf("Failed to get number of clients: %s\n", err)
 			}
 
-			if clients <= 0 && time.Now().Sub(lastClientSeen) > 3*time.Second {
+			if clients <= 0 && time.Since(lastClientSeen) > 3*time.Second {
 				utils.SafeLogf("No clients left: %s\n", stream.Info.Title)
 				return
 			}
