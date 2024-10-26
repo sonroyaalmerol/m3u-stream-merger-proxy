@@ -77,9 +77,6 @@ func (stream *BufferStream) GetInitialResponse(r *http.Request) error {
 
 func (stream *BufferStream) Start(r *http.Request) error {
 	debug := os.Getenv("DEBUG") == "true"
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	if stream.Started {
 		return nil
 	}
@@ -96,6 +93,9 @@ func (stream *BufferStream) Start(r *http.Request) error {
 	var err error
 
 	go func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
 		for {
 			select {
 			case <-ctx.Done():
