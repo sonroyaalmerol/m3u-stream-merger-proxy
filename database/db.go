@@ -237,6 +237,33 @@ func (db *Instance) DecrementConcurrency(m3uIndex int) error {
 	return db.Redis.Decr(db.Ctx, key).Err()
 }
 
+func (db *Instance) GetBufferUser(bufferId string) (int, error) {
+	key := "bufferuser:" + bufferId
+	countStr, err := db.Redis.Get(db.Ctx, key).Result()
+	if err == redis.Nil {
+		return 0, nil // Key does not exist
+	} else if err != nil {
+		return 0, err
+	}
+
+	count, err := strconv.Atoi(countStr)
+	if err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
+func (db *Instance) IncrementBufferUser(bufferId string) error {
+	key := "bufferuser:" + bufferId
+	return db.Redis.Incr(db.Ctx, key).Err()
+}
+
+func (db *Instance) DecrementBufferUser(bufferId string) error {
+	key := "bufferuser:" + bufferId
+	return db.Redis.Decr(db.Ctx, key).Err()
+}
+
 func (db *Instance) ClearConcurrencies() error {
 	var cursor uint64
 	var err error
@@ -245,6 +272,18 @@ func (db *Instance) ClearConcurrencies() error {
 	for {
 		var scanKeys []string
 		scanKeys, cursor, err = db.Redis.Scan(db.Ctx, cursor, "concurrency:*", 0).Result()
+		if err != nil {
+			return fmt.Errorf("error scanning keys from Redis: %v", err)
+		}
+		keys = append(keys, scanKeys...)
+		if cursor == 0 {
+			break
+		}
+	}
+
+	for {
+		var scanKeys []string
+		scanKeys, cursor, err = db.Redis.Scan(db.Ctx, cursor, "bufferuser:*", 0).Result()
 		if err != nil {
 			return fmt.Errorf("error scanning keys from Redis: %v", err)
 		}
