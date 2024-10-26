@@ -11,11 +11,10 @@ import (
 	"strings"
 )
 
-func (instance *BufferStream) LoadBalancer(method string) (*http.Response, int, error) {
+func (instance *StreamInstance) LoadBalancer(previous *[]int, method string) (*http.Response, string, int, error) {
 	debug := os.Getenv("DEBUG") == "true"
 
 	m3uIndexes := utils.GetM3UIndexes()
-	previous := &instance.TestedIndexes
 
 	sort.Slice(m3uIndexes, func(i, j int) bool {
 		return instance.Database.ConcurrencyPriorityValue(i) > instance.Database.ConcurrencyPriorityValue(j)
@@ -59,9 +58,7 @@ func (instance *BufferStream) LoadBalancer(method string) (*http.Response, int, 
 				if debug {
 					utils.SafeLogf("[DEBUG] Successfully fetched stream from %s\n", url)
 				}
-
-				instance.TestedIndexes = append(instance.TestedIndexes, index)
-				return resp, index, nil
+				return resp, url, index, nil
 			}
 			utils.SafeLogf("Error fetching stream: %s\n", err.Error())
 			if debug {
@@ -79,5 +76,5 @@ func (instance *BufferStream) LoadBalancer(method string) (*http.Response, int, 
 		lap++
 	}
 
-	return nil, -1, fmt.Errorf("Error fetching stream. Exhausted all streams.")
+	return nil, "", -1, fmt.Errorf("Error fetching stream. Exhausted all streams.")
 }
