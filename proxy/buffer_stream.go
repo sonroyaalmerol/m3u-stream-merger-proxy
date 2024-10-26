@@ -87,8 +87,6 @@ func (stream *BufferStream) Start(r *http.Request) error {
 
 	stream.Started = true
 
-	firstIteration := true
-
 	resp := stream.Response
 	selectedIndex := stream.CurrentIndex
 	var err error
@@ -98,13 +96,16 @@ func (stream *BufferStream) Start(r *http.Request) error {
 		defer cancel()
 		defer func() {
 			stream.Started = false
+			resp.Body.Close()
 		}()
+		locker := redislock.New(stream.Database.Redis)
+
+		firstIteration := true
 
 		for {
 			select {
 			case <-ctx.Done():
 				utils.SafeLogf("Context cancelled: %s\n", stream.Info.Title)
-				resp.Body.Close()
 				return
 			default:
 				if !firstIteration {
@@ -118,9 +119,6 @@ func (stream *BufferStream) Start(r *http.Request) error {
 				} else {
 					firstIteration = false
 				}
-
-				stream.Buffer.testedIndexes = append(stream.Buffer.testedIndexes, selectedIndex)
-				locker := redislock.New(stream.Database.Redis)
 
 				lock, err := locker.Obtain(ctx, stream.Id, time.Minute, nil)
 				if err == redislock.ErrNotObtained {
@@ -241,6 +239,23 @@ func (stream *BufferStream) streamToBuffer(ctx context.Context, resp *http.Respo
 			err = stream.Buffer.Write(ctx, sourceChunk[:n])
 			if err != nil {
 				utils.SafeLogf("Failed to store buffer: %s\n", err.Error())
+				utils.SafeLogf("Source chunk: %v\n", sourceChunk)
+
+				if timeoutSecond == 0 {
+					return
+				}
+
+				if debug {
+					utils.SafeLogf("[DEBUG] Retrying same stream with backoff of %v...\n", currentBackoff)
+				}
+
+				time.Sleep(currentBackoff)
+				currentBackoff *= 2
+				if currentBackoff > maxBackoff {
+					currentBackoff = maxBackoff
+				}
+
+				continue
 			}
 
 			// Reset the timer on each successful write and backoff

@@ -15,7 +15,7 @@ func (instance *BufferStream) LoadBalancer(method string) (*http.Response, int, 
 	debug := os.Getenv("DEBUG") == "true"
 
 	m3uIndexes := utils.GetM3UIndexes()
-	previous := &instance.Buffer.testedIndexes
+	previous := &instance.TestedIndexes
 
 	sort.Slice(m3uIndexes, func(i, j int) bool {
 		return instance.Database.ConcurrencyPriorityValue(i) > instance.Database.ConcurrencyPriorityValue(j)
@@ -59,6 +59,8 @@ func (instance *BufferStream) LoadBalancer(method string) (*http.Response, int, 
 				if debug {
 					utils.SafeLogf("[DEBUG] Successfully fetched stream from %s\n", url)
 				}
+
+				instance.TestedIndexes = append(instance.TestedIndexes, index)
 				return resp, index, nil
 			}
 			utils.SafeLogf("Error fetching stream: %s\n", err.Error())

@@ -13,12 +13,11 @@ import (
 
 // Buffer struct using Redis Streams
 type Buffer struct {
-	streamKey     string
-	lockKey       string
-	db            *database.Instance
-	testedIndexes []int
-	latestMsgId   string
-	bufferSize    int64
+	streamKey   string
+	lockKey     string
+	db          *database.Instance
+	latestMsgId string
+	bufferSize  int64
 }
 
 // NewBuffer creates a new Redis-backed buffer with a unique stream key
@@ -30,11 +29,10 @@ func NewBuffer(db *database.Instance, id string) (*Buffer, error) {
 	}
 
 	return &Buffer{
-		db:            db,
-		streamKey:     "streambuffer:" + id,
-		lockKey:       "streambuffer:" + id + ":streaming",
-		testedIndexes: []int{},
-		bufferSize:    int64(bufferSize),
+		db:         db,
+		streamKey:  "streambuffer:" + id,
+		lockKey:    "streambuffer:" + id + ":streaming",
+		bufferSize: int64(bufferSize),
 	}, nil
 }
 
