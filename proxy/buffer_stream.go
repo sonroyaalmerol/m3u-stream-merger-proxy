@@ -64,6 +64,10 @@ func InitializeBufferStream(streamUrl string) (*BufferStream, error) {
 }
 
 func (stream *BufferStream) GetInitialResponse(r *http.Request) error {
+	if stream.Response != nil {
+		return nil
+	}
+
 	resp, selectedIndex, err := stream.LoadBalancer(r.Method)
 	if err != nil {
 		return err
@@ -82,9 +86,6 @@ func (stream *BufferStream) Start(r *http.Request) error {
 	}
 
 	stream.Started = true
-	defer func() {
-		stream.Started = false
-	}()
 
 	firstIteration := true
 
@@ -95,6 +96,9 @@ func (stream *BufferStream) Start(r *http.Request) error {
 	go func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+		defer func() {
+			stream.Started = false
+		}()
 
 		for {
 			select {
