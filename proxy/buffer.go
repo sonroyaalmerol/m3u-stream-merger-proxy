@@ -40,7 +40,7 @@ func NewBuffer(db *database.Instance, id string) (*Buffer, error) {
 func (b *Buffer) Write(ctx context.Context, data []byte) error {
 	msgId, err := b.db.Redis.XAdd(ctx, &redis.XAddArgs{
 		Stream: b.streamKey,
-		Values: map[string]interface{}{"data": data},
+		Values: map[string]interface{}{"data": string(data)},
 		MaxLen: b.bufferSize,
 	}).Result()
 	if err != nil {

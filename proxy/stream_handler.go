@@ -177,6 +177,8 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		err = client.StreamBuffer(ctx, stream.Buffer, w)
 	}
 
-	utils.SafeLogf("Error stream for slug %s: %v\n", streamUrl, err)
-	http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err != nil {
+		utils.SafeLogf("Error stream for slug %s: %v\n", streamUrl, err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
