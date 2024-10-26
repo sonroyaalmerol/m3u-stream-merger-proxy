@@ -23,7 +23,6 @@ type Buffer struct {
 	testedIndexes []int
 	latestMsgId   string
 	bufferSize    int64
-	lock          *redislock.Lock
 }
 
 // NewBuffer creates a new Redis-backed buffer with a unique stream key
@@ -116,7 +115,12 @@ func BufferStream(instance *StreamInstance, m3uIndex int, resp *http.Response, r
 		utils.SafeLogf("Obtaining lock error: %v\n", err)
 		return
 	}
-	defer lock.Release(context.Background())
+	defer func() {
+		err := lock.Release(context.Background())
+		if err != nil && debug {
+			utils.SafeLogf("Releasing lock error: %v\n", err)
+		}
+	}()
 
 	instance.Database.UpdateConcurrency(m3uIndex, true)
 	defer instance.Database.UpdateConcurrency(m3uIndex, false)

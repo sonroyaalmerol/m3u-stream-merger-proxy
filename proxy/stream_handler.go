@@ -91,13 +91,23 @@ func (instance *StreamInstance) DirectProxy(ctx context.Context, resp *http.Resp
 }
 
 func (instance *StreamInstance) StreamBuffer(ctx context.Context, w http.ResponseWriter) {
+	debug := os.Getenv("DEBUG") == "true"
+
 	streamCh, err := instance.Buffer.Subscribe(ctx)
 	if err != nil {
 		utils.SafeLogf("Error subscribing client: %v", err)
 		return
 	}
-	instance.Database.IncrementBufferUser(instance.Buffer.streamKey)
-	defer instance.Database.DecrementBufferUser(instance.Buffer.streamKey)
+	err = instance.Database.IncrementBufferUser(instance.Buffer.streamKey)
+	if err != nil && debug {
+		utils.SafeLogf("Error incrementing buffer user: %v\n", err)
+	}
+	defer func() {
+		err = instance.Database.DecrementBufferUser(instance.Buffer.streamKey)
+		if err != nil && debug {
+			utils.SafeLogf("Error decrementing buffer user: %v\n", err)
+		}
+	}()
 
 	for {
 		select {
