@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"m3u-stream-merger/database"
 	"m3u-stream-merger/m3u"
 	"m3u-stream-merger/proxy"
@@ -54,10 +55,10 @@ func main() {
 	})
 
 	// Start the server
-	utils.SafeLogln("Server is running on port 8080...")
+	utils.SafeLogln(fmt.Sprintf("Server is running on port %s...", os.Getenv("PORT")))
 	utils.SafeLogln("Playlist Endpoint is running (`/playlist.m3u`)")
 	utils.SafeLogln("Stream Endpoint is running (`/proxy/{originalBasePath}/{streamID}.{fileExt}`)")
-	err = http.ListenAndServe(":8080", nil)
+	err = http.ListenAndServe(fmt.Sprintf(":%s", os.Getenv("PORT")), nil)
 	if err != nil {
 		utils.SafeLogFatalf("HTTP server error: %v", err)
 	}
