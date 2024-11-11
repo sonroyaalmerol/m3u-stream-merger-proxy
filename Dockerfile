@@ -51,5 +51,7 @@ RUN chmod +x /m3u-proxy/entrypoint.sh
 ENV PUID=1000
 ENV PGID=1000
 
+ENV PORT=8080
+
 # The container entrypoint
 ENTRYPOINT ["/m3u-proxy/entrypoint.sh", "/m3u-proxy/m3u-proxy"]
