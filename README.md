@@ -94,6 +94,7 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 
 | ENV VAR                     | Description                                              | Default Value | Possible Values                                |
 |-----------------------------|----------------------------------------------------------|---------------|------------------------------------------------|
+| PORT | Set listening port of service inside the container.                  |   8080 |   Any valid port |
 | PUID | Set UID of user running the container.                  |   1000 |   Any valid UID |
 | PGID | Set GID of user running the container.                  |   1000 |   Any valid GID |
 | TZ                          | Set timezone                                           | Etc/UTC     | [TZ Identifiers](https://nodatime.org/TimeZones) |
