@@ -1,8 +1,8 @@
 # 📡 M3U Stream Merger Proxy
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/15a1064c638d4402931fe633b2baa51d)](https://app.codacy.com/gh/sonroyaalmerol/m3u-stream-merger-proxy/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade) [![Docker Pulls](https://img.shields.io/docker/pulls/sonroyaalmerol/m3u-stream-merger-proxy.svg)](https://hub.docker.com/r/sonroyaalmerol/m3u-stream-merger-proxy/) [![](https://img.shields.io/docker/image-size/sonroyaalmerol/m3u-stream-merger-proxy)](https://img.shields.io/docker/image-size/sonroyaalmerol/m3u-stream-merger-proxy) [![Release Images](https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/actions/workflows/release.yml/badge.svg)](https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/actions/workflows/release.yml) [![Developer Images](https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/actions/workflows/developer.yml/badge.svg)](https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/actions/workflows/developer.yml) [![Discord](https://img.shields.io/discord/1274826220596625603?logo=discord&label=Discord&link=https%3A%2F%2Fdiscord.gg%2Fb2hVjRvkcj)](https://discord.com/invite/b2hVjRvkcj)
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
 [![All Contributors](https://img.shields.io/badge/all_contributors-1-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/15a1064c638d4402931fe633b2baa51d)](https://app.codacy.com/gh/sonroyaalmerol/m3u-stream-merger-proxy/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade) [![Docker Pulls](https://img.shields.io/docker/pulls/sonroyaalmerol/m3u-stream-merger-proxy.svg)](https://hub.docker.com/r/sonroyaalmerol/m3u-stream-merger-proxy/) [![](https://img.shields.io/docker/image-size/sonroyaalmerol/m3u-stream-merger-proxy)](https://img.shields.io/docker/image-size/sonroyaalmerol/m3u-stream-merger-proxy) [![Release Images](https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/actions/workflows/release.yml/badge.svg)](https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/actions/workflows/release.yml) [![Developer Images](https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/actions/workflows/developer.yml/badge.svg)](https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/actions/workflows/developer.yml) [![Discord](https://img.shields.io/discord/1274826220596625603?logo=discord&label=Discord&link=https%3A%2F%2Fdiscord.gg%2Fb2hVjRvkcj)](https://discord.com/invite/b2hVjRvkcj)
 
 > [!WARNING]  
 > This repo is currently in heavy development. Expect major changes on every release until the first stable release, `1.0.0`.
@@ -163,16 +163,12 @@ Huge thanks to those who donated for the development of this project!
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://paypal.me/saalmerol"><img src="https://avatars.githubusercontent.com/u/17176864?v=4?s=100" width="100px;" alt="Son Roy Almerol"/><br /><sub><b>Son Roy Almerol</b></sub></a><br /><a href="#infra-sonroyaalmerol" title="Infrastructure (Hosting, Build-Tools, etc)">🚇</a> <a href="https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/commits?author=sonroyaalmerol" title="Tests">⚠️</a> <a href="https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/commits?author=sonroyaalmerol" title="Documentation">📖</a> <a href="https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/commits?author=sonroyaalmerol" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/andjos"><img src="https://avatars.githubusercontent.com/u/15799439?v=4?s=100" width="100px;" alt="Anders Josefsson"/><br /><sub><b>Anders Josefsson</b></sub></a><br /><a href="https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/commits?author=andjos" title="Documentation">📖</a> <a href="https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/commits?author=andjos" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://pixelhosting.nl"><img src="https://avatars.githubusercontent.com/u/45701225?v=4?s=100" width="100px;" alt="blackwhitebear8"/><br /><sub><b>blackwhitebear8</b></sub></a><br /><a href="https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/commits?author=blackwhitebear8" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://kevinpirnie.com"><img src="https://avatars.githubusercontent.com/u/48323656?v=4?s=100" width="100px;" alt="Kevin Pirnie"/><br /><sub><b>Kevin Pirnie</b></sub></a><br /><a href="https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/commits?author=kpirnie" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-
-<!-- ALL-CONTRIBUTORS-LIST:END -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
 
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->

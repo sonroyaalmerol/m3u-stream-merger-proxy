@@ -18,6 +18,34 @@
         "doc",
         "code"
       ]
+    },
+    {
+      "login": "andjos",
+      "name": "Anders Josefsson",
+      "avatar_url": "https://avatars.githubusercontent.com/u/15799439?v=4",
+      "profile": "https://github.com/andjos",
+      "contributions": [
+        "doc",
+        "code"
+      ]
+    },
+    {
+      "login": "blackwhitebear8",
+      "name": "blackwhitebear8",
+      "avatar_url": "https://avatars.githubusercontent.com/u/45701225?v=4",
+      "profile": "https://pixelhosting.nl",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "kpirnie",
+      "name": "Kevin Pirnie",
+      "avatar_url": "https://avatars.githubusercontent.com/u/48323656?v=4",
+      "profile": "https://kevinpirnie.com",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
