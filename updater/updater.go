@@ -107,14 +107,7 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 			}
 			utils.SafeLogln("CACHE_ON_SYNC enabled. Building cache.")
 
-			contentStream := make(chan string)
-			go store.RevalidatingGetM3U(nil, contentStream, true)
-			for {
-				_, ok := <-contentStream
-				if !ok {
-					break
-				}
-			}
+			_ = store.RevalidatingGetM3U(nil, true)
 		}
 	}
 }
