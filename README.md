@@ -10,7 +10,12 @@ Streamline your IPTV experience by consolidating multiple M3U playlists into a s
 Uses the channel title or `tvg-name` (as fallback) to merge multiple identical channels into one. This is not an xTeVe/Threadfin replacement but is often used with it.
 
 > [!IMPORTANT]  
-> All versions after `0.10.0` will require an external Redis/Valkey instance. The SQLite database within the data folder will not be used going forward. For data persistence, refer to the [Redis](https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/) docs. The sample `docker-compose.yml` below has also been modified to include Redis.
+> Starting `0.16.0`, Redis will be removed as a dependency. There will be no databases required for the proxy from this version moving forward.
+> Migrating to `0.16.0` is as easy as removing the Redis container from your compose file.
+> Due to a major change on how data is being processed, any Redis persistence cannot be migrated over and a sync from the original M3U sources will be required.
+
+> [!NOTICE]
+> All versions after `0.10.0` until `0.15.2` requires an external Redis/Valkey instance. For data persistence, refer to the [Redis](https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/) docs.
 > To see the README of a specific version, navigate to the specific tag of the desired version (e.g. [`0.10.0`](https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/tree/0.10.0)).
 
 ## How It Works
@@ -53,7 +58,6 @@ Deploy with ease using the provided `docker-compose.yml`:
 
 ```yaml
 
-version: '3'
 services:
   m3u-stream-merger-proxy:
     image: sonroyaalmerol/m3u-stream-merger-proxy:latest
@@ -72,20 +76,9 @@ services:
       - M3U_MAX_CONCURRENCY_2=1
       - M3U_URL_X=
     restart: always
-    depends_on:
-      - redis
-  redis:
-    image: redis
-    restart: always
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
-      interval: 1s
-      timeout: 3s
-      retries: 5
-    # Redis persistence is OPTIONAL. This will allow you to reuse the database across restarts.
-    # command: redis-server --save 60 1
+    # [OPTIONAL] Cache persistence: This will allow you to reuse the M3U cache across container recreates.
     # volumes:
-    #   - ./data:/data
+    #   - ./data:/m3u-proxy/data
 ```
 
 Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
@@ -103,12 +96,8 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | MAX_RETRIES | Set max number of retries (loop) across all M3Us while streaming. 0 to never stop retrying (beware of throttling from provider). | 5 | Any integer greater than or equal 0 |
 | RETRY_WAIT | Set a wait time before retrying (looping) across all M3Us on stream initialization error. | 0 | Any integer greater than or equal 0 |
 | STREAM_TIMEOUT | Set timeout duration in seconds of retrying on error before a stream is considered down. | 3 | Any positive integer greater than 0 |
-| REDIS_ADDR | Set Redis server address | N/A | e.g. localhost:6379 |
-| REDIS_PASS | Set Redis server password | N/A | Any string |
-| REDIS_DB | Set Redis server database to be used | 0 | 0 to 15 |
 | SORTING_KEY | Set tag to be used for sorting the stream list | tvg-id | tvg-id, tvg-chno |
 | USER_AGENT                  | Set the User-Agent of HTTP requests.                    | IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)    |  Any valid user agent        |
-| ~~LOAD_BALANCING_MODE~~ (removed on version 0.10.0)                | Set load balancing algorithm to a specific mode | brute-force    | brute-force/round-robin   |
 | PARSER_WORKERS | Set number of workers to spawn for M3U parsing. | 5 | Any positive integer |
 | BUFFER_MB | Set buffer size in mb. | 0 (no buffer) | Any positive integer |
 | INCLUDE_GROUPS_1, INCLUDE_GROUPS_2, INCLUDE_GROUPS_X    | Set channels to include based on groups (Takes precedence over EXCLUDE_GROUPS_X) | N/A | Go regexp |

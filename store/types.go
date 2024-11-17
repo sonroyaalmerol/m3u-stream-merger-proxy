@@ -1,11 +1,11 @@
 package store
 
 type StreamInfo struct {
-	Slug    string         `json:"slug"`
+	Slug    string         `json:"-"`
 	Title   string         `json:"title"`
-	TvgID   string         `json:"tvg_id"`
-	TvgChNo string         `json:"tvg_chno"`
-	LogoURL string         `json:"logo_url"`
-	Group   string         `json:"group_name"`
+	TvgID   string         `json:"-"`
+	TvgChNo string         `json:"-"`
+	LogoURL string         `json:"-"`
+	Group   string         `json:"-"`
 	URLs    map[int]string `json:"urls"`
 }
