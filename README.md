@@ -63,7 +63,6 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=America/Toronto
-      - REDIS_ADDR=redis:6379
       - SYNC_ON_BOOT=true
       - SYNC_CRON=0 0 * * *
       - M3U_URL_1=https://iptvprovider1.com/playlist.m3u
