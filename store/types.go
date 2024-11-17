@@ -1,7 +1,6 @@
 package store
 
 type StreamInfo struct {
-	Slug    string         `json:"-"`
 	Title   string         `json:"title"`
 	TvgID   string         `json:"-"`
 	TvgChNo string         `json:"-"`

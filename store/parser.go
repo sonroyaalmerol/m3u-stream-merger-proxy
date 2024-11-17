@@ -115,11 +115,5 @@ func parseLine(line string, nextLine string, m3uIndex int) StreamInfo {
 		currentStream.Title = utils.TvgNameParser(strings.TrimSpace(lineCommaSplit[1]))
 	}
 
-	currentStream.Slug = EncodeSlug(currentStream)
-
-	if debug {
-		utils.SafeLogf("[DEBUG] Generated slug: %s\n", currentStream.Slug)
-	}
-
 	return currentStream
 }

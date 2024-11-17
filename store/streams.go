@@ -49,7 +49,8 @@ func GetStreams() []StreamInfo {
 	wg.Wait()
 
 	streams.Range(func(key, value any) bool {
-		result = append(result, value.(StreamInfo))
+		stream := value.(StreamInfo)
+		result = append(result, stream)
 		return true
 	})
 
@@ -69,12 +70,12 @@ func GenerateStreamURL(baseUrl string, stream StreamInfo) string {
 
 		ext, err := utils.GetFileExtensionFromUrl(srcUrl)
 		if err != nil {
-			return fmt.Sprintf("%s/proxy/%s/%s", baseUrl, subPath, stream.Slug)
+			return fmt.Sprintf("%s/proxy/%s/%s", baseUrl, subPath, EncodeSlug(stream))
 		}
 
-		return fmt.Sprintf("%s/proxy/%s/%s%s", baseUrl, subPath, stream.Slug, ext)
+		return fmt.Sprintf("%s/proxy/%s/%s%s", baseUrl, subPath, EncodeSlug(stream), ext)
 	}
-	return fmt.Sprintf("%s/proxy/stream/%s", baseUrl, stream.Slug)
+	return fmt.Sprintf("%s/proxy/stream/%s", baseUrl, EncodeSlug(stream))
 }
 
 func sortStreams(s []StreamInfo) {
