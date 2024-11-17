@@ -22,7 +22,7 @@ func isDebugMode() bool {
 	return os.Getenv("DEBUG") == "true"
 }
 
-func RevalidatingGetM3U(r *http.Request, egressStream chan string, force bool) {
+func RevalidatingGetM3U(r *http.Request, egressStream *chan string, force bool) {
 	debug := isDebugMode()
 	if debug {
 		utils.SafeLogln("[DEBUG] Revalidating M3U cache")
@@ -49,7 +49,7 @@ func RevalidatingGetM3U(r *http.Request, egressStream chan string, force bool) {
 	readCacheFromFile(egressStream)
 }
 
-func generateM3UContent(r *http.Request, egressStream chan string) {
+func generateM3UContent(r *http.Request, egressStream *chan string) {
 	M3uCache.Lock()
 	defer M3uCache.Unlock()
 
@@ -70,7 +70,7 @@ func generateM3UContent(r *http.Request, egressStream chan string) {
 	}
 
 	go func() {
-		egressStream <- "#EXTM3U\n"
+		*egressStream <- "#EXTM3U\n"
 
 		for {
 			data, ok := <-contentStream
@@ -78,11 +78,11 @@ func generateM3UContent(r *http.Request, egressStream chan string) {
 				if debug {
 					utils.SafeLogln("[DEBUG] Finished generating M3U content")
 				}
-				close(egressStream)
-				break
+				close(*egressStream)
+				return
 			}
 
-			egressStream <- data
+			*egressStream <- data
 		}
 	}()
 
@@ -117,7 +117,7 @@ func ClearCache() {
 	}
 }
 
-func readCacheFromFile(dataChan chan string) {
+func readCacheFromFile(dataChan *chan string) {
 	debug := isDebugMode()
 
 	go func() {
@@ -127,16 +127,16 @@ func readCacheFromFile(dataChan chan string) {
 				utils.SafeLogf("[DEBUG] Cache file reading failed: %v\n", err)
 			}
 
-			dataChan <- "#EXTM3U\n"
+			*dataChan <- "#EXTM3U\n"
 		} else {
-			dataChan <- string(data)
+			*dataChan <- string(data)
 		}
 
-		close(dataChan)
+		close(*dataChan)
 	}()
 }
 
-func writeCacheToFile(content chan string) error {
+func writeCacheToFile(content *chan string) error {
 	err := os.MkdirAll(filepath.Dir(cacheFilePath), os.ModePerm)
 	if err != nil {
 		return fmt.Errorf("Error creating directories for data path: %v", err)
@@ -149,7 +149,7 @@ func writeCacheToFile(content chan string) error {
 
 	go func() {
 		for {
-			data, ok := <-content
+			data, ok := <-*content
 			if !ok {
 				break
 			}
