@@ -1,12 +1,13 @@
 name: Pull Request Publish
 on:
-  issue_comment:
+  pull_request:
     types:
-      - created
+      - synchronize
+      - opened
+      - reopened
 
 jobs:
   fetch-pr-details:
-    if: ${{ github.event.comment.body == '/publish' && github.event.issue.pull_request }}
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.get-sha.outputs.result }}
@@ -17,18 +18,12 @@ jobs:
         with:
           result-encoding: string
           script: |
-            const prNumber = context.issue.number;
-            const response = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: prNumber
-            });
-            const sha = response.data.head.sha;
+            const prNumber = context.payload.pull_request.number;
+            const sha = context.payload.pull_request.head.sha;
             return sha;
 
   build-and-push:
     needs: fetch-pr-details
-    if: ${{ github.event.comment.body == '/publish' && github.event.issue.pull_request }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -53,7 +48,7 @@ jobs:
         with:
           images: |
             ghcr.io/${{ github.repository }}
-          tags: type=raw,value=pr-${{ github.event.issue.number }}
+          tags: type=raw,value=pr-${{ github.event.pull_request.number }}
           flavor: latest=false
 
       - name: Docker - Build and Push
@@ -69,8 +64,8 @@ jobs:
         with:
           header: Built and pushed Docker image for PR
           recreate: true
-          number: ${{ github.event.issue.number }}
+          number: ${{ github.event.pull_request.number }}
           message: |
             The Docker image for this pull request has been built and pushed to GHCR.
 
-            Image URL: `ghcr.io/${{ github.repository }}:pr-${{ github.event.issue.number }}`
+            Image URL: `ghcr.io/${{ github.repository }}:pr-${{ github.event.pull_request.number }}`
