@@ -51,33 +51,15 @@ func generateM3UContent(r *http.Request, egressStream chan string) {
 		utils.SafeLogf("[DEBUG] Base URL set to %s\n", baseURL)
 	}
 
-	contentStream := make(chan string)
-
-	if err := writeCacheToFile(egressStream); err != nil {
-		utils.SafeLogf("Error writing cache to file: %v\n", err)
-	}
-
-	go func() {
-		for {
-			data, ok := <-contentStream
-			if !ok {
-				if debug {
-					utils.SafeLogln("[DEBUG] Finished generating M3U content")
-				}
-				close(egressStream)
-				return
-			}
-
-			egressStream <- data
-		}
-	}()
+	go writeCacheToFile(egressStream)
 
 	go func() {
 		M3uCache.Lock()
 		defer M3uCache.Unlock()
 
 		streams := GetStreams()
-		contentStream <- "#EXTM3U\n"
+		egressStream <- "#EXTM3U\n"
+
 		for _, stream := range streams {
 			if len(stream.URLs) == 0 {
 				continue
@@ -87,9 +69,9 @@ func generateM3UContent(r *http.Request, egressStream chan string) {
 				utils.SafeLogf("[DEBUG] Processing stream title: %s\n", stream.Title)
 			}
 
-			contentStream <- formatStreamEntry(baseURL, stream)
+			egressStream <- formatStreamEntry(baseURL, stream)
 		}
-		close(contentStream)
+		close(egressStream)
 	}()
 }
 
@@ -111,8 +93,6 @@ func readCacheFromFile(dataChan chan string) {
 	debug := isDebugMode()
 
 	go func() {
-		dataChan <- "#EXTM3U\n"
-
 		data, err := os.ReadFile(cacheFilePath)
 		if err != nil {
 			if debug {
@@ -126,33 +106,21 @@ func readCacheFromFile(dataChan chan string) {
 	}()
 }
 
-func writeCacheToFile(content chan string) error {
-	err := os.MkdirAll(filepath.Dir(cacheFilePath), os.ModePerm)
-	if err != nil {
-		return fmt.Errorf("Error creating directories for data path: %v", err)
-	}
+func writeCacheToFile(dataChan chan string) {
+	var content strings.Builder
 
-	file, err := os.OpenFile(cacheFilePath+".new", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		return err
-	}
-
-	go func() {
-		for {
-			data, ok := <-content
-			if !ok {
-				break
-			}
-			_, _ = file.WriteString(data)
+	for {
+		data, ok := <-dataChan
+		if !ok {
+			break
 		}
+		content.WriteString(data)
+	}
 
-		_ = os.Remove(cacheFilePath)
-		_ = os.Rename(cacheFilePath+".new", cacheFilePath)
-
-		_ = file.Close()
-	}()
-
-	return nil
+	_ = os.MkdirAll(filepath.Dir(cacheFilePath), os.ModePerm)
+	_ = os.WriteFile(cacheFilePath+".new", []byte(content.String()), 0644)
+	_ = os.Remove(cacheFilePath)
+	_ = os.Rename(cacheFilePath+".new", cacheFilePath)
 }
 
 func deleteCacheFile() error {
