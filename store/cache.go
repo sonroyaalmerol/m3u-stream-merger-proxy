@@ -7,16 +7,18 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 )
 
 type Cache struct {
 	sync.RWMutex
-	Exists       bool
-	Revalidating bool
+	Exists         bool
+	Revalidating   bool
+	generationDone chan struct{}
 }
 
-var M3uCache = &Cache{}
+var M3uCache = &Cache{
+	generationDone: make(chan struct{}),
+}
 
 const cacheFilePath = "/m3u-proxy/cache.m3u"
 
@@ -36,6 +38,10 @@ func RevalidatingGetM3U(r *http.Request) string {
 		}
 
 		M3uCache.RUnlock()
+
+		// Wait for generation to finish
+		<-M3uCache.generationDone
+
 		return readCacheFromFile()
 	}
 	M3uCache.RUnlock()
@@ -44,22 +50,6 @@ func RevalidatingGetM3U(r *http.Request) string {
 }
 
 func generateM3UContent(r *http.Request) string {
-	M3uCache.RLock()
-	if M3uCache.Revalidating {
-		M3uCache.RUnlock()
-
-		for {
-			<-time.After(time.Second)
-			M3uCache.RLock()
-			if !M3uCache.Revalidating {
-				M3uCache.RUnlock()
-				return readCacheFromFile()
-			}
-			M3uCache.RUnlock()
-		}
-	}
-	M3uCache.RUnlock()
-
 	debug := isDebugMode()
 	if debug {
 		utils.SafeLogln("[DEBUG] Regenerating M3U cache in the background")
@@ -101,6 +91,9 @@ func generateM3UContent(r *http.Request) string {
 	M3uCache.Revalidating = false
 	M3uCache.Unlock()
 
+	close(M3uCache.generationDone)
+	M3uCache.generationDone = make(chan struct{})
+
 	return stringContent
 }
 
@@ -111,6 +104,7 @@ func ClearCache() {
 	defer M3uCache.Unlock()
 
 	M3uCache.Exists = false
+	M3uCache.Revalidating = false
 
 	if debug {
 		utils.SafeLogln("[DEBUG] Clearing memory and disk M3U cache.")

@@ -18,7 +18,7 @@ func DownloadM3USource(m3uIndex int) (err error) {
 		utils.SafeLogf("[DEBUG] Processing M3U from: %s\n", m3uURL)
 	}
 
-	finalPath := utils.GetM3UFilePathByIndex(m3uIndex + 1)
+	finalPath := utils.GetM3UFilePathByIndex(m3uIndex)
 	tmpPath := finalPath + ".new"
 
 	// Handle local file URLs

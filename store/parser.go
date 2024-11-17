@@ -16,7 +16,7 @@ func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
 }
 
 func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo)) error {
-	utils.SafeLogf("Parsing M3U %d...\n", m3uIndex)
+	utils.SafeLogf("Parsing M3U #%d...\n", m3uIndex+1)
 	filePath := utils.GetM3UFilePathByIndex(m3uIndex)
 
 	file, err := os.Open(filePath)
