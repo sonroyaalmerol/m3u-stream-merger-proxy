@@ -10,13 +10,9 @@ Streamline your IPTV experience by consolidating multiple M3U playlists into a s
 Uses the channel title or `tvg-name` (as fallback) to merge multiple identical channels into one. This is not an xTeVe/Threadfin replacement but is often used with it.
 
 > [!IMPORTANT]  
-> Starting `0.16.0`, Redis will be removed as a dependency. There will be no databases required for the proxy from this version moving forward.
+> Starting `0.16.0`, Redis is **removed** as a dependency. There will be **no** databases required for the proxy from this version moving forward.
 > Migrating to `0.16.0` is as easy as removing the Redis container from your compose file.
 > Due to a major change on how data is being processed, any Redis persistence cannot be migrated over and a sync from the original M3U sources will be required.
-
-> [!NOTICE]
-> All versions after `0.10.0` until `0.15.2` requires an external Redis/Valkey instance. For data persistence, refer to the [Redis](https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/) docs.
-> To see the README of a specific version, navigate to the specific tag of the desired version (e.g. [`0.10.0`](https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/tree/0.10.0)).
 
 ## How It Works
 
@@ -84,6 +80,10 @@ services:
 Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 
 ## Configuration
+
+> [!NOTE]
+> This configuration list only applies to the latest release version.
+> To see the README of a specific version, navigate to the specific tag of the desired version (e.g. [`0.10.0`](https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/tree/0.10.0)).
 
 | ENV VAR                     | Description                                              | Default Value | Possible Values                                |
 |-----------------------------|----------------------------------------------------------|---------------|------------------------------------------------|
