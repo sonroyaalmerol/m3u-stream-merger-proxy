@@ -5,6 +5,8 @@ on:
       - synchronize
       - opened
       - reopened
+    paths-ignore:
+      - '**/README.md'
 
 jobs:
   fetch-pr-details:
