@@ -5,6 +5,7 @@ import (
 	"m3u-stream-merger/utils"
 	"os"
 	"sort"
+	"sync"
 )
 
 func GetStreamBySlug(slug string) (StreamInfo, error) {
@@ -19,30 +20,38 @@ func GetStreamBySlug(slug string) (StreamInfo, error) {
 func GetStreams() []StreamInfo {
 	var (
 		debug   = os.Getenv("DEBUG") == "true"
-		streams = make(map[string]StreamInfo) // Map to store unique streams by title
-		result  = make([]StreamInfo, 0)       // Slice to store final results
+		result  = make([]StreamInfo, 0) // Slice to store final results
+		streams sync.Map
 	)
 
+	var wg sync.WaitGroup
 	for _, m3uIndex := range utils.GetM3UIndexes() {
-		err := M3UScanner(m3uIndex, func(streamInfo StreamInfo) {
-			// Check uniqueness and update if necessary
-			if existingStream, exists := streams[streamInfo.Title]; exists {
-				for idx, url := range streamInfo.URLs {
-					existingStream.URLs[idx] = url
-				}
-				streams[streamInfo.Title] = existingStream
-			} else {
-				streams[streamInfo.Title] = streamInfo
-			}
-		})
-		if err != nil && debug {
-			utils.SafeLogf("error getting streams: %v\n", err)
-		}
-	}
+		wg.Add(1)
+		go func(m3uIndex int) {
+			defer wg.Done()
 
-	for _, stream := range streams {
-		result = append(result, stream)
+			err := M3UScanner(m3uIndex, func(streamInfo StreamInfo) {
+				// Check uniqueness and update if necessary
+				if existingStream, exists := streams.Load(streamInfo.Title); exists {
+					for idx, url := range streamInfo.URLs {
+						existingStream.(StreamInfo).URLs[idx] = url
+					}
+					streams.Store(streamInfo.Title, existingStream)
+				} else {
+					streams.Store(streamInfo.Title, streamInfo)
+				}
+			})
+			if err != nil && debug {
+				utils.SafeLogf("error getting streams: %v\n", err)
+			}
+		}(m3uIndex)
 	}
+	wg.Wait()
+
+	streams.Range(func(key, value any) bool {
+		result = append(result, value.(StreamInfo))
+		return true
+	})
 
 	sortStreams(result)
 

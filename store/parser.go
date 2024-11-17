@@ -38,6 +38,7 @@ func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo)) error {
 	lines := strings.Split(content, "\n")
 
 	var currentLine string
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "#EXTINF:") {
