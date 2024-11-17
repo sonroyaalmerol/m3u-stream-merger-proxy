@@ -3,9 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"m3u-stream-merger/database"
-	"m3u-stream-merger/m3u"
-	"m3u-stream-merger/proxy"
+	"m3u-stream-merger/handlers"
+	"m3u-stream-merger/store"
 	"m3u-stream-merger/updater"
 	"m3u-stream-merger/utils"
 	"net/http"
@@ -18,14 +17,10 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	utils.SafeLogln("Checking database connection...")
-	db, err := database.InitializeDb()
-	if err != nil {
-		utils.SafeLogFatalf("Error initializing Redis database: %v", err)
-	}
+	cm := store.NewConcurrencyManager()
 
 	utils.SafeLogln("Starting updater...")
-	_, err = updater.Initialize(ctx)
+	_, err := updater.Initialize(ctx)
 	if err != nil {
 		utils.SafeLogFatalf("Error initializing updater: %v", err)
 	}
@@ -39,19 +34,13 @@ func main() {
 		}
 	}
 
-	utils.SafeLogln("Clearing stale concurrency data from database...")
-	err = db.ClearConcurrencies()
-	if err != nil {
-		utils.SafeLogFatalf("Error clearing concurrency database: %v", err)
-	}
-
 	utils.SafeLogln("Setting up HTTP handlers...")
 	// HTTP handlers
 	http.HandleFunc("/playlist.m3u", func(w http.ResponseWriter, r *http.Request) {
-		m3u.Handler(w, r)
+		handlers.M3UHandler(w, r)
 	})
 	http.HandleFunc("/proxy/", func(w http.ResponseWriter, r *http.Request) {
-		proxy.Handler(w, r)
+		handlers.StreamHandler(w, r, cm)
 	})
 
 	// Start the server

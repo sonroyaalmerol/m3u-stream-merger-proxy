@@ -1,4 +1,4 @@
-package database
+package store
 
 type StreamInfo struct {
 	Slug    string         `json:"slug"`

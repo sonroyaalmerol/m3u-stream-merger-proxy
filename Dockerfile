@@ -13,16 +13,9 @@ RUN go mod download
 # Copy the source code from the current directory to the Working Directory inside the container
 COPY . .
 
-# fire up redis server and test and build the app.
+# test and build the app.
 # hadolint ignore=DL3018
-RUN \
-  if [ "$(uname -m)" = "x86_64" ]; then \
-    apk --no-cache add redis && \
-    sed -i "s/bind .*/bind 127.0.0.1/g" /etc/redis.conf && \
-    redis-server --daemonize yes && \
-    go test ./...; \
-  fi && \
-  go build -ldflags='-s -w' -o m3u-proxy .
+RUN go test ./tests/... && go build -ldflags='-s -w' -o m3u-proxy .
 
 # End from the latest alpine image
 # hadolint ignore=DL3007
