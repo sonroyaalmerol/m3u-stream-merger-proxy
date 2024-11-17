@@ -9,7 +9,7 @@ import (
 )
 
 type ConcurrencyManager struct {
-	mu    sync.Mutex
+	mu    sync.RWMutex
 	count map[int]int
 }
 
@@ -32,8 +32,8 @@ func (cm *ConcurrencyManager) Decrement(m3uIndex int) {
 }
 
 func (cm *ConcurrencyManager) GetCount(m3uIndex int) int {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
 	return cm.count[m3uIndex]
 }
 
