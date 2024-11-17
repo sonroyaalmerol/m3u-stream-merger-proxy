@@ -22,31 +22,24 @@ func isDebugMode() bool {
 	return os.Getenv("DEBUG") == "true"
 }
 
-func RevalidatingGetM3U(r *http.Request, force bool) string {
+func RevalidatingGetM3U(r *http.Request, force bool) chan string {
 	debug := isDebugMode()
 	if debug {
 		utils.SafeLogln("[DEBUG] Revalidating M3U cache")
 	}
 
-	if force {
-		return generateM3UContent(r)
-	}
-
-	if _, err := os.Stat(cacheFilePath); err != nil {
-		if debug {
+	if _, err := os.Stat(cacheFilePath); err != nil || force {
+		if debug && !force {
 			utils.SafeLogln("[DEBUG] Existing cache not found, generating content")
 		}
-		if M3uCache.TryLock() {
-			go func() {
-				_ = generateM3UContent(r)
-			}()
-		}
+
+		return generateM3UContent(r)
 	}
 
 	return readCacheFromFile()
 }
 
-func generateM3UContent(r *http.Request) string {
+func generateM3UContent(r *http.Request) chan string {
 	M3uCache.Lock()
 	defer M3uCache.Unlock()
 
@@ -60,33 +53,52 @@ func generateM3UContent(r *http.Request) string {
 		utils.SafeLogf("[DEBUG] Base URL set to %s\n", baseURL)
 	}
 
-	var content strings.Builder
-	content.WriteString("#EXTM3U\n")
+	contentStream := make(chan string)
+	egressStream := make(chan string)
 
-	streams := GetStreams()
-	for _, stream := range streams {
-		if len(stream.URLs) == 0 {
-			continue
+	go func() {
+		var content strings.Builder
+		content.WriteString("#EXTM3U\n")
+		egressStream <- "#EXTM3U\n"
+
+		for {
+			data, ok := <-contentStream
+			if !ok {
+				if debug {
+					utils.SafeLogln("[DEBUG] Finished generating M3U content")
+				}
+				close(egressStream)
+				break
+			}
+
+			egressStream <- data
+			content.WriteString(data)
 		}
 
-		if debug {
-			utils.SafeLogf("[DEBUG] Processing stream with TVG ID: %s\n", stream.TvgID)
+		stringContent := content.String()
+
+		if err := writeCacheToFile(stringContent); err != nil {
+			utils.SafeLogf("Error writing cache to file: %v\n", err)
 		}
+	}()
 
-		content.WriteString(formatStreamEntry(baseURL, stream))
-	}
+	go func() {
+		streams := GetStreams()
+		for _, stream := range streams {
+			if len(stream.URLs) == 0 {
+				continue
+			}
 
-	if debug {
-		utils.SafeLogln("[DEBUG] Finished generating M3U content")
-	}
+			if debug {
+				utils.SafeLogf("[DEBUG] Processing stream with TVG ID: %s\n", stream.TvgID)
+			}
 
-	stringContent := content.String()
+			contentStream <- formatStreamEntry(baseURL, stream)
+		}
+		close(contentStream)
+	}()
 
-	if err := writeCacheToFile(stringContent); err != nil {
-		utils.SafeLogf("Error writing cache to file: %v\n", err)
-	}
-
-	return stringContent
+	return egressStream
 }
 
 func ClearCache() {
@@ -103,18 +115,23 @@ func ClearCache() {
 	}
 }
 
-func readCacheFromFile() string {
+func readCacheFromFile() chan string {
 	debug := isDebugMode()
 
-	data, err := os.ReadFile(cacheFilePath)
-	if err != nil {
-		if debug {
-			utils.SafeLogf("[DEBUG] Cache file reading failed: %v\n", err)
-		}
+	dataChan := make(chan string)
+	go func() {
+		data, err := os.ReadFile(cacheFilePath)
+		if err != nil {
+			if debug {
+				utils.SafeLogf("[DEBUG] Cache file reading failed: %v\n", err)
+			}
 
-		return "#EXTM3U\n"
-	}
-	return string(data)
+			dataChan <- "#EXTM3U\n"
+		}
+		dataChan <- string(data)
+	}()
+
+	return dataChan
 }
 
 func writeCacheToFile(content string) error {
