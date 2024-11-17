@@ -40,9 +40,6 @@ func RevalidatingGetM3U(r *http.Request) string {
 			if debug {
 				utils.SafeLogln("[DEBUG] Initiating cache revalidation")
 			}
-			M3uCache.Lock()
-			M3uCache.Revalidating = true
-			M3uCache.Unlock()
 
 			go generateM3UContent(r)
 		}
@@ -70,6 +67,11 @@ func RevalidatingGetM3U(r *http.Request) string {
 }
 
 func generateM3UContent(r *http.Request) string {
+	M3uCache.Lock()
+	defer M3uCache.Unlock()
+
+	M3uCache.Revalidating = true
+
 	debug := isDebugMode()
 	if debug {
 		utils.SafeLogln("[DEBUG] Regenerating M3U cache in the background")
@@ -106,10 +108,8 @@ func generateM3UContent(r *http.Request) string {
 		utils.SafeLogf("Error writing cache to file: %v\n", err)
 	}
 
-	M3uCache.Lock()
 	M3uCache.Exists = true
 	M3uCache.Revalidating = false
-	M3uCache.Unlock()
 
 	close(M3uCache.generationDone)
 	M3uCache.generationDone = make(chan struct{})
