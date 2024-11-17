@@ -40,10 +40,12 @@ func RevalidatingGetM3U(r *http.Request, egressStream chan string, force bool) {
 		}
 
 		M3uCache.RUnlock()
-		generateM3UContent(r, egressStream)
-	}
-	M3uCache.RUnlock()
 
+		generateM3UContent(r, egressStream)
+		return
+	}
+
+	M3uCache.RUnlock()
 	readCacheFromFile(egressStream)
 }
 
@@ -63,11 +65,9 @@ func generateM3UContent(r *http.Request, egressStream chan string) {
 
 	contentStream := make(chan string)
 
-	go func() {
-		if err := writeCacheToFile(egressStream); err != nil {
-			utils.SafeLogf("Error writing cache to file: %v\n", err)
-		}
-	}()
+	if err := writeCacheToFile(egressStream); err != nil {
+		utils.SafeLogf("Error writing cache to file: %v\n", err)
+	}
 
 	go func() {
 		egressStream <- "#EXTM3U\n"
@@ -144,19 +144,20 @@ func writeCacheToFile(content chan string) error {
 		return err
 	}
 
-	for {
-		data, ok := <-content
-		if !ok {
-			break
+	go func() {
+		for {
+			data, ok := <-content
+			if !ok {
+				break
+			}
+			_, _ = file.WriteString(data)
 		}
-		_, _ = file.WriteString(data)
-	}
 
-	_ = os.Remove(cacheFilePath)
-	err = os.Rename(cacheFilePath+".new", cacheFilePath)
-	if err != nil {
-		return err
-	}
+		_ = os.Remove(cacheFilePath)
+		_ = os.Rename(cacheFilePath+".new", cacheFilePath)
+
+		_ = file.Close()
+	}()
 
 	return nil
 }
