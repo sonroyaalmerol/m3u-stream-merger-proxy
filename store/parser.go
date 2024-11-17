@@ -15,8 +15,8 @@ func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
 	return DecodeSlug(slug)
 }
 
-func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo, lineNumber int)) error {
-	utils.SafeLogln("Parsing M3U file.")
+func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo)) error {
+	utils.SafeLogf("Parsing M3U %d...\n", m3uIndex)
 	filePath := utils.GetM3UFilePathByIndex(m3uIndex)
 
 	file, err := os.Open(filePath)
@@ -26,9 +26,7 @@ func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo, lineNumber int)) er
 
 	scanner := bufio.NewScanner(file)
 
-	currentLine := 0
 	for scanner.Scan() {
-		currentLine++
 		line := scanner.Text()
 		if strings.HasPrefix(line, "#EXTINF:") {
 			if scanner.Scan() {
@@ -48,7 +46,7 @@ func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo, lineNumber int)) er
 					continue
 				}
 
-				fn(streamInfo, currentLine)
+				fn(streamInfo)
 			}
 		}
 	}

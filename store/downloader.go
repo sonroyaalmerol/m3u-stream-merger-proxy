@@ -34,6 +34,8 @@ func DownloadM3USource(m3uIndex int) (err error) {
 			return fmt.Errorf("Error creating directories for final path: %v", err)
 		}
 
+		_ = os.Remove(finalPath)
+
 		// Create a symlink
 		err = os.Symlink(localPath, finalPath)
 		if err != nil {

@@ -27,7 +27,7 @@ func GetStreams() []StreamInfo {
 	)
 
 	for _, m3uIndex := range utils.GetM3UIndexes() {
-		err := M3UScanner(m3uIndex, func(streamInfo StreamInfo, lineNumber int) {
+		err := M3UScanner(m3uIndex, func(streamInfo StreamInfo) {
 			// Check uniqueness and update if necessary
 			if existingStream, exists := streams[streamInfo.Title]; exists {
 				for idx, url := range streamInfo.URLs {
