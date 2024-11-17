@@ -111,6 +111,8 @@ func readCacheFromFile(dataChan chan string) {
 	debug := isDebugMode()
 
 	go func() {
+		dataChan <- "#EXTM3U\n"
+
 		data, err := os.ReadFile(cacheFilePath)
 		if err != nil {
 			if debug {
