@@ -19,7 +19,6 @@ func M3UHandler(w http.ResponseWriter, r *http.Request) {
 	for {
 		data, ok := <-contentStream
 		if !ok {
-			w.WriteHeader(http.StatusOK)
 			return
 		}
 

@@ -11,7 +11,7 @@ import (
 )
 
 type Cache struct {
-	sync.RWMutex
+	sync.Mutex
 }
 
 var M3uCache = &Cache{}
@@ -28,19 +28,15 @@ func RevalidatingGetM3U(r *http.Request, egressStream chan string, force bool) {
 		utils.SafeLogln("[DEBUG] Revalidating M3U cache")
 	}
 
-	M3uCache.RLock()
 	if _, err := os.Stat(cacheFilePath); err != nil || force {
 		if debug && !force {
 			utils.SafeLogln("[DEBUG] Existing cache not found, generating content")
 		}
 
-		M3uCache.RUnlock()
-
 		generateM3UContent(r, egressStream)
 		return
 	}
 
-	M3uCache.RUnlock()
 	readCacheFromFile(egressStream)
 }
 
@@ -62,8 +58,6 @@ func generateM3UContent(r *http.Request, egressStream chan string) {
 	}
 
 	go func() {
-		egressStream <- "#EXTM3U\n"
-
 		for {
 			data, ok := <-contentStream
 			if !ok {
@@ -83,6 +77,7 @@ func generateM3UContent(r *http.Request, egressStream chan string) {
 		defer M3uCache.Unlock()
 
 		streams := GetStreams()
+		contentStream <- "#EXTM3U\n"
 		for _, stream := range streams {
 			if len(stream.URLs) == 0 {
 				continue
@@ -121,8 +116,6 @@ func readCacheFromFile(dataChan chan string) {
 			if debug {
 				utils.SafeLogf("[DEBUG] Cache file reading failed: %v\n", err)
 			}
-
-			dataChan <- "#EXTM3U\n"
 		} else {
 			dataChan <- string(data)
 		}
