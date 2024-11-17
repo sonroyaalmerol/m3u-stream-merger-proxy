@@ -45,9 +45,6 @@ func RevalidatingGetM3U(r *http.Request, egressStream chan string, force bool) {
 }
 
 func generateM3UContent(r *http.Request, egressStream chan string) {
-	M3uCache.Lock()
-	defer M3uCache.Unlock()
-
 	debug := isDebugMode()
 	if debug {
 		utils.SafeLogln("[DEBUG] Regenerating M3U cache in the background")
@@ -82,6 +79,9 @@ func generateM3UContent(r *http.Request, egressStream chan string) {
 	}()
 
 	go func() {
+		M3uCache.Lock()
+		defer M3uCache.Unlock()
+
 		streams := GetStreams()
 		for _, stream := range streams {
 			if len(stream.URLs) == 0 {
