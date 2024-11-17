@@ -5,8 +5,12 @@ on:
       - synchronize
       - opened
       - reopened
-    paths-ignore:
-      - '**/README.md'
+    paths:
+      - '**.go'
+      - 'Dockerfile'
+      - '**.sh'
+      - 'go.mod'
+      - 'go.sum'
 
 jobs:
   fetch-pr-details:
