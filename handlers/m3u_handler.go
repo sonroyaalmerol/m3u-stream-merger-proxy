@@ -15,11 +15,12 @@ func M3UHandler(w http.ResponseWriter, r *http.Request) {
 
 	contentStream := make(chan string)
 
-	go store.RevalidatingGetM3U(r, &contentStream, false)
+	go store.RevalidatingGetM3U(r, contentStream, false)
 	for {
 		data, ok := <-contentStream
 		if !ok {
-			break
+			w.WriteHeader(http.StatusOK)
+			return
 		}
 
 		_, err := w.Write([]byte(data))
@@ -29,6 +30,4 @@ func M3UHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-
-	w.WriteHeader(http.StatusOK)
 }
