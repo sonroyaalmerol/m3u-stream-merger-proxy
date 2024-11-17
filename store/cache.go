@@ -27,9 +27,19 @@ func isDebugMode() bool {
 }
 
 func RevalidatingGetM3U(r *http.Request) string {
+	debug := isDebugMode()
+	if debug {
+		utils.SafeLogln("[DEBUG] Revalidating M3U cache")
+	}
 	M3uCache.RLock()
 	if M3uCache.Exists {
+		if debug {
+			utils.SafeLogln("[DEBUG] M3U cache already exists")
+		}
 		if !M3uCache.Revalidating {
+			if debug {
+				utils.SafeLogln("[DEBUG] Initiating cache revalidation")
+			}
 			M3uCache.Lock()
 			M3uCache.Revalidating = true
 			M3uCache.Unlock()
@@ -38,13 +48,23 @@ func RevalidatingGetM3U(r *http.Request) string {
 		}
 
 		M3uCache.RUnlock()
+		if debug {
+			utils.SafeLogln("[DEBUG] Waiting for cache revalidation to finish")
+		}
 
 		// Wait for generation to finish
 		<-M3uCache.generationDone
+		if debug {
+			utils.SafeLogln("[DEBUG] Finished cache revalidation")
+		}
 
 		return readCacheFromFile()
 	}
 	M3uCache.RUnlock()
+
+	if debug {
+		utils.SafeLogln("[DEBUG] Existing cache not found, generating content")
+	}
 
 	return generateM3UContent(r)
 }

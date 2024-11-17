@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	"m3u-stream-merger/utils"
-
-	"github.com/gosimple/slug"
 )
 
 func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
@@ -110,7 +108,7 @@ func parseLine(line string, nextLine string, m3uIndex int) StreamInfo {
 		currentStream.Title = utils.TvgNameParser(strings.TrimSpace(lineCommaSplit[1]))
 	}
 
-	currentStream.Slug = slug.Make(currentStream.Title)
+	currentStream.Slug = EncodeSlug(currentStream)
 
 	if debug {
 		utils.SafeLogf("[DEBUG] Generated slug: %s\n", currentStream.Slug)
