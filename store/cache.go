@@ -22,28 +22,32 @@ func isDebugMode() bool {
 	return os.Getenv("DEBUG") == "true"
 }
 
-func RevalidatingGetM3U(r *http.Request, force bool) chan string {
+func RevalidatingGetM3U(r *http.Request, egressStream chan string, force bool) {
 	debug := isDebugMode()
 	if debug {
 		utils.SafeLogln("[DEBUG] Revalidating M3U cache")
 	}
 
-	M3uCache.RLock()
+	if !M3uCache.TryRLock() && !force {
+		readCacheFromFile(egressStream)
+		return
+	}
 
+	M3uCache.RLock()
 	if _, err := os.Stat(cacheFilePath); err != nil || force {
 		if debug && !force {
 			utils.SafeLogln("[DEBUG] Existing cache not found, generating content")
 		}
 
 		M3uCache.RUnlock()
-		return generateM3UContent(r)
+		generateM3UContent(r, egressStream)
 	}
-
 	M3uCache.RUnlock()
-	return readCacheFromFile()
+
+	readCacheFromFile(egressStream)
 }
 
-func generateM3UContent(r *http.Request) chan string {
+func generateM3UContent(r *http.Request, egressStream chan string) {
 	M3uCache.Lock()
 	defer M3uCache.Unlock()
 
@@ -58,11 +62,12 @@ func generateM3UContent(r *http.Request) chan string {
 	}
 
 	contentStream := make(chan string)
-	egressStream := make(chan string)
+
+	if err := writeCacheToFile(egressStream); err != nil {
+		utils.SafeLogf("Error writing cache to file: %v\n", err)
+	}
 
 	go func() {
-		var content strings.Builder
-		content.WriteString("#EXTM3U\n")
 		egressStream <- "#EXTM3U\n"
 
 		for {
@@ -76,13 +81,6 @@ func generateM3UContent(r *http.Request) chan string {
 			}
 
 			egressStream <- data
-			content.WriteString(data)
-		}
-
-		stringContent := content.String()
-
-		if err := writeCacheToFile(stringContent); err != nil {
-			utils.SafeLogf("Error writing cache to file: %v\n", err)
 		}
 	}()
 
@@ -102,7 +100,7 @@ func generateM3UContent(r *http.Request) chan string {
 		close(contentStream)
 	}()
 
-	return egressStream
+	return
 }
 
 func ClearCache() {
@@ -119,10 +117,9 @@ func ClearCache() {
 	}
 }
 
-func readCacheFromFile() chan string {
+func readCacheFromFile(dataChan chan string) {
 	debug := isDebugMode()
 
-	dataChan := make(chan string)
 	go func() {
 		data, err := os.ReadFile(cacheFilePath)
 		if err != nil {
@@ -134,19 +131,25 @@ func readCacheFromFile() chan string {
 		}
 		dataChan <- string(data)
 	}()
-
-	return dataChan
 }
 
-func writeCacheToFile(content string) error {
+func writeCacheToFile(content chan string) error {
 	err := os.MkdirAll(filepath.Dir(cacheFilePath), os.ModePerm)
 	if err != nil {
 		return fmt.Errorf("Error creating directories for data path: %v", err)
 	}
 
-	err = os.WriteFile(cacheFilePath+".new", []byte(content), 0644)
+	file, err := os.OpenFile(cacheFilePath+".new", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
+	}
+
+	for {
+		data, ok := <-content
+		if !ok {
+			break
+		}
+		file.WriteString(data)
 	}
 
 	_ = os.Remove(cacheFilePath)

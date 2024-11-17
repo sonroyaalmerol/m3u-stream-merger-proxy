@@ -13,10 +13,11 @@ func M3UHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	content := store.RevalidatingGetM3U(r, false)
+	contentStream := make(chan string)
 
+	go store.RevalidatingGetM3U(r, contentStream, false)
 	for {
-		data, ok := <-content
+		data, ok := <-contentStream
 		if !ok {
 			break
 		}
