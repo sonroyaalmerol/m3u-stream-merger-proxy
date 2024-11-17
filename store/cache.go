@@ -26,7 +26,7 @@ func isDebugMode() bool {
 	return os.Getenv("DEBUG") == "true"
 }
 
-func RevalidatingGetM3U(r *http.Request) string {
+func RevalidatingGetM3U(r *http.Request, wait bool) string {
 	debug := isDebugMode()
 	if debug {
 		utils.SafeLogln("[DEBUG] Revalidating M3U cache")
@@ -45,14 +45,16 @@ func RevalidatingGetM3U(r *http.Request) string {
 		}
 
 		M3uCache.RUnlock()
-		if debug {
-			utils.SafeLogln("[DEBUG] Waiting for cache revalidation to finish")
-		}
+		if wait {
+			if debug {
+				utils.SafeLogln("[DEBUG] Waiting for cache revalidation to finish")
+			}
 
-		// Wait for generation to finish
-		<-M3uCache.generationDone
-		if debug {
-			utils.SafeLogln("[DEBUG] Finished cache revalidation")
+			// Wait for generation to finish
+			<-M3uCache.generationDone
+			if debug {
+				utils.SafeLogln("[DEBUG] Finished cache revalidation")
+			}
 		}
 
 		return readCacheFromFile()
