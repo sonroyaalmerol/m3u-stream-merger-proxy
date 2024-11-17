@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"fmt"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
 	"net/http"
@@ -22,7 +21,7 @@ func M3UHandler(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		_, err := fmt.Fprint(w, data)
+		_, err := w.Write([]byte(data))
 		if err != nil {
 			if debug {
 				utils.SafeLogf("[DEBUG] Error writing http response: %v\n", err)
