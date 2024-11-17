@@ -32,14 +32,11 @@ func RevalidatingGetM3U(r *http.Request, force bool) string {
 		return generateM3UContent(r)
 	}
 
-	M3uCache.RLock()
-
 	if _, err := os.Stat(cacheFilePath); err == nil {
 		if debug {
 			utils.SafeLogln("[DEBUG] M3U cache already exists")
 		}
 
-		M3uCache.RUnlock()
 		return readCacheFromFile()
 	}
 
@@ -47,7 +44,9 @@ func RevalidatingGetM3U(r *http.Request, force bool) string {
 		utils.SafeLogln("[DEBUG] Existing cache not found, generating content")
 	}
 
-	M3uCache.RUnlock()
+	if !M3uCache.TryRLock() {
+		return readCacheFromFile()
+	}
 
 	return generateM3UContent(r)
 }
