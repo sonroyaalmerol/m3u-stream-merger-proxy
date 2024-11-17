@@ -1,12 +1,13 @@
 package store
 
 import (
-	"bufio"
 	"os"
 	"regexp"
 	"strings"
 
 	"m3u-stream-merger/utils"
+
+	"github.com/edsrzf/mmap-go"
 )
 
 func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
@@ -21,31 +22,34 @@ func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo)) error {
 	if err != nil {
 		return err
 	}
+	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	// Memory-map the file
+	mappedFile, err := mmap.Map(file, mmap.RDONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer mappedFile.Unmap()
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	// Process the file as a single large string
+	content := string(mappedFile)
+	lines := strings.Split(content, "\n")
+
+	var currentLine string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "#EXTINF:") {
-			if scanner.Scan() {
-				nextLine := scanner.Text()
-				// skip all other #EXT tags
-				for strings.HasPrefix(nextLine, "#") {
-					if scanner.Scan() {
-						nextLine = scanner.Text()
-					} else {
-						break
-					}
-				}
+			currentLine = line
+		} else if currentLine != "" && !strings.HasPrefix(line, "#") {
+			// Parse the stream info
+			streamInfo := parseLine(currentLine, line, m3uIndex)
+			currentLine = ""
 
-				streamInfo := parseLine(line, nextLine, m3uIndex)
-
-				if !checkFilter(streamInfo) {
-					continue
-				}
-
-				fn(streamInfo)
+			if !checkFilter(streamInfo) {
+				continue
 			}
+
+			fn(streamInfo)
 		}
 	}
 

@@ -11,14 +11,10 @@ import (
 
 type Cache struct {
 	sync.RWMutex
-	Exists         bool
-	Revalidating   bool
-	generationDone chan struct{}
+	Revalidating bool
 }
 
-var M3uCache = &Cache{
-	generationDone: make(chan struct{}),
-}
+var M3uCache = &Cache{}
 
 const cacheFilePath = "/m3u-proxy/cache.m3u"
 
@@ -31,30 +27,11 @@ func RevalidatingGetM3U(r *http.Request, wait bool) string {
 	if debug {
 		utils.SafeLogln("[DEBUG] Revalidating M3U cache")
 	}
+
 	M3uCache.RLock()
-	if M3uCache.Exists {
+	if _, err := os.Stat(cacheFilePath); err == nil {
 		if debug {
 			utils.SafeLogln("[DEBUG] M3U cache already exists")
-		}
-		if !M3uCache.Revalidating {
-			if debug {
-				utils.SafeLogln("[DEBUG] Initiating cache revalidation")
-			}
-
-			go generateM3UContent(r)
-		}
-
-		M3uCache.RUnlock()
-		if wait {
-			if debug {
-				utils.SafeLogln("[DEBUG] Waiting for cache revalidation to finish")
-			}
-
-			// Wait for generation to finish
-			<-M3uCache.generationDone
-			if debug {
-				utils.SafeLogln("[DEBUG] Finished cache revalidation")
-			}
 		}
 
 		return readCacheFromFile()
@@ -110,11 +87,7 @@ func generateM3UContent(r *http.Request) string {
 		utils.SafeLogf("Error writing cache to file: %v\n", err)
 	}
 
-	M3uCache.Exists = true
 	M3uCache.Revalidating = false
-
-	close(M3uCache.generationDone)
-	M3uCache.generationDone = make(chan struct{})
 
 	return stringContent
 }
@@ -125,7 +98,6 @@ func ClearCache() {
 	M3uCache.Lock()
 	defer M3uCache.Unlock()
 
-	M3uCache.Exists = false
 	M3uCache.Revalidating = false
 
 	if debug {
