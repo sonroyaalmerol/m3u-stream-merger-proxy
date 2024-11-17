@@ -22,10 +22,12 @@ func TestStreamHandler(t *testing.T) {
 		t.Errorf("Downloader returned error: %v", err)
 	}
 
-	streams := store.GetStreams()
-
 	m3uReq := httptest.NewRequest("GET", "/playlist.m3u", nil)
 	m3uW := httptest.NewRecorder()
+
+	_ = store.RevalidatingGetM3U(m3uReq, true)
+
+	streams := store.GetStreams()
 
 	func() {
 		handlers.M3UHandler(m3uW, m3uReq)
