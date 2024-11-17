@@ -75,6 +75,8 @@ func generateM3UContent(r *http.Request) string {
 		utils.SafeLogf("[DEBUG] Error writing cache to file: %v\n", err)
 	}
 
+	utils.SafeLogln("Background process: Finished building M3U content.")
+
 	return content.String()
 }
 
