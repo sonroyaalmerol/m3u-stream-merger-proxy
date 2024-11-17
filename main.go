@@ -39,14 +39,14 @@ func main() {
 	http.HandleFunc("/playlist.m3u", func(w http.ResponseWriter, r *http.Request) {
 		handlers.M3UHandler(w, r)
 	})
-	http.HandleFunc("/proxy/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/p/", func(w http.ResponseWriter, r *http.Request) {
 		handlers.StreamHandler(w, r, cm)
 	})
 
 	// Start the server
 	utils.SafeLogln(fmt.Sprintf("Server is running on port %s...", os.Getenv("PORT")))
 	utils.SafeLogln("Playlist Endpoint is running (`/playlist.m3u`)")
-	utils.SafeLogln("Stream Endpoint is running (`/proxy/{originalBasePath}/{streamID}.{fileExt}`)")
+	utils.SafeLogln("Stream Endpoint is running (`/p/{originalBasePath}/{streamID}.{fileExt}`)")
 	err = http.ListenAndServe(fmt.Sprintf(":%s", os.Getenv("PORT")), nil)
 	if err != nil {
 		utils.SafeLogFatalf("HTTP server error: %v", err)

@@ -70,12 +70,12 @@ func GenerateStreamURL(baseUrl string, stream StreamInfo) string {
 
 		ext, err := utils.GetFileExtensionFromUrl(srcUrl)
 		if err != nil {
-			return fmt.Sprintf("%s/proxy/%s/%s", baseUrl, subPath, EncodeSlug(stream))
+			return fmt.Sprintf("%s/p/%s/%s", baseUrl, subPath, EncodeSlug(stream))
 		}
 
-		return fmt.Sprintf("%s/proxy/%s/%s%s", baseUrl, subPath, EncodeSlug(stream), ext)
+		return fmt.Sprintf("%s/p/%s/%s%s", baseUrl, subPath, EncodeSlug(stream), ext)
 	}
-	return fmt.Sprintf("%s/proxy/stream/%s", baseUrl, EncodeSlug(stream))
+	return fmt.Sprintf("%s/p/stream/%s", baseUrl, EncodeSlug(stream))
 }
 
 func sortStreams(s []StreamInfo) {
