@@ -3,7 +3,7 @@ package utils
 import "fmt"
 
 func GetM3UFilePathByIndex(m3uIndex int) string {
-	m3uFile := fmt.Sprintf("/m3u-proxy/sources/%d.m3u", m3uIndex+1)
+	m3uFile := fmt.Sprintf("/tmp/m3u-proxy/sources/%d.m3u", m3uIndex+1)
 
 	return m3uFile
 }

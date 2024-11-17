@@ -5,6 +5,7 @@ import (
 	"m3u-stream-merger/utils"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -15,7 +16,7 @@ type Cache struct {
 
 var M3uCache = &Cache{}
 
-const cacheFilePath = "/m3u-proxy/cache.m3u"
+const cacheFilePath = "/m3u-proxy/data/cache.m3u"
 
 func isDebugMode() bool {
 	return os.Getenv("DEBUG") == "true"
@@ -123,7 +124,12 @@ func readCacheFromFile() string {
 }
 
 func writeCacheToFile(content string) error {
-	err := os.WriteFile(cacheFilePath+".new", []byte(content), 0644)
+	err := os.MkdirAll(filepath.Dir(cacheFilePath), os.ModePerm)
+	if err != nil {
+		return fmt.Errorf("Error creating directories for data path: %v", err)
+	}
+
+	err = os.WriteFile(cacheFilePath+".new", []byte(content), 0644)
 	if err != nil {
 		return err
 	}
