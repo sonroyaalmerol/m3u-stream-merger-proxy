@@ -25,8 +25,6 @@ func TestStreamHandler(t *testing.T) {
 	m3uReq := httptest.NewRequest("GET", "/playlist.m3u", nil)
 	m3uW := httptest.NewRecorder()
 
-	_ = store.RevalidatingGetM3U(m3uReq, true)
-
 	streams := store.GetStreams()
 
 	func() {

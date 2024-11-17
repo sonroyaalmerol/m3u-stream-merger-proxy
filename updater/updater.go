@@ -106,7 +106,12 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 				utils.SafeLogln("BASE_URL is required for CACHE_ON_SYNC to work.")
 			}
 			utils.SafeLogln("CACHE_ON_SYNC enabled. Building cache.")
-			_ = store.RevalidatingGetM3U(nil, true)
+			for {
+				_, ok := <-store.RevalidatingGetM3U(nil, true)
+				if !ok {
+					break
+				}
+			}
 		}
 	}
 }

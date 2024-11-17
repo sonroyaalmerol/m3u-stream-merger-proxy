@@ -94,7 +94,7 @@ func generateM3UContent(r *http.Request) chan string {
 			}
 
 			if debug {
-				utils.SafeLogf("[DEBUG] Processing stream with TVG ID: %s\n", stream.TvgID)
+				utils.SafeLogf("[DEBUG] Processing stream title: %s\n", stream.Title)
 			}
 
 			contentStream <- formatStreamEntry(baseURL, stream)
