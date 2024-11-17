@@ -101,8 +101,6 @@ func generateM3UContent(r *http.Request, egressStream chan string) {
 		}
 		close(contentStream)
 	}()
-
-	return
 }
 
 func ClearCache() {
@@ -151,7 +149,7 @@ func writeCacheToFile(content chan string) error {
 		if !ok {
 			break
 		}
-		file.WriteString(data)
+		_, _ = file.WriteString(data)
 	}
 
 	_ = os.Remove(cacheFilePath)
