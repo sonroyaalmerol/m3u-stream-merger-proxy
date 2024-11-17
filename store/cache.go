@@ -128,8 +128,11 @@ func readCacheFromFile(dataChan chan string) {
 			}
 
 			dataChan <- "#EXTM3U\n"
+		} else {
+			dataChan <- string(data)
 		}
-		dataChan <- string(data)
+
+		close(dataChan)
 	}()
 }
 
