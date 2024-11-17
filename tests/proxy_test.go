@@ -17,16 +17,12 @@ func TestStreamHandler(t *testing.T) {
 	os.Setenv("M3U_URL_1", "https://gist.githubusercontent.com/sonroyaalmerol/de1c90e8681af040924da5d15c7f530d/raw/06844df09e69ea278060252ca5aa8d767eb4543d/test-m3u.m3u")
 	os.Setenv("INCLUDE_GROUPS_1", "movies")
 
-	err := store.DownloadM3USource(1)
+	err := store.DownloadM3USource(0)
 	if err != nil {
 		t.Errorf("Downloader returned error: %v", err)
 	}
 
 	streams := store.GetStreams()
-
-	for _, stream := range streams {
-		streams = append(streams, stream)
-	}
 
 	m3uReq := httptest.NewRequest("GET", "/playlist.m3u", nil)
 	m3uW := httptest.NewRecorder()

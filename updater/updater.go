@@ -65,6 +65,8 @@ func Initialize(ctx context.Context) (*Updater, error) {
 }
 
 func (instance *Updater) UpdateSources(ctx context.Context) {
+	debug := os.Getenv("DEBUG") == "true"
+
 	// Ensure only one job is running at a time
 	instance.Lock()
 	defer instance.Unlock()
@@ -83,7 +85,10 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 			// Start the goroutine for periodic updates
 			go func(idx int) {
 				defer wg.Done()
-				store.DownloadM3USource(idx)
+				err := store.DownloadM3USource(idx)
+				if err != nil && debug {
+					utils.SafeLogf("Background process: Error fetching M3U_URL_%d: %v\n", idx+1, err)
+				}
 			}(idx)
 		}
 		wg.Wait()
