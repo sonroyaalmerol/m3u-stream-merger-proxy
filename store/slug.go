@@ -3,21 +3,31 @@ package store
 import (
 	"encoding/base64"
 	"fmt"
+	"m3u-stream-merger/utils"
+	"os"
 	"strings"
 
 	"github.com/DataDog/zstd"
 	"github.com/goccy/go-json"
 )
 
+var debug = os.Getenv("DEBUG") == "true"
+
 func EncodeSlug(stream StreamInfo) string {
 	jsonData, err := json.Marshal(stream)
 	if err != nil {
+		if debug {
+			utils.SafeLogf("[DEBUG] Error json marshal: %v\n", err)
+		}
 		return ""
 	}
 
 	var compressedData []byte
-	_, err = zstd.CompressLevel(compressedData, jsonData, zstd.BestCompression)
+	out, err := zstd.CompressLevel(compressedData, jsonData, zstd.BestCompression)
 	if err != nil {
+		if debug {
+			utils.SafeLogf("[DEBUG] Error zstd compression (%v): %v\n", out, err)
+		}
 		return ""
 	}
 
