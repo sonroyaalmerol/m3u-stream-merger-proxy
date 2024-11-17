@@ -42,25 +42,22 @@ func EncodeSlug(stream StreamInfo) string {
 }
 
 func DecodeSlug(encodedSlug string) (*StreamInfo, error) {
+	encodedSlug = strings.Replace(encodedSlug, "-", "+", -1)
+	encodedSlug = strings.Replace(encodedSlug, "_", "/", -1)
+
+	switch len(encodedSlug) % 4 {
+	case 2:
+		encodedSlug += "=="
+	case 3:
+		encodedSlug += "="
+	}
+
 	decodedData, err := base64.StdEncoding.DecodeString(encodedSlug)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding Base64 data: %v", err)
 	}
 
-	strData := string(decodedData)
-	strData = strings.Replace(strData, "-", "+", -1)
-	strData = strings.Replace(strData, "_", "/", -1)
-
-	switch len(strData) % 4 {
-	case 0:
-	case 1:
-	case 2:
-		strData += "=="
-	case 3:
-		strData += "="
-	}
-
-	reader, err := zstd.NewReader(bytes.NewReader([]byte(strData)))
+	reader, err := zstd.NewReader(bytes.NewReader(decodedData))
 	if err != nil {
 		return nil, fmt.Errorf("error creating zstd reader: %v", err)
 	}
