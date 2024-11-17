@@ -29,7 +29,9 @@ func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo)) error {
 	if err != nil {
 		return err
 	}
-	defer mappedFile.Unmap()
+	defer func() {
+		_ = mappedFile.Unmap()
+	}()
 
 	// Process the file as a single large string
 	content := string(mappedFile)
