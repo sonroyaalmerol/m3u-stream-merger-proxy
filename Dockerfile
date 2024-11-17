@@ -8,6 +8,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 
 # Download all dependencies. Dependencies will be cached if the go.mod and go.sum files are not changed
+# hadolint ignore=DL3018
 RUN go mod download && \
   apk add --no-cache --update gcc g++
 
@@ -17,7 +18,6 @@ COPY . .
 ENV CGO_ENABLED=1
 
 # test and build the app.
-# hadolint ignore=DL3018
 RUN go test ./tests/... && go build -ldflags='-s -w' -o m3u-proxy .
 
 # End from the latest alpine image
