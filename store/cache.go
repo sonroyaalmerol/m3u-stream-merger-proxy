@@ -63,9 +63,11 @@ func generateM3UContent(r *http.Request, egressStream chan string) {
 
 	contentStream := make(chan string)
 
-	if err := writeCacheToFile(egressStream); err != nil {
-		utils.SafeLogf("Error writing cache to file: %v\n", err)
-	}
+	go func() {
+		if err := writeCacheToFile(egressStream); err != nil {
+			utils.SafeLogf("Error writing cache to file: %v\n", err)
+		}
+	}()
 
 	go func() {
 		egressStream <- "#EXTM3U\n"
