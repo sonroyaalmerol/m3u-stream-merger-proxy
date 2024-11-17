@@ -3,8 +3,12 @@ name: Developer image
 on:  # yamllint disable-line rule:truthy
   push:
     branches: [main]
-    paths-ignore:
-      - '**/README.md'
+    paths:
+      - '**.go'
+      - 'Dockerfile'
+      - '**.sh'
+      - 'go.mod'
+      - 'go.sum'
 
 jobs:
   push:
