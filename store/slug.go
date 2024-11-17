@@ -1,14 +1,12 @@
 package store
 
 import (
-	"bytes"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"strings"
 
+	"github.com/DataDog/zstd"
 	"github.com/goccy/go-json"
-	"github.com/klauspost/compress/zstd"
 )
 
 func EncodeSlug(stream StreamInfo) string {
@@ -17,19 +15,13 @@ func EncodeSlug(stream StreamInfo) string {
 		return ""
 	}
 
-	var compressedData bytes.Buffer
-	writer, err := zstd.NewWriter(&compressedData)
+	var compressedData []byte
+	_, err = zstd.CompressLevel(compressedData, jsonData, zstd.BestCompression)
 	if err != nil {
 		return ""
 	}
 
-	_, err = writer.Write(jsonData)
-	if err != nil {
-		return ""
-	}
-	writer.Close()
-
-	encodedData := base64.StdEncoding.EncodeToString(compressedData.Bytes())
+	encodedData := base64.StdEncoding.EncodeToString(compressedData)
 
 	// 62nd char of encoding
 	encodedData = strings.Replace(encodedData, "+", "-", -1)
@@ -57,15 +49,11 @@ func DecodeSlug(encodedSlug string) (*StreamInfo, error) {
 		return nil, fmt.Errorf("error decoding Base64 data: %v", err)
 	}
 
-	reader, err := zstd.NewReader(bytes.NewReader(decodedData))
-	if err != nil {
-		return nil, fmt.Errorf("error creating zstd reader: %v", err)
-	}
-	decompressedData, err := io.ReadAll(reader)
+	var decompressedData []byte
+	_, err = zstd.Decompress(decompressedData, decodedData)
 	if err != nil {
 		return nil, fmt.Errorf("error reading decompressed data: %v", err)
 	}
-	reader.Close()
 
 	var result StreamInfo
 	err = json.Unmarshal(decompressedData, &result)
