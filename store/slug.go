@@ -9,8 +9,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/DataDog/zstd"
 	"github.com/goccy/go-json"
+	"github.com/klauspost/compress/zstd"
 )
 
 var debug = os.Getenv("DEBUG") == "true"
@@ -25,7 +25,14 @@ func EncodeSlug(stream StreamInfo) string {
 	}
 
 	var compressedData bytes.Buffer
-	writer := zstd.NewWriterLevel(&compressedData, zstd.BestCompression)
+	writer, err := zstd.NewWriter(&compressedData)
+	if err != nil {
+		if debug {
+			utils.SafeLogf("[DEBUG] Error zstd compression for slug: %v\n", err)
+		}
+		return ""
+	}
+
 	_, err = writer.Write(jsonData)
 	if err != nil {
 		if debug {
@@ -63,7 +70,11 @@ func DecodeSlug(encodedSlug string) (*StreamInfo, error) {
 		return nil, fmt.Errorf("error decoding Base64 data: %v", err)
 	}
 
-	reader := zstd.NewReader(bytes.NewReader(decodedData))
+	reader, err := zstd.NewReader(bytes.NewReader(decodedData))
+	if err != nil {
+		return nil, fmt.Errorf("error reading decompressed data: %v", err)
+	}
+
 	decompressedData, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, fmt.Errorf("error reading decompressed data: %v", err)
