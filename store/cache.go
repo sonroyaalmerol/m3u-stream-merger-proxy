@@ -46,11 +46,12 @@ func RevalidatingGetM3U(r *http.Request, wait bool) string {
 				utils.SafeLogln("[DEBUG] Revalidation already in progress, waiting...")
 			}
 			<-M3uCache.generationDone
+
+			if debug {
+				utils.SafeLogln("[DEBUG] Revalidation finished.")
+			}
 		}
 
-		if debug {
-			utils.SafeLogln("[DEBUG] Revalidation finished.")
-		}
 		return readCacheFromFile()
 	}
 
