@@ -64,7 +64,6 @@ func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo)) error {
 	scanner := bufio.NewScanner(bytes.NewReader(mappedFile))
 	var currentLine string
 
-	lineNumber := 0
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if strings.HasPrefix(line, "#EXTINF:") {
@@ -77,7 +76,6 @@ func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo)) error {
 				fn(streamInfo)
 			}
 		}
-		lineNumber++
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -99,13 +97,6 @@ func parseLine(line string, nextLine string, m3uIndex int) StreamInfo {
 
 	currentStream := StreamInfo{}
 	currentStream.URLs = map[int]string{m3uIndex: cleanUrl}
-
-	fileName := fmt.Sprintf("%s_%d", base64.StdEncoding.EncodeToString([]byte(currentStream.Title)), m3uIndex)
-	encodedUrl := base64.StdEncoding.EncodeToString([]byte(cleanUrl))
-	err := os.WriteFile(filepath.Join(streamsDirPath, fileName), []byte(encodedUrl), 0644)
-	if err != nil {
-		utils.SafeLogf("[DEBUG] Error indexing stream: %s (#%d) -> %v\n", currentStream.Title, m3uIndex+1, err)
-	}
 
 	lineWithoutPairs := line
 
@@ -150,6 +141,13 @@ func parseLine(line string, nextLine string, m3uIndex int) StreamInfo {
 			utils.SafeLogf("[DEBUG] Line comma split detected, title: %s\n", strings.TrimSpace(lineCommaSplit[1]))
 		}
 		currentStream.Title = utils.TvgNameParser(strings.TrimSpace(lineCommaSplit[1]))
+	}
+
+	fileName := fmt.Sprintf("%s_%d", base64.StdEncoding.EncodeToString([]byte(currentStream.Title)), m3uIndex)
+	encodedUrl := base64.StdEncoding.EncodeToString([]byte(cleanUrl))
+	err := os.WriteFile(filepath.Join(streamsDirPath, fileName), []byte(encodedUrl), 0644)
+	if err != nil {
+		utils.SafeLogf("[DEBUG] Error indexing stream: %s (#%d) -> %v\n", currentStream.Title, m3uIndex+1, err)
 	}
 
 	return currentStream
