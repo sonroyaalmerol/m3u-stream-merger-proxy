@@ -3,8 +3,10 @@ package store
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -13,8 +15,32 @@ import (
 	"github.com/edsrzf/mmap-go"
 )
 
+const streamsDirPath = "/m3u-proxy/data/streams"
+
 func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
-	return DecodeSlug(slug)
+	initInfo, err := DecodeSlug(slug)
+	if err != nil {
+		return nil, err
+	}
+
+	indexes := utils.GetM3UIndexes()
+
+	for _, m3uIndex := range indexes {
+		fileName := fmt.Sprintf("%s_%d", base64.StdEncoding.EncodeToString([]byte(initInfo.Title)), m3uIndex)
+		urlEncoded, err := os.ReadFile(filepath.Join(streamsDirPath, fileName))
+		if err != nil {
+			continue
+		}
+
+		url, err := base64.StdEncoding.DecodeString(string(urlEncoded))
+		if err != nil {
+			continue
+		}
+
+		initInfo.URLs[m3uIndex] = strings.TrimSpace(string(url))
+	}
+
+	return initInfo, nil
 }
 
 func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo)) error {
@@ -44,7 +70,7 @@ func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo)) error {
 		if strings.HasPrefix(line, "#EXTINF:") {
 			currentLine = line
 		} else if currentLine != "" && !strings.HasPrefix(line, "#") {
-			streamInfo := parseLine(currentLine, lineNumber, line, m3uIndex)
+			streamInfo := parseLine(currentLine, line, m3uIndex)
 			currentLine = ""
 
 			if checkFilter(streamInfo) {
@@ -61,7 +87,7 @@ func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo)) error {
 	return nil
 }
 
-func parseLine(line string, lineNumber int, nextLine string, m3uIndex int) StreamInfo {
+func parseLine(line string, nextLine string, m3uIndex int) StreamInfo {
 	debug := os.Getenv("DEBUG") == "true"
 	if debug {
 		utils.SafeLogf("[DEBUG] Parsing line: %s\n", line)
@@ -70,7 +96,14 @@ func parseLine(line string, lineNumber int, nextLine string, m3uIndex int) Strea
 	}
 
 	currentStream := StreamInfo{}
-	currentStream.URLs = map[int]int{m3uIndex: lineNumber}
+	currentStream.URLs = map[int]string{m3uIndex: nextLine}
+
+	fileName := fmt.Sprintf("%s_%d", base64.StdEncoding.EncodeToString([]byte(currentStream.Title)), m3uIndex)
+	encodedUrl := base64.StdEncoding.EncodeToString([]byte(nextLine))
+	err := os.WriteFile(filepath.Join(streamsDirPath, fileName), []byte(encodedUrl), 0644)
+	if err != nil {
+		utils.SafeLogf("[DEBUG] Error indexing stream: %s (#%d) -> %v\n", currentStream.Title, m3uIndex+1, err)
+	}
 
 	lineWithoutPairs := line
 

@@ -1,12 +1,10 @@
 package store
 
 import (
-	"bufio"
 	"fmt"
 	"m3u-stream-merger/utils"
 	"os"
 	"sort"
-	"strings"
 	"sync"
 )
 
@@ -17,49 +15,6 @@ func GetStreamBySlug(slug string) (StreamInfo, error) {
 	}
 
 	return *streamInfo, nil
-}
-
-var urlCache sync.Map
-
-func ClearURLCache() {
-	urlCache.Clear()
-}
-
-func GetURL(m3uIndex int, line int) string {
-	cache, ok := urlCache.Load(fmt.Sprintf("%d_%d", m3uIndex, line))
-	if ok {
-		return cache.(string)
-	}
-
-	utils.SafeLogf("Parsing M3U #%d...\n", m3uIndex+1)
-	filePath := utils.GetM3UFilePathByIndex(m3uIndex)
-
-	file, err := os.Open(filePath)
-	if err != nil {
-		utils.SafeLogf("Failed to open file: %v\n", err)
-		return ""
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	currentLine := 0
-
-	for scanner.Scan() {
-		if currentLine == line {
-			url := strings.TrimSpace(scanner.Text())
-			urlCache.Store(fmt.Sprintf("%d_%d", m3uIndex, line), url)
-			return url
-		}
-		currentLine++
-	}
-
-	if err := scanner.Err(); err != nil {
-		utils.SafeLogf("Error while scanning file: %v\n", err)
-		return ""
-	}
-
-	utils.SafeLogf("Line %d not found in file\n", line)
-	return ""
 }
 
 func GetStreams() []StreamInfo {
@@ -107,8 +62,7 @@ func GetStreams() []StreamInfo {
 func GenerateStreamURL(baseUrl string, stream StreamInfo) string {
 	var subPath string
 	var err error
-	for m3uIndex, urlLine := range stream.URLs {
-		srcUrl := GetURL(m3uIndex, urlLine)
+	for _, srcUrl := range stream.URLs {
 		subPath, err = utils.GetSubPathFromUrl(srcUrl)
 		if err != nil {
 			continue
