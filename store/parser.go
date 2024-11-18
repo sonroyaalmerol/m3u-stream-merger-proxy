@@ -23,6 +23,8 @@ func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
 		return nil, err
 	}
 
+	initInfo.URLs = make(map[int]string)
+
 	indexes := utils.GetM3UIndexes()
 
 	for _, m3uIndex := range indexes {
