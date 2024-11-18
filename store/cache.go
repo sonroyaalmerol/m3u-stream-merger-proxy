@@ -89,8 +89,11 @@ func ClearCache() {
 	if debug {
 		utils.SafeLogln("[DEBUG] Clearing memory and disk M3U cache.")
 	}
-	if err := deleteCacheFile(); err != nil && debug {
+	if err := os.Remove(cacheFilePath); err != nil && debug {
 		utils.SafeLogf("[DEBUG] Cache file deletion failed: %v\n", err)
+	}
+	if err := os.RemoveAll(streamsDirPath); err != nil && debug {
+		utils.SafeLogf("[DEBUG] Stream files deletion failed: %v\n", err)
 	}
 }
 
@@ -127,10 +130,6 @@ func writeCacheToFile(content string) error {
 		return err
 	}
 	return nil
-}
-
-func deleteCacheFile() error {
-	return os.Remove(cacheFilePath)
 }
 
 func formatStreamEntry(baseURL string, stream StreamInfo) string {

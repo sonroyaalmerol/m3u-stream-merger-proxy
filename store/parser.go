@@ -1,7 +1,12 @@
 package store
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/base64"
+	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -10,8 +15,34 @@ import (
 	"github.com/edsrzf/mmap-go"
 )
 
+const streamsDirPath = "/m3u-proxy/data/streams"
+
 func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
-	return DecodeSlug(slug)
+	initInfo, err := DecodeSlug(slug)
+	if err != nil {
+		return nil, err
+	}
+
+	initInfo.URLs = make(map[int]string)
+
+	indexes := utils.GetM3UIndexes()
+
+	for _, m3uIndex := range indexes {
+		fileName := fmt.Sprintf("%s_%d", base64.StdEncoding.EncodeToString([]byte(initInfo.Title)), m3uIndex)
+		urlEncoded, err := os.ReadFile(filepath.Join(streamsDirPath, fileName))
+		if err != nil {
+			continue
+		}
+
+		url, err := base64.StdEncoding.DecodeString(string(urlEncoded))
+		if err != nil {
+			continue
+		}
+
+		initInfo.URLs[m3uIndex] = strings.TrimSpace(string(url))
+	}
+
+	return initInfo, nil
 }
 
 func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo)) error {
@@ -24,7 +55,6 @@ func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo)) error {
 	}
 	defer file.Close()
 
-	// Memory-map the file
 	mappedFile, err := mmap.Map(file, mmap.RDONLY, 0)
 	if err != nil {
 		return err
@@ -33,27 +63,25 @@ func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo)) error {
 		_ = mappedFile.Unmap()
 	}()
 
-	// Process the file as a single large string
-	content := string(mappedFile)
-	lines := strings.Split(content, "\n")
-
+	scanner := bufio.NewScanner(bytes.NewReader(mappedFile))
 	var currentLine string
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
 		if strings.HasPrefix(line, "#EXTINF:") {
 			currentLine = line
 		} else if currentLine != "" && !strings.HasPrefix(line, "#") {
-			// Parse the stream info
 			streamInfo := parseLine(currentLine, line, m3uIndex)
 			currentLine = ""
 
-			if !checkFilter(streamInfo) {
-				continue
+			if checkFilter(streamInfo) {
+				fn(streamInfo)
 			}
-
-			fn(streamInfo)
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading M3U file: %w", err)
 	}
 
 	return nil
@@ -67,8 +95,10 @@ func parseLine(line string, nextLine string, m3uIndex int) StreamInfo {
 		utils.SafeLogf("[DEBUG] M3U index: %d\n", m3uIndex)
 	}
 
+	cleanUrl := strings.TrimSpace(nextLine)
+
 	currentStream := StreamInfo{}
-	currentStream.URLs = map[int]string{m3uIndex: strings.TrimSpace(nextLine)}
+	currentStream.URLs = map[int]string{m3uIndex: cleanUrl}
 
 	lineWithoutPairs := line
 
@@ -113,6 +143,18 @@ func parseLine(line string, nextLine string, m3uIndex int) StreamInfo {
 			utils.SafeLogf("[DEBUG] Line comma split detected, title: %s\n", strings.TrimSpace(lineCommaSplit[1]))
 		}
 		currentStream.Title = utils.TvgNameParser(strings.TrimSpace(lineCommaSplit[1]))
+	}
+
+	fileName := fmt.Sprintf("%s_%d", base64.StdEncoding.EncodeToString([]byte(currentStream.Title)), m3uIndex)
+	encodedUrl := base64.StdEncoding.EncodeToString([]byte(cleanUrl))
+
+	err := os.MkdirAll(streamsDirPath, os.ModePerm)
+	if err != nil {
+		utils.SafeLogf("[DEBUG] Error creating stream cache folder: %s -> %v\n", streamsDirPath, err)
+	}
+	err = os.WriteFile(filepath.Join(streamsDirPath, fileName), []byte(encodedUrl), 0644)
+	if err != nil {
+		utils.SafeLogf("[DEBUG] Error indexing stream: %s (#%d) -> %v\n", currentStream.Title, m3uIndex+1, err)
 	}
 
 	return currentStream
