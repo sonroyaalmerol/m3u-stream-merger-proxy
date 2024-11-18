@@ -95,11 +95,13 @@ func parseLine(line string, nextLine string, m3uIndex int) StreamInfo {
 		utils.SafeLogf("[DEBUG] M3U index: %d\n", m3uIndex)
 	}
 
+	cleanUrl := strings.TrimSpace(nextLine)
+
 	currentStream := StreamInfo{}
-	currentStream.URLs = map[int]string{m3uIndex: nextLine}
+	currentStream.URLs = map[int]string{m3uIndex: cleanUrl}
 
 	fileName := fmt.Sprintf("%s_%d", base64.StdEncoding.EncodeToString([]byte(currentStream.Title)), m3uIndex)
-	encodedUrl := base64.StdEncoding.EncodeToString([]byte(nextLine))
+	encodedUrl := base64.StdEncoding.EncodeToString([]byte(cleanUrl))
 	err := os.WriteFile(filepath.Join(streamsDirPath, fileName), []byte(encodedUrl), 0644)
 	if err != nil {
 		utils.SafeLogf("[DEBUG] Error indexing stream: %s (#%d) -> %v\n", currentStream.Title, m3uIndex+1, err)
