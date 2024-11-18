@@ -1,6 +1,9 @@
 package store
 
 import (
+	"bufio"
+	"bytes"
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -24,7 +27,6 @@ func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo)) error {
 	}
 	defer file.Close()
 
-	// Memory-map the file
 	mappedFile, err := mmap.Map(file, mmap.RDONLY, 0)
 	if err != nil {
 		return err
@@ -33,33 +35,33 @@ func M3UScanner(m3uIndex int, fn func(streamInfo StreamInfo)) error {
 		_ = mappedFile.Unmap()
 	}()
 
-	// Process the file as a single large string
-	content := string(mappedFile)
-	lines := strings.Split(content, "\n")
-
+	scanner := bufio.NewScanner(bytes.NewReader(mappedFile))
 	var currentLine string
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
+	lineNumber := 0
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
 		if strings.HasPrefix(line, "#EXTINF:") {
 			currentLine = line
 		} else if currentLine != "" && !strings.HasPrefix(line, "#") {
-			// Parse the stream info
-			streamInfo := parseLine(currentLine, line, m3uIndex)
+			streamInfo := parseLine(currentLine, lineNumber, line, m3uIndex)
 			currentLine = ""
 
-			if !checkFilter(streamInfo) {
-				continue
+			if checkFilter(streamInfo) {
+				fn(streamInfo)
 			}
-
-			fn(streamInfo)
 		}
+		lineNumber++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading M3U file: %w", err)
 	}
 
 	return nil
 }
 
-func parseLine(line string, nextLine string, m3uIndex int) StreamInfo {
+func parseLine(line string, lineNumber int, nextLine string, m3uIndex int) StreamInfo {
 	debug := os.Getenv("DEBUG") == "true"
 	if debug {
 		utils.SafeLogf("[DEBUG] Parsing line: %s\n", line)
@@ -68,7 +70,7 @@ func parseLine(line string, nextLine string, m3uIndex int) StreamInfo {
 	}
 
 	currentStream := StreamInfo{}
-	currentStream.URLs = map[int]string{m3uIndex: strings.TrimSpace(nextLine)}
+	currentStream.URLs = map[int]int{m3uIndex: lineNumber}
 
 	lineWithoutPairs := line
 

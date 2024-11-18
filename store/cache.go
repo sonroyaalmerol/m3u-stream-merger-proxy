@@ -86,6 +86,8 @@ func ClearCache() {
 	M3uCache.Lock()
 	defer M3uCache.Unlock()
 
+	ClearURLCache()
+
 	if debug {
 		utils.SafeLogln("[DEBUG] Clearing memory and disk M3U cache.")
 	}
