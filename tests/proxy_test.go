@@ -54,8 +54,7 @@ func TestStreamHandler(t *testing.T) {
 			t.Errorf("%s - Expected status code %d, got %d", stream.Title, http.StatusOK, resp.StatusCode)
 		}
 
-		streamUrl := store.GetURL(0, stream.URLs[0])
-		res, err := http.Get(streamUrl)
+		res, err := http.Get(stream.URLs[0])
 		if err != nil {
 			t.Errorf("HttpGet returned error: %v", err)
 		}
