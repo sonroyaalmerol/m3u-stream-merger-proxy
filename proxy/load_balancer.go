@@ -58,13 +58,11 @@ func (instance *StreamInstance) LoadBalancer(previous *[]int, method string) (*h
 				continue
 			}
 
-			urlLine, ok := instance.Info.URLs[index]
+			url, ok := instance.Info.URLs[index]
 			if !ok {
 				utils.SafeLogf("Channel not found from M3U_%d: %s\n", index+1, instance.Info.Title)
 				continue
 			}
-
-			url := store.GetURL(index, urlLine)
 
 			if instance.Cm.CheckConcurrency(index) {
 				utils.SafeLogf("Concurrency limit reached for M3U_%d: %s\n", index+1, url)
