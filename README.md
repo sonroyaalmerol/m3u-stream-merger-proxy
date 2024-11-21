@@ -151,7 +151,7 @@ Huge thanks to those who donated for the development of this project!
 </p>
 
 <p align="left"><!-- markdownlint-disable-line --><!-- markdownlint-disable-next-line -->
-<a href="https://github.com/kpirnie"><img src="https://github.com/kpirnie.png" width="50px" alt="kpirnie" /></a>&nbsp;&nbsp;<a href="https://github.com/jbumgard"><img src="https://github.com/jbumgard.png" width="50px" alt="jbumgard" /></a>&nbsp;&nbsp;<a href="https://github.com/aniel300"><img src="https://github.com/aniel300.png" width="50px" alt="aniel300" /></a>&nbsp;&nbsp;
+<a href="https://github.com/kpirnie"><img src="https://github.com/kpirnie.png" width="50px" alt="kpirnie" /></a>&nbsp;&nbsp;<a href="https://github.com/jbumgard"><img src="https://github.com/jbumgard.png" width="50px" alt="jbumgard" /></a>&nbsp;&nbsp;<a href="https://github.com/aniel300"><img src="https://github.com/aniel300.png" width="50px" alt="aniel300" /></a>&nbsp;&nbsp;<a href="https://github.com/raf02"><img src="https://github.com/raf02.png" width="50px" alt="raf02" /></a>&nbsp;&nbsp;
 </p>
 
 ## Contributors ✨
