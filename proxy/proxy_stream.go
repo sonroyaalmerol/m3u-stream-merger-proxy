@@ -98,6 +98,30 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 
 	returnStatus := 0
 
+	// Backoff settings
+	initialBackoff := 200 * time.Millisecond
+	maxBackoff := time.Duration(timeoutSecond-1) * time.Second
+	currentBackoff := initialBackoff
+
+	contextSleep := func() bool {
+		select {
+		case <-time.After(currentBackoff):
+			currentBackoff *= 2
+			if currentBackoff > maxBackoff {
+				currentBackoff = maxBackoff
+			}
+			return true
+		case <-ctx.Done():
+			utils.SafeLogf("Context canceled for stream: %s\n", r.RemoteAddr)
+			statusChan <- 0
+			return false
+		case <-timer.C:
+			utils.SafeLogf("Timeout reached while trying to stream: %s\n", r.RemoteAddr)
+			statusChan <- returnStatus
+			return false
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -123,7 +147,9 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 				returnStatus = 2
 
 				utils.SafeLogf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
-				time.Sleep(time.Millisecond * 500)
+				if !contextSleep() {
+					return
+				}
 
 				continue
 			case err != nil:
@@ -136,7 +162,9 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 				}
 
 				utils.SafeLogf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
-				time.Sleep(time.Millisecond * 500)
+				if !contextSleep() {
+					return
+				}
 
 				continue
 			}
@@ -153,13 +181,18 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 			}
 
 			// check if never errored or last error was at least a second ago
-			if lastErr.Equal(timeStarted) || time.Now().Sub(lastErr).Seconds() >= 1 {
+			if lastErr.Equal(timeStarted) || time.Since(lastErr) >= time.Second {
 				// Reset timer on successful read/write
 				if !timer.Stop() {
-					<-timer.C // drain channel if necessary
+					select {
+					case <-timer.C:
+					default:
+					}
 				}
 				timer.Reset(timeoutDuration)
 			}
+
+			currentBackoff = initialBackoff
 		}
 	}
 }
