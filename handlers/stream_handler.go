@@ -47,7 +47,7 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 			utils.SafeLogf("Client disconnected: %s\n", r.RemoteAddr)
 			return
 		default:
-			resp, selectedUrl, selectedIndex, err = stream.LoadBalancer(&testedIndexes, r.Method)
+			resp, selectedUrl, selectedIndex, err = stream.LoadBalancer(ctx, &testedIndexes, r.Method)
 			if err != nil {
 				utils.SafeLogf("Error reloading stream for %s: %v\n", streamUrl, err)
 				return
@@ -78,25 +78,32 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 			go stream.ProxyStream(ctx, selectedIndex, resp, r, w, exitStatus)
 			testedIndexes = append(testedIndexes, selectedIndex)
 
-			streamExitCode := <-exitStatus
-			utils.SafeLogf("Exit code %d received from %s\n", streamExitCode, selectedUrl)
-
-			if streamExitCode == 2 && utils.EOFIsExpected(resp) {
-				utils.SafeLogf("Successfully proxied playlist: %s\n", r.RemoteAddr)
-				cancel()
-			} else if streamExitCode == 1 || streamExitCode == 2 {
-				// Retry on server-side connection errors
-				utils.SafeLogf("Retrying other servers...\n")
-			} else if streamExitCode == 4 {
-				utils.SafeLogf("Finished handling %s request: %s\n", r.Method, r.RemoteAddr)
-				cancel()
-			} else {
-				// Consider client-side connection errors as complete closure
+			select {
+			case <-ctx.Done():
 				utils.SafeLogf("Client has closed the stream: %s\n", r.RemoteAddr)
-				cancel()
-			}
+				resp.Body.Close()
 
-			resp.Body.Close()
+				return
+			case streamExitCode := <-exitStatus:
+				utils.SafeLogf("Exit code %d received from %s\n", streamExitCode, selectedUrl)
+
+				if streamExitCode == 2 && utils.EOFIsExpected(resp) {
+					utils.SafeLogf("Successfully proxied playlist: %s\n", r.RemoteAddr)
+					cancel()
+				} else if streamExitCode == 1 || streamExitCode == 2 {
+					// Retry on server-side connection errors
+					utils.SafeLogf("Retrying other servers...\n")
+				} else if streamExitCode == 4 {
+					utils.SafeLogf("Finished handling %s request: %s\n", r.Method, r.RemoteAddr)
+					cancel()
+				} else {
+					// Consider client-side connection errors as complete closure
+					utils.SafeLogf("Unable to write to client. Assuming stream has been closed: %s\n", r.RemoteAddr)
+					cancel()
+				}
+
+				resp.Body.Close()
+			}
 		}
 	}
 }

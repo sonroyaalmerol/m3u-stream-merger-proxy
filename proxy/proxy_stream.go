@@ -14,7 +14,6 @@ import (
 )
 
 func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
-	debug := os.Getenv("DEBUG") == "true"
 	bufferMbInt, err := strconv.Atoi(os.Getenv("BUFFER_MB"))
 	if err != nil || bufferMbInt < 0 {
 		bufferMbInt = 0
@@ -82,9 +81,9 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 		}
 	}()
 
-	timeoutSecond, err := strconv.Atoi(os.Getenv("STREAM_TIMEOUT"))
-	if err != nil || timeoutSecond < 0 {
-		timeoutSecond = 3
+	timeoutSecond := 3
+	if ts, err := strconv.Atoi(os.Getenv("STREAM_TIMEOUT")); err == nil && ts >= 0 {
+		timeoutSecond = ts
 	}
 
 	timeoutDuration := time.Duration(timeoutSecond) * time.Second
@@ -94,16 +93,14 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 	timer := time.NewTimer(timeoutDuration)
 	defer timer.Stop()
 
-	// Backoff settings
-	initialBackoff := 200 * time.Millisecond
-	maxBackoff := time.Duration(timeoutSecond-1) * time.Second
-	currentBackoff := initialBackoff
+	timeStarted := time.Now()
+	lastErr := timeStarted
 
 	returnStatus := 0
 
 	for {
 		select {
-		case <-ctx.Done(): // handle context cancellation
+		case <-ctx.Done():
 			utils.SafeLogf("Context canceled for stream: %s\n", r.RemoteAddr)
 			statusChan <- 0
 			return
@@ -113,52 +110,39 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 			return
 		default:
 			n, err := resp.Body.Read(buffer)
-			if err != nil {
-				if err == io.EOF {
-					utils.SafeLogf("Stream ended (EOF reached): %s\n", r.RemoteAddr)
-					if utils.EOFIsExpected(resp) || timeoutSecond == 0 {
-						statusChan <- 2
-						return
-					}
-
-					returnStatus = 2
-					utils.SafeLogf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
-					if debug {
-						utils.SafeLogf("[DEBUG] Retrying same stream with backoff of %v...\n", currentBackoff)
-					}
-
-					time.Sleep(currentBackoff)
-					currentBackoff *= 2
-					if currentBackoff > maxBackoff {
-						currentBackoff = maxBackoff
-					}
-
-					continue
+			switch {
+			case err == io.EOF:
+				lastErr = time.Now()
+				if utils.EOFIsExpected(resp) || timeoutSecond == 0 {
+					utils.SafeLogf("Stream ended (expected EOF reached): %s\n", r.RemoteAddr)
+					statusChan <- 2
+					return
 				}
 
+				utils.SafeLogf("Stream ended (unexpected EOF reached): %s\n", r.RemoteAddr)
+				returnStatus = 2
+
+				utils.SafeLogf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
+				time.Sleep(time.Millisecond * 500)
+
+				continue
+			case err != nil:
+				lastErr = time.Now()
 				utils.SafeLogf("Error reading stream: %s\n", err.Error())
-
 				returnStatus = 1
-
 				if timeoutSecond == 0 {
 					statusChan <- 1
 					return
 				}
 
-				if debug {
-					utils.SafeLogf("[DEBUG] Retrying same stream with backoff of %v...\n", currentBackoff)
-				}
-
-				time.Sleep(currentBackoff)
-				currentBackoff *= 2
-				if currentBackoff > maxBackoff {
-					currentBackoff = maxBackoff
-				}
+				utils.SafeLogf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
+				time.Sleep(time.Millisecond * 500)
 
 				continue
 			}
 
 			if _, err := w.Write(buffer[:n]); err != nil {
+				lastErr = time.Now()
 				utils.SafeLogf("Error writing to response: %s\n", err.Error())
 				statusChan <- 0
 				return
@@ -168,17 +152,14 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 				flusher.Flush()
 			}
 
-			// Reset the timer on each successful write and backoff
-			if !timer.Stop() {
-				select {
-				case <-timer.C: // drain the channel to avoid blocking
-				default:
+			// check if never errored or last error was at least a second ago
+			if lastErr.Equal(timeStarted) || time.Now().Sub(lastErr).Seconds() >= 1 {
+				// Reset timer on successful read/write
+				if !timer.Stop() {
+					<-timer.C // drain channel if necessary
 				}
+				timer.Reset(timeoutDuration)
 			}
-			timer.Reset(timeoutDuration)
-
-			// Reset the backoff duration after successful read/write
-			currentBackoff = initialBackoff
 		}
 	}
 }

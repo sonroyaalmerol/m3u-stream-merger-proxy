@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
@@ -29,7 +30,7 @@ func NewStreamInstance(streamUrl string, cm *store.ConcurrencyManager) (*StreamI
 	}, nil
 }
 
-func (instance *StreamInstance) LoadBalancer(previous *[]int, method string) (*http.Response, string, int, error) {
+func (instance *StreamInstance) LoadBalancer(ctx context.Context, previous *[]int, method string) (*http.Response, string, int, error) {
 	debug := os.Getenv("DEBUG") == "true"
 
 	m3uIndexes := utils.GetM3UIndexes()
@@ -52,43 +53,49 @@ func (instance *StreamInstance) LoadBalancer(previous *[]int, method string) (*h
 		}
 		allSkipped := true // Assume all URLs might be skipped
 
-		for _, index := range m3uIndexes {
-			if slices.Contains(*previous, index) {
-				utils.SafeLogf("Skipping M3U_%d: marked as previous stream\n", index+1)
-				continue
-			}
-
-			url, ok := instance.Info.URLs[index]
-			if !ok {
-				utils.SafeLogf("Channel not found from M3U_%d: %s\n", index+1, instance.Info.Title)
-				continue
-			}
-
-			if instance.Cm.CheckConcurrency(index) {
-				utils.SafeLogf("Concurrency limit reached for M3U_%d: %s\n", index+1, url)
-				continue
-			}
-
-			allSkipped = false // At least one URL is not skipped
-
-			resp, err := utils.CustomHttpRequest(method, url)
-			if err == nil {
-				if debug {
-					utils.SafeLogf("[DEBUG] Successfully fetched stream from %s\n", url)
+		select {
+		case <-ctx.Done():
+			return nil, "", -1, fmt.Errorf("Cancelling load balancer.")
+		default:
+			for _, index := range m3uIndexes {
+				if slices.Contains(*previous, index) {
+					utils.SafeLogf("Skipping M3U_%d: marked as previous stream\n", index+1)
+					continue
 				}
-				return resp, url, index, nil
-			}
-			utils.SafeLogf("Error fetching stream: %s\n", err.Error())
-			if debug {
-				utils.SafeLogf("[DEBUG] Error fetching stream from %s: %s\n", url, err.Error())
-			}
-		}
 
-		if allSkipped {
-			if debug {
-				utils.SafeLogf("[DEBUG] All streams skipped in lap %d\n", lap)
+				url, ok := instance.Info.URLs[index]
+				if !ok {
+					utils.SafeLogf("Channel not found from M3U_%d: %s\n", index+1, instance.Info.Title)
+					continue
+				}
+
+				if instance.Cm.CheckConcurrency(index) {
+					utils.SafeLogf("Concurrency limit reached for M3U_%d: %s\n", index+1, url)
+					continue
+				}
+
+				allSkipped = false // At least one URL is not skipped
+
+				resp, err := utils.CustomHttpRequest(method, url)
+				if err == nil {
+					if debug {
+						utils.SafeLogf("[DEBUG] Successfully fetched stream from %s\n", url)
+					}
+					return resp, url, index, nil
+				}
+				utils.SafeLogf("Error fetching stream: %s\n", err.Error())
+				if debug {
+					utils.SafeLogf("[DEBUG] Error fetching stream from %s: %s\n", url, err.Error())
+				}
 			}
-			*previous = []int{}
+
+			if allSkipped {
+				if debug {
+					utils.SafeLogf("[DEBUG] All streams skipped in lap %d\n", lap)
+				}
+				*previous = []int{}
+			}
+
 		}
 
 		lap++
