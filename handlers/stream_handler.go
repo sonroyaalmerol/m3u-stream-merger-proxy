@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
@@ -14,8 +13,7 @@ import (
 func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.ConcurrencyManager) {
 	debug := os.Getenv("DEBUG") == "true"
 
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
+	ctx := r.Context()
 
 	utils.SafeLogf("Received request from %s for URL: %s\n", r.RemoteAddr, r.URL.Path)
 
@@ -89,17 +87,17 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 
 				if streamExitCode == 2 && utils.EOFIsExpected(resp) {
 					utils.SafeLogf("Successfully proxied playlist: %s\n", r.RemoteAddr)
-					cancel()
+					return
 				} else if streamExitCode == 1 || streamExitCode == 2 {
 					// Retry on server-side connection errors
 					utils.SafeLogf("Retrying other servers...\n")
 				} else if streamExitCode == 4 {
 					utils.SafeLogf("Finished handling %s request: %s\n", r.Method, r.RemoteAddr)
-					cancel()
+					return
 				} else {
 					// Consider client-side connection errors as complete closure
 					utils.SafeLogf("Unable to write to client. Assuming stream has been closed: %s\n", r.RemoteAddr)
-					cancel()
+					return
 				}
 
 				resp.Body.Close()
