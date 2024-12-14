@@ -170,7 +170,6 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 			}
 
 			if _, err := w.Write(buffer[:n]); err != nil {
-				lastErr = time.Now()
 				utils.SafeLogf("Error writing to response: %s\n", err.Error())
 				statusChan <- 0
 				return
