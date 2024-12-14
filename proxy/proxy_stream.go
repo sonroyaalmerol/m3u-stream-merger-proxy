@@ -103,22 +103,15 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 	maxBackoff := time.Duration(timeoutSecond-1) * time.Second
 	currentBackoff := initialBackoff
 
-	contextSleep := func() bool {
+	contextSleep := func(ctx context.Context, timer *time.Timer) {
 		select {
 		case <-time.After(currentBackoff):
 			currentBackoff *= 2
 			if currentBackoff > maxBackoff {
 				currentBackoff = maxBackoff
 			}
-			return true
 		case <-ctx.Done():
-			utils.SafeLogf("Context canceled for stream: %s\n", r.RemoteAddr)
-			statusChan <- 0
-			return false
 		case <-timer.C:
-			utils.SafeLogf("Timeout reached while trying to stream: %s\n", r.RemoteAddr)
-			statusChan <- returnStatus
-			return false
 		}
 	}
 
@@ -147,9 +140,7 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 				returnStatus = 2
 
 				utils.SafeLogf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
-				if !contextSleep() {
-					return
-				}
+				contextSleep(ctx, timer)
 
 				continue
 			case err != nil:
@@ -162,9 +153,7 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 				}
 
 				utils.SafeLogf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
-				if !contextSleep() {
-					return
-				}
+				contextSleep(ctx, timer)
 
 				continue
 			}
@@ -189,9 +178,9 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 					}
 				}
 				timer.Reset(timeoutDuration)
-			}
 
-			currentBackoff = initialBackoff
+				currentBackoff = initialBackoff
+			}
 		}
 	}
 }
