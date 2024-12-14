@@ -14,6 +14,8 @@ import (
 )
 
 func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
+	defer close(statusChan)
+
 	bufferMbInt, err := strconv.Atoi(os.Getenv("BUFFER_MB"))
 	if err != nil || bufferMbInt < 0 {
 		bufferMbInt = 0

@@ -73,7 +73,6 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 			}
 
 			exitStatus := make(chan int)
-			defer close(exitStatus)
 
 			utils.SafeLogf("Proxying %s to %s\n", r.RemoteAddr, selectedUrl)
 			go stream.ProxyStream(ctx, selectedIndex, resp, r, w, exitStatus)
