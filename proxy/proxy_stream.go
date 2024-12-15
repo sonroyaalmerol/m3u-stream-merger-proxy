@@ -73,10 +73,13 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 		return
 	}
 
-	instance.Cm.UpdateConcurrency(m3uIndex, true)
-	defer instance.Cm.UpdateConcurrency(m3uIndex, false)
+	cm := instance.Cm
+
+	cm.UpdateConcurrency(m3uIndex, true)
 
 	defer func() {
+		cm.UpdateConcurrency(m3uIndex, false)
+
 		buffer = nil
 		if flusher, ok := w.(http.Flusher); ok {
 			flusher.Flush()
