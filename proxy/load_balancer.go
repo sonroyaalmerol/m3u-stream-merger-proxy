@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type StreamInstance struct {
@@ -46,6 +47,11 @@ func (instance *StreamInstance) LoadBalancer(ctx context.Context, previous *[]in
 	}
 
 	lap := 0
+
+	// Backoff settings
+	initialBackoff := 200 * time.Millisecond
+	maxBackoff := 2 * time.Second
+	currentBackoff := initialBackoff
 
 	for lap < maxLaps || maxLaps == 0 {
 		if debug {
@@ -96,6 +102,15 @@ func (instance *StreamInstance) LoadBalancer(ctx context.Context, previous *[]in
 				*previous = []int{}
 			}
 
+		}
+
+		select {
+		case <-time.After(currentBackoff):
+			currentBackoff *= 2
+			if currentBackoff > maxBackoff {
+				currentBackoff = maxBackoff
+			}
+		case <-ctx.Done():
 		}
 
 		lap++
