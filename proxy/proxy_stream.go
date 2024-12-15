@@ -107,17 +107,32 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 
 	contextSleep := func(ctx context.Context, timer *time.Timer) {
 		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
 		case <-time.After(currentBackoff):
 			currentBackoff *= 2
 			if currentBackoff > maxBackoff {
 				currentBackoff = maxBackoff
 			}
-		case <-ctx.Done():
-		case <-timer.C:
 		}
 	}
 
+	readChan := make(chan struct {
+		n   int
+		err error
+	}, 1)
+	defer close(readChan)
+
 	for {
+		go func() {
+			n, err := resp.Body.Read(buffer)
+			readChan <- struct {
+				n   int
+				err error
+			}{n, err}
+		}()
+
 		select {
 		case <-ctx.Done():
 			utils.SafeLogf("Context canceled for stream: %s\n", r.RemoteAddr)
@@ -127,10 +142,9 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 			utils.SafeLogf("Timeout reached while trying to stream: %s\n", r.RemoteAddr)
 			statusChan <- returnStatus
 			return
-		default:
-			n, err := resp.Body.Read(buffer)
+		case result := <-readChan:
 			switch {
-			case err == io.EOF:
+			case result.err == io.EOF:
 				lastErr = time.Now()
 				if utils.EOFIsExpected(resp) || timeoutSecond == 0 {
 					utils.SafeLogf("Stream ended (expected EOF reached): %s\n", r.RemoteAddr)
@@ -145,7 +159,7 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 				contextSleep(ctx, timer)
 
 				continue
-			case err != nil:
+			case result.err != nil:
 				lastErr = time.Now()
 				utils.SafeLogf("Error reading stream: %s\n", err.Error())
 				returnStatus = 1
@@ -160,7 +174,7 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 				continue
 			}
 
-			if _, err := w.Write(buffer[:n]); err != nil {
+			if _, err := w.Write(buffer[:result.n]); err != nil {
 				utils.SafeLogf("Error writing to response: %s\n", err.Error())
 				statusChan <- 0
 				return
