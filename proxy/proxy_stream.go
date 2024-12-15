@@ -140,7 +140,6 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 		select {
 		case <-ctx.Done():
 			utils.SafeLogf("Context canceled for stream: %s\n", r.RemoteAddr)
-			statusChan <- 0
 			return
 		case <-timer.C:
 			utils.SafeLogf("Timeout reached while trying to stream: %s\n", r.RemoteAddr)
