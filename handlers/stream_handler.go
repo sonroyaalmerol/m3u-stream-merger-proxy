@@ -38,6 +38,11 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 	firstWrite := true
 
 	var resp *http.Response
+	defer func() {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+	}()
 
 	for {
 		select {
@@ -45,6 +50,10 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 			utils.SafeLogf("Client disconnected: %s\n", r.RemoteAddr)
 			return
 		default:
+			if resp != nil && resp.Body != nil {
+				resp.Body.Close()
+			}
+
 			resp, selectedUrl, selectedIndex, err = stream.LoadBalancer(ctx, &testedIndexes, r.Method)
 			if err != nil {
 				utils.SafeLogf("Error reloading stream for %s: %v\n", streamUrl, err)
@@ -79,8 +88,6 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 			select {
 			case <-ctx.Done():
 				utils.SafeLogf("Client has closed the stream: %s\n", r.RemoteAddr)
-				resp.Body.Close()
-
 				return
 			case streamExitCode := <-exitStatus:
 				utils.SafeLogf("Exit code %d received from %s\n", streamExitCode, selectedUrl)
@@ -99,8 +106,6 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 					utils.SafeLogf("Unable to write to client. Assuming stream has been closed: %s\n", r.RemoteAddr)
 					return
 				}
-
-				resp.Body.Close()
 			}
 		}
 	}
