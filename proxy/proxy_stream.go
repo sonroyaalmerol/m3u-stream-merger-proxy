@@ -83,9 +83,6 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 
 	defer func() {
 		buffer = nil
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
 	}()
 
 	timeoutSecond := 3
