@@ -14,7 +14,7 @@ import (
 )
 
 func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
-	defer close(statusChan)
+	debug := os.Getenv("DEBUG") == "true"
 
 	bufferMbInt, err := strconv.Atoi(os.Getenv("BUFFER_MB"))
 	if err != nil || bufferMbInt < 0 {
@@ -73,13 +73,15 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 		return
 	}
 
-	cm := instance.Cm
-
-	cm.UpdateConcurrency(m3uIndex, true)
+	instance.Cm.UpdateConcurrency(m3uIndex, true)
+	defer func() {
+		if debug {
+			utils.SafeLogf("[DEBUG] Defer executed for stream: %s\n", r.RemoteAddr)
+		}
+		instance.Cm.UpdateConcurrency(m3uIndex, false)
+	}()
 
 	defer func() {
-		cm.UpdateConcurrency(m3uIndex, false)
-
 		buffer = nil
 		if flusher, ok := w.(http.Flusher); ok {
 			flusher.Flush()
@@ -125,7 +127,6 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 		n   int
 		err error
 	}, 1)
-	defer close(readChan)
 
 	for {
 		go func() {
