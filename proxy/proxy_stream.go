@@ -141,6 +141,7 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 		select {
 		case <-ctx.Done():
 			utils.SafeLogf("Context canceled for stream: %s\n", r.RemoteAddr)
+			_ = resp.Body.Close()
 			return
 		case result := <-readChan:
 			switch {
