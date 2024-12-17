@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
@@ -45,10 +46,6 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 	}()
 
 	for {
-		if resp != nil && resp.Body != nil {
-			resp.Body.Close()
-		}
-
 		resp, selectedUrl, selectedIndex, err = stream.LoadBalancer(ctx, &testedIndexes, r.Method)
 		if err != nil {
 			utils.SafeLogf("Error reloading stream for %s: %v\n", streamUrl, err)
@@ -77,7 +74,10 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 		exitStatus := make(chan int)
 
 		utils.SafeLogf("Proxying %s to %s\n", r.RemoteAddr, selectedUrl)
-		go stream.ProxyStream(ctx, selectedIndex, resp, r, w, exitStatus)
+		proxyCtx, proxyCtxCancel := context.WithCancel(ctx)
+		defer proxyCtxCancel()
+
+		go stream.ProxyStream(proxyCtx, selectedIndex, resp, r, w, exitStatus)
 		testedIndexes = append(testedIndexes, selectedIndex)
 
 		select {
@@ -93,6 +93,7 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 			} else if streamExitCode == 1 || streamExitCode == 2 {
 				// Retry on server-side connection errors
 				utils.SafeLogf("Retrying other servers...\n")
+				proxyCtxCancel()
 			} else if streamExitCode == 4 {
 				utils.SafeLogf("Finished handling %s request: %s\n", r.Method, r.RemoteAddr)
 				return

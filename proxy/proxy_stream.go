@@ -94,8 +94,6 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 	if timeoutSecond == 0 {
 		timeoutDuration = time.Minute
 	}
-	timer := time.NewTimer(timeoutDuration)
-	defer timer.Stop()
 
 	timeStarted := time.Now()
 	lastErr := timeStarted
@@ -107,11 +105,10 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 	maxBackoff := time.Duration(timeoutSecond-1) * time.Second
 	currentBackoff := initialBackoff
 
-	contextSleep := func(ctx context.Context, timer *time.Timer) {
+	contextSleep := func(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-timer.C:
 		case <-time.After(currentBackoff):
 			currentBackoff *= 2
 			if currentBackoff > maxBackoff {
@@ -134,13 +131,17 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 			}{n, err}
 		}()
 
+		elapsed := time.Since(timeStarted)
+		if timeoutSecond > 0 && elapsed >= timeoutDuration {
+			utils.SafeLogf("Timeout reached while trying to stream: %s\n", r.RemoteAddr)
+			statusChan <- returnStatus
+			return
+		}
+
 		select {
 		case <-ctx.Done():
 			utils.SafeLogf("Context canceled for stream: %s\n", r.RemoteAddr)
-			return
-		case <-timer.C:
-			utils.SafeLogf("Timeout reached while trying to stream: %s\n", r.RemoteAddr)
-			statusChan <- returnStatus
+			_ = resp.Body.Close()
 			return
 		case result := <-readChan:
 			switch {
@@ -156,9 +157,7 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 				returnStatus = 2
 
 				utils.SafeLogf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
-				contextSleep(ctx, timer)
-
-				continue
+				contextSleep(ctx)
 			case result.err != nil:
 				lastErr = time.Now()
 				utils.SafeLogf("Error reading stream: %s\n", err.Error())
@@ -169,33 +168,25 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 				}
 
 				utils.SafeLogf("Retrying same stream until timeout (%d seconds) is reached...\n", timeoutSecond)
-				contextSleep(ctx, timer)
-
-				continue
-			}
-
-			if _, err := w.Write(buffer[:result.n]); err != nil {
-				utils.SafeLogf("Error writing to response: %s\n", err.Error())
-				statusChan <- 0
-				return
-			}
-
-			if flusher, ok := w.(http.Flusher); ok {
-				flusher.Flush()
-			}
-
-			// check if never errored or last error was at least a second ago
-			if lastErr.Equal(timeStarted) || time.Since(lastErr) >= time.Second {
-				// Reset timer on successful read/write
-				if !timer.Stop() {
-					select {
-					case <-timer.C:
-					default:
-					}
+				contextSleep(ctx)
+			case result.err == nil:
+				if _, err := w.Write(buffer[:result.n]); err != nil {
+					utils.SafeLogf("Error writing to response: %s\n", err.Error())
+					statusChan <- 0
+					return
 				}
-				timer.Reset(timeoutDuration)
 
-				currentBackoff = initialBackoff
+				if flusher, ok := w.(http.Flusher); ok {
+					flusher.Flush()
+				}
+
+				// check if never errored or last error was at least a second ago
+				if lastErr.Equal(timeStarted) || time.Since(lastErr) >= time.Second {
+					// Reset timer on successful read/write
+					timeStarted = time.Now()
+
+					currentBackoff = initialBackoff
+				}
 			}
 		}
 	}
