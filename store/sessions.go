@@ -3,6 +3,7 @@ package store
 import (
 	"m3u-stream-merger/utils"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -19,12 +20,16 @@ var sessionStore = struct {
 }{sessions: make(map[string]Session)}
 
 func GetOrCreateSession(r *http.Request) Session {
+	debug := os.Getenv("DEBUG") == "true"
 	fingerprint := utils.GenerateFingerprint(r)
 
 	sessionStore.RLock()
 	session, exists := sessionStore.sessions[fingerprint]
 	sessionStore.RUnlock()
 	if exists {
+		if debug {
+			utils.SafeLogf("[DEBUG] Existing session found: %s\n", fingerprint)
+		}
 		return session
 	}
 
@@ -38,6 +43,10 @@ func GetOrCreateSession(r *http.Request) Session {
 	sessionStore.sessions[session.ID] = session
 	sessionStore.Unlock()
 
+	if debug {
+		utils.SafeLogf("[DEBUG] Generating new session: %s\n", fingerprint)
+	}
+
 	return session
 }
 
@@ -50,7 +59,13 @@ func ClearSessionStore() {
 }
 
 func (s *Session) SetTestedIndexes(indexes []int) {
+	debug := os.Getenv("DEBUG") == "true"
+
 	s.TestedIndexes = indexes
+
+	if debug {
+		utils.SafeLogf("[DEBUG] Setting tested indexes for session - %s: %v\n", s.ID, s.TestedIndexes)
+	}
 
 	sessionStore.Lock()
 	sessionStore.sessions[s.ID] = *s
