@@ -95,6 +95,8 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 
 		utils.SafeLogf("Background process: M3U fetching complete.\n")
 
+		store.ClearSessionStore()
+
 		cacheOnSync := os.Getenv("CACHE_ON_SYNC")
 		if len(strings.TrimSpace(cacheOnSync)) == 0 {
 			cacheOnSync = "false"

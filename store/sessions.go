@@ -41,6 +41,14 @@ func GetOrCreateSession(r *http.Request) Session {
 	return session
 }
 
+func ClearSessionStore() {
+	sessionStore.Lock()
+	for k := range sessionStore.sessions {
+		delete(sessionStore.sessions, k)
+	}
+	sessionStore.Unlock()
+}
+
 func (s *Session) SetTestedIndexes(indexes []int) {
 	s.TestedIndexes = indexes
 
