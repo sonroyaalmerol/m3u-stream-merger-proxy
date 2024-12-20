@@ -78,7 +78,6 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 		defer proxyCtxCancel()
 
 		go stream.ProxyStream(proxyCtx, selectedIndex, resp, r, w, exitStatus)
-		session.SetTestedIndexes(append(session.TestedIndexes, selectedIndex))
 
 		select {
 		case <-ctx.Done():
@@ -92,6 +91,7 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 				return
 			} else if streamExitCode == 1 || streamExitCode == 2 {
 				// Retry on server-side connection errors
+				session.SetTestedIndexes(append(session.TestedIndexes, selectedIndex))
 				utils.SafeLogf("Retrying other servers...\n")
 				proxyCtxCancel()
 			} else if streamExitCode == 4 {
