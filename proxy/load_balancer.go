@@ -31,7 +31,7 @@ func NewStreamInstance(streamUrl string, cm *store.ConcurrencyManager) (*StreamI
 	}, nil
 }
 
-func (instance *StreamInstance) LoadBalancer(ctx context.Context, previous *[]int, method string) (*http.Response, string, int, error) {
+func (instance *StreamInstance) LoadBalancer(ctx context.Context, session *store.Session, method string) (*http.Response, string, int, error) {
 	debug := os.Getenv("DEBUG") == "true"
 
 	m3uIndexes := utils.GetM3UIndexes()
@@ -64,7 +64,7 @@ func (instance *StreamInstance) LoadBalancer(ctx context.Context, previous *[]in
 			return nil, "", -1, fmt.Errorf("Cancelling load balancer.")
 		default:
 			for _, index := range m3uIndexes {
-				if slices.Contains(*previous, index) {
+				if slices.Contains(session.TestedIndexes, index) {
 					utils.SafeLogf("Skipping M3U_%d: marked as previous stream\n", index+1)
 					continue
 				}
@@ -99,7 +99,7 @@ func (instance *StreamInstance) LoadBalancer(ctx context.Context, previous *[]in
 				if debug {
 					utils.SafeLogf("[DEBUG] All streams skipped in lap %d\n", lap)
 				}
-				*previous = []int{}
+				session.SetTestedIndexes([]int{})
 			}
 
 		}
