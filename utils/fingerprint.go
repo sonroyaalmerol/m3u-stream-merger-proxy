@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 )
 
 func GenerateFingerprint(r *http.Request) string {
 	debug := os.Getenv("DEBUG") == "true"
 
 	// Collect relevant attributes
-	ip := r.RemoteAddr
+	ip := strings.Split(r.RemoteAddr, ":")[0]
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		ip = xff
 	}
