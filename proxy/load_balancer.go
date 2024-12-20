@@ -80,10 +80,9 @@ func (instance *StreamInstance) LoadBalancer(ctx context.Context, session *store
 					continue
 				}
 
-				allSkipped = false // At least one URL is not skipped
-
 				resp, err := utils.CustomHttpRequest(method, url)
 				if err == nil {
+					allSkipped = false // At least one URL is not skipped
 					if debug {
 						utils.SafeLogf("[DEBUG] Successfully fetched stream from %s\n", url)
 					}
@@ -93,6 +92,7 @@ func (instance *StreamInstance) LoadBalancer(ctx context.Context, session *store
 				if debug {
 					utils.SafeLogf("[DEBUG] Error fetching stream from %s: %s\n", url, err.Error())
 				}
+				session.SetTestedIndexes(append(session.TestedIndexes, index))
 			}
 
 			if allSkipped {
