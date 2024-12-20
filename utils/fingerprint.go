@@ -20,9 +20,10 @@ func GenerateFingerprint(r *http.Request) string {
 	userAgent := r.Header.Get("User-Agent")
 	accept := r.Header.Get("Accept")
 	acceptLang := r.Header.Get("Accept-Language")
+	path := r.URL.Path
 
 	// Combine into a single string
-	data := fmt.Sprintf("%s|%s|%s|%s", ip, userAgent, accept, acceptLang)
+	data := fmt.Sprintf("%s|%s|%s|%s|%s", ip, userAgent, accept, acceptLang, path)
 	if debug {
 		SafeLogf("[DEBUG] Generating fingerprint from: %s\n", data)
 	}
