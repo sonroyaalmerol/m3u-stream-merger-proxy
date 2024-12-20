@@ -57,7 +57,6 @@ func (instance *StreamInstance) LoadBalancer(ctx context.Context, session *store
 		if debug {
 			utils.SafeLogf("[DEBUG] Stream attempt %d out of %d\n", lap+1, maxLaps)
 		}
-		allSkipped := true // Assume all URLs might be skipped
 
 		select {
 		case <-ctx.Done():
@@ -82,7 +81,6 @@ func (instance *StreamInstance) LoadBalancer(ctx context.Context, session *store
 
 				resp, err := utils.CustomHttpRequest(method, url)
 				if err == nil {
-					allSkipped = false // At least one URL is not skipped
 					if debug {
 						utils.SafeLogf("[DEBUG] Successfully fetched stream from %s\n", url)
 					}
@@ -95,12 +93,10 @@ func (instance *StreamInstance) LoadBalancer(ctx context.Context, session *store
 				session.SetTestedIndexes(append(session.TestedIndexes, index))
 			}
 
-			if allSkipped {
-				if debug {
-					utils.SafeLogf("[DEBUG] All streams skipped in lap %d\n", lap)
-				}
-				session.SetTestedIndexes([]int{})
+			if debug {
+				utils.SafeLogf("[DEBUG] All streams skipped in lap %d\n", lap)
 			}
+			session.SetTestedIndexes([]int{})
 
 		}
 
