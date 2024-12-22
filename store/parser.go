@@ -113,18 +113,18 @@ func M3UScanner(m3uIndex string, fn func(streamInfo StreamInfo)) error {
 		}
 	}
 
-	entries, err := os.ReadDir(streamsDirPath)
-	if err != nil {
-		return fmt.Errorf("error reading dir path: %w", err)
-	}
+	// entries, err := os.ReadDir(streamsDirPath)
+	// if err != nil {
+	// 	return fmt.Errorf("error reading dir path: %w", err)
+	// }
 
-	for _, e := range entries {
-		if e.Name() == sessionId {
-			continue
-		}
+	// for _, e := range entries {
+	// 	if e.Name() == sessionId {
+	// 		continue
+	// 	}
 
-		_ = os.RemoveAll(filepath.Join(streamsDirPath, e.Name()))
-	}
+	// 	_ = os.RemoveAll(filepath.Join(streamsDirPath, e.Name()))
+	// }
 
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("error reading M3U file: %w", err)
