@@ -41,9 +41,6 @@ func (cm *ConcurrencyManager) GetCount(m3uIndex string) int {
 }
 
 func (cm *ConcurrencyManager) ConcurrencyPriorityValue(m3uIndex string) int {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-
 	maxConcurrency, err := strconv.Atoi(os.Getenv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%s", m3uIndex)))
 	if err != nil {
 		maxConcurrency = 1
@@ -55,9 +52,6 @@ func (cm *ConcurrencyManager) ConcurrencyPriorityValue(m3uIndex string) int {
 }
 
 func (cm *ConcurrencyManager) CheckConcurrency(m3uIndex string) bool {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-
 	maxConcurrency, err := strconv.Atoi(os.Getenv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%s", m3uIndex)))
 	if err != nil {
 		maxConcurrency = 1
@@ -70,9 +64,6 @@ func (cm *ConcurrencyManager) CheckConcurrency(m3uIndex string) bool {
 }
 
 func (cm *ConcurrencyManager) UpdateConcurrency(m3uIndex string, incr bool) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-
 	if incr {
 		cm.Increment(m3uIndex)
 	} else {
