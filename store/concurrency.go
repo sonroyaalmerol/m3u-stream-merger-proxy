@@ -90,12 +90,20 @@ func (cm *ConcurrencyManager) CheckConcurrency(m3uIndex string) bool {
 }
 
 func (cm *ConcurrencyManager) UpdateConcurrency(m3uIndex string, subIndex string, incr bool) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
 	if incr {
 		cm.Increment(m3uIndex, subIndex)
 	} else {
 		cm.Decrement(m3uIndex, subIndex)
 	}
 
-	count := cm.GetCount(m3uIndex, subIndex)
-	utils.SafeLogf("Current number of connections for M3U_%s|%s: %d", m3uIndex, subIndex, count)
+	totalCount := 0
+	for subIndex := range cm.count[m3uIndex] {
+		count := cm.GetCount(m3uIndex, subIndex)
+		totalCount += count
+	}
+
+	utils.SafeLogf("Current number of connections for M3U_%s: %d", m3uIndex, totalCount)
 }
