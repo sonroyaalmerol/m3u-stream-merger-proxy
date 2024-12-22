@@ -52,27 +52,41 @@ func (cm *ConcurrencyManager) GetCount(m3uIndex string, subIndex string) int {
 	return cm.count[m3uIndex][subIndex]
 }
 
-func (cm *ConcurrencyManager) ConcurrencyPriorityValue(m3uIndex string, subIndex string) int {
+func (cm *ConcurrencyManager) ConcurrencyPriorityValue(m3uIndex string) int {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
 	maxConcurrency, err := strconv.Atoi(os.Getenv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%s", m3uIndex)))
 	if err != nil {
 		maxConcurrency = 1
 	}
 
-	count := cm.GetCount(m3uIndex, subIndex)
+	totalCount := 0
+	for subIndex := range cm.count[m3uIndex] {
+		count := cm.GetCount(m3uIndex, subIndex)
+		totalCount += count
+	}
 
-	return maxConcurrency - count
+	return maxConcurrency - totalCount
 }
 
-func (cm *ConcurrencyManager) CheckConcurrency(m3uIndex string, subIndex string) bool {
+func (cm *ConcurrencyManager) CheckConcurrency(m3uIndex string) bool {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
 	maxConcurrency, err := strconv.Atoi(os.Getenv(fmt.Sprintf("M3U_MAX_CONCURRENCY_%s", m3uIndex)))
 	if err != nil {
 		maxConcurrency = 1
 	}
 
-	count := cm.GetCount(m3uIndex, subIndex)
+	totalCount := 0
+	for subIndex := range cm.count[m3uIndex] {
+		count := cm.GetCount(m3uIndex, subIndex)
+		totalCount += count
+	}
 
-	utils.SafeLogf("Current number of connections for M3U_%s|%s: %d", m3uIndex, subIndex, count)
-	return count >= maxConcurrency
+	utils.SafeLogf("Current number of connections for M3U_%s: %d", m3uIndex, totalCount)
+	return totalCount >= maxConcurrency
 }
 
 func (cm *ConcurrencyManager) UpdateConcurrency(m3uIndex string, subIndex string, incr bool) {

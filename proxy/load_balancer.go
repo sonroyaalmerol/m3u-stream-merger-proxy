@@ -37,7 +37,7 @@ func (instance *StreamInstance) LoadBalancer(ctx context.Context, session *store
 	m3uIndexes := utils.GetM3UIndexes()
 
 	sort.Slice(m3uIndexes, func(i, j int) bool {
-		return instance.Cm.ConcurrencyPriorityValue(m3uIndexes[i], "0") > instance.Cm.ConcurrencyPriorityValue(m3uIndexes[j], "0")
+		return instance.Cm.ConcurrencyPriorityValue(m3uIndexes[i]) > instance.Cm.ConcurrencyPriorityValue(m3uIndexes[j])
 	})
 
 	maxLapsString := os.Getenv("MAX_RETRIES")
@@ -75,8 +75,8 @@ func (instance *StreamInstance) LoadBalancer(ctx context.Context, session *store
 						continue
 					}
 
-					if instance.Cm.CheckConcurrency(index, subIndex) {
-						utils.SafeLogf("Concurrency limit reached for M3U_%s|%s: %s\n", index, subIndex, url)
+					if instance.Cm.CheckConcurrency(index) {
+						utils.SafeLogf("Concurrency limit reached for M3U_%s: %s\n", index, url)
 						continue
 					}
 
