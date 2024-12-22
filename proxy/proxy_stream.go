@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
+func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex string, subIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
 	debug := os.Getenv("DEBUG") == "true"
 
 	bufferMbInt, err := strconv.Atoi(os.Getenv("BUFFER_MB"))
@@ -73,12 +73,12 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex int, r
 		return
 	}
 
-	instance.Cm.UpdateConcurrency(m3uIndex, true)
+	instance.Cm.UpdateConcurrency(m3uIndex, subIndex, true)
 	defer func() {
 		if debug {
 			utils.SafeLogf("[DEBUG] Defer executed for stream: %s\n", r.RemoteAddr)
 		}
-		instance.Cm.UpdateConcurrency(m3uIndex, false)
+		instance.Cm.UpdateConcurrency(m3uIndex, subIndex, false)
 	}()
 
 	defer func() {

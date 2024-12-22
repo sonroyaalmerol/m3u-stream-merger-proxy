@@ -2,8 +2,8 @@ package utils
 
 import "fmt"
 
-func GetM3UFilePathByIndex(m3uIndex int) string {
-	m3uFile := fmt.Sprintf("/tmp/m3u-proxy/sources/%d.m3u", m3uIndex+1)
+func GetM3UFilePathByIndex(m3uIndex string) string {
+	m3uFile := fmt.Sprintf("/tmp/m3u-proxy/sources/%s.m3u", m3uIndex)
 
 	return m3uFile
 }

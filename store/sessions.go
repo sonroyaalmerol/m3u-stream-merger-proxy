@@ -11,7 +11,7 @@ import (
 type Session struct {
 	ID            string
 	CreatedAt     time.Time
-	TestedIndexes []int
+	TestedIndexes []string
 }
 
 var sessionStore = struct {
@@ -36,7 +36,7 @@ func GetOrCreateSession(r *http.Request) Session {
 	session = Session{
 		ID:            fingerprint,
 		CreatedAt:     time.Now(),
-		TestedIndexes: []int{},
+		TestedIndexes: []string{},
 	}
 
 	sessionStore.Lock()
@@ -58,7 +58,7 @@ func ClearSessionStore() {
 	sessionStore.Unlock()
 }
 
-func (s *Session) SetTestedIndexes(indexes []int) {
+func (s *Session) SetTestedIndexes(indexes []string) {
 	debug := os.Getenv("DEBUG") == "true"
 
 	s.TestedIndexes = indexes

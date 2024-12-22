@@ -80,14 +80,14 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 
 		indexes := utils.GetM3UIndexes()
 		for _, idx := range indexes {
-			utils.SafeLogf("Background process: Fetching M3U_URL_%d...\n", idx+1)
+			utils.SafeLogf("Background process: Fetching M3U_URL_%s...\n", idx)
 			wg.Add(1)
 			// Start the goroutine for periodic updates
-			go func(idx int) {
+			go func(idx string) {
 				defer wg.Done()
 				err := store.DownloadM3USource(idx)
 				if err != nil && debug {
-					utils.SafeLogf("Background process: Error fetching M3U_URL_%d: %v\n", idx+1, err)
+					utils.SafeLogf("Background process: Error fetching M3U_URL_%s: %v\n", idx, err)
 				}
 			}(idx)
 		}

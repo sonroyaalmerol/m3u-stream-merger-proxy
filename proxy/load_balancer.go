@@ -31,13 +31,13 @@ func NewStreamInstance(streamUrl string, cm *store.ConcurrencyManager) (*StreamI
 	}, nil
 }
 
-func (instance *StreamInstance) LoadBalancer(ctx context.Context, session *store.Session, method string) (*http.Response, string, int, error) {
+func (instance *StreamInstance) LoadBalancer(ctx context.Context, session *store.Session, method string) (*http.Response, string, string, string, error) {
 	debug := os.Getenv("DEBUG") == "true"
 
 	m3uIndexes := utils.GetM3UIndexes()
 
 	sort.Slice(m3uIndexes, func(i, j int) bool {
-		return instance.Cm.ConcurrencyPriorityValue(i) > instance.Cm.ConcurrencyPriorityValue(j)
+		return instance.Cm.ConcurrencyPriorityValue(m3uIndexes[i], "0") > instance.Cm.ConcurrencyPriorityValue(m3uIndexes[j], "0")
 	})
 
 	maxLapsString := os.Getenv("MAX_RETRIES")
@@ -60,43 +60,45 @@ func (instance *StreamInstance) LoadBalancer(ctx context.Context, session *store
 
 		select {
 		case <-ctx.Done():
-			return nil, "", -1, fmt.Errorf("Cancelling load balancer.")
+			return nil, "", "", "", fmt.Errorf("Cancelling load balancer.")
 		default:
 			for _, index := range m3uIndexes {
-				if slices.Contains(session.TestedIndexes, index) {
-					utils.SafeLogf("Skipping M3U_%d: marked as previous stream\n", index+1)
-					continue
-				}
-
-				url, ok := instance.Info.URLs[index]
+				innerMap, ok := instance.Info.URLs[index]
 				if !ok {
-					utils.SafeLogf("Channel not found from M3U_%d: %s\n", index+1, instance.Info.Title)
+					utils.SafeLogf("Channel not found from M3U_%s: %s\n", index, instance.Info.Title)
 					continue
 				}
 
-				if instance.Cm.CheckConcurrency(index) {
-					utils.SafeLogf("Concurrency limit reached for M3U_%d: %s\n", index+1, url)
-					continue
-				}
-
-				resp, err := utils.CustomHttpRequest(method, url)
-				if err == nil {
-					if debug {
-						utils.SafeLogf("[DEBUG] Successfully fetched stream from %s\n", url)
+				for subIndex, url := range innerMap {
+					if slices.Contains(session.TestedIndexes, index+"|"+subIndex) {
+						utils.SafeLogf("Skipping M3U_%s|%s: marked as previous stream\n", index, subIndex)
+						continue
 					}
-					return resp, url, index, nil
+
+					if instance.Cm.CheckConcurrency(index, subIndex) {
+						utils.SafeLogf("Concurrency limit reached for M3U_%s|%s: %s\n", index, subIndex, url)
+						continue
+					}
+
+					resp, err := utils.CustomHttpRequest(method, url)
+					if err == nil {
+						if debug {
+							utils.SafeLogf("[DEBUG] Successfully fetched stream from %s\n", url)
+						}
+						return resp, url, index, subIndex, nil
+					}
+					utils.SafeLogf("Error fetching stream: %s\n", err.Error())
+					if debug {
+						utils.SafeLogf("[DEBUG] Error fetching stream from %s: %s\n", url, err.Error())
+					}
+					session.SetTestedIndexes(append(session.TestedIndexes, index+"|"+subIndex))
 				}
-				utils.SafeLogf("Error fetching stream: %s\n", err.Error())
-				if debug {
-					utils.SafeLogf("[DEBUG] Error fetching stream from %s: %s\n", url, err.Error())
-				}
-				session.SetTestedIndexes(append(session.TestedIndexes, index))
 			}
 
 			if debug {
 				utils.SafeLogf("[DEBUG] All streams skipped in lap %d\n", lap)
 			}
-			session.SetTestedIndexes([]int{})
+			session.SetTestedIndexes([]string{})
 
 		}
 
@@ -112,5 +114,5 @@ func (instance *StreamInstance) LoadBalancer(ctx context.Context, session *store
 		lap++
 	}
 
-	return nil, "", -1, fmt.Errorf("Error fetching stream. Exhausted all streams.")
+	return nil, "", "", "", fmt.Errorf("Error fetching stream. Exhausted all streams.")
 }
