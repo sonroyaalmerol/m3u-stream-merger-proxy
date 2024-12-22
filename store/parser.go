@@ -23,6 +23,8 @@ import (
 const streamsDirPath = "/m3u-proxy/data/streams"
 
 func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
+	debug := os.Getenv("DEBUG") == "true"
+
 	initInfo, err := DecodeSlug(slug)
 	if err != nil {
 		return nil, err
@@ -33,14 +35,22 @@ func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
 	indexes := utils.GetM3UIndexes()
 
 	for _, m3uIndex := range indexes {
-		fileName := fmt.Sprintf("%s_%s", base64.StdEncoding.EncodeToString([]byte(initInfo.Title)), m3uIndex)
+		safeTitle := base64.StdEncoding.EncodeToString([]byte(initInfo.Title))
 
-		fileMatches, err := filepath.Glob(filepath.Join(streamsDirPath, fileName, "|*"))
+		fileName := fmt.Sprintf("%s_%s*", safeTitle, m3uIndex)
+		globPattern := filepath.Join(streamsDirPath, "*", fileName)
+
+		fileMatches, err := filepath.Glob(globPattern)
 		if err != nil {
+			if debug {
+				utils.SafeLogf("Error finding files for pattern %s: %v", globPattern, err)
+			}
 			continue
 		}
 
-		initInfo.URLs[m3uIndex] = make(map[string]string)
+		if _, exists := initInfo.URLs[m3uIndex]; !exists {
+			initInfo.URLs[m3uIndex] = make(map[string]string)
+		}
 
 		for _, fileMatch := range fileMatches {
 			fileNameSplit := strings.Split(filepath.Base(fileMatch), "|")
@@ -113,7 +123,7 @@ func M3UScanner(m3uIndex string, fn func(streamInfo StreamInfo)) error {
 			continue
 		}
 
-		_ = os.RemoveAll(filepath.Join(streamsDirPath, sessionId))
+		_ = os.RemoveAll(filepath.Join(streamsDirPath, e.Name()))
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -184,24 +194,31 @@ func parseLine(sessionId string, line string, nextLine string, m3uIndex string) 
 
 	sessionDirPath := filepath.Join(streamsDirPath, sessionId)
 
+	err := os.MkdirAll(sessionDirPath, os.ModePerm)
+	if err != nil {
+		utils.SafeLogf("[DEBUG] Error creating stream cache folder: %s -> %v\n", sessionDirPath, err)
+	}
+
 	for i := 0; true; i++ {
 		fileName := fmt.Sprintf("%s_%s|%d", base64.StdEncoding.EncodeToString([]byte(currentStream.Title)), m3uIndex, i)
+		filePath := filepath.Join(sessionDirPath, fileName)
 
-		err := os.MkdirAll(sessionDirPath, os.ModePerm)
-		if err != nil {
-			utils.SafeLogf("[DEBUG] Error creating stream cache folder: %s -> %v\n", sessionDirPath, err)
-		}
-
-		if _, err := os.Stat(filepath.Join(sessionDirPath, fileName)); errors.Is(err, os.ErrNotExist) {
-			err = os.WriteFile(filepath.Join(sessionDirPath, fileName), []byte(encodedUrl), 0644)
+		if _, err := os.Stat(filePath); errors.Is(err, os.ErrNotExist) {
+			err = os.WriteFile(filePath, []byte(encodedUrl), 0644)
 			if err != nil {
 				utils.SafeLogf("[DEBUG] Error indexing stream: %s (#%s) -> %v\n", currentStream.Title, m3uIndex, err)
 			}
 
-			currentStream.URLs = make(map[string]map[string]string)
-			currentStream.URLs[m3uIndex] = make(map[string]string)
-			currentStream.URLs[m3uIndex][strconv.Itoa(i)] = cleanUrl
+			// Initialize maps if not already initialized
+			if currentStream.URLs == nil {
+				currentStream.URLs = make(map[string]map[string]string)
+			}
+			if currentStream.URLs[m3uIndex] == nil {
+				currentStream.URLs[m3uIndex] = make(map[string]string)
+			}
 
+			// Add the URL to the map
+			currentStream.URLs[m3uIndex][strconv.Itoa(i)] = cleanUrl
 			break
 		}
 	}
