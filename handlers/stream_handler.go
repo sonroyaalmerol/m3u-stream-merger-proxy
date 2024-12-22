@@ -32,7 +32,8 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 		return
 	}
 
-	var selectedIndex int
+	var selectedIndex string
+	var selectedSubIndex string
 	var selectedUrl string
 
 	session := store.GetOrCreateSession(r)
@@ -46,7 +47,7 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 	}()
 
 	for {
-		resp, selectedUrl, selectedIndex, err = stream.LoadBalancer(ctx, &session, r.Method)
+		resp, selectedUrl, selectedIndex, selectedSubIndex, err = stream.LoadBalancer(ctx, &session, r.Method)
 		if err != nil {
 			utils.SafeLogf("Error reloading stream for %s: %v\n", streamUrl, err)
 			return
@@ -77,7 +78,7 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 		proxyCtx, proxyCtxCancel := context.WithCancel(ctx)
 		defer proxyCtxCancel()
 
-		go stream.ProxyStream(proxyCtx, selectedIndex, resp, r, w, exitStatus)
+		go stream.ProxyStream(proxyCtx, selectedIndex, selectedSubIndex, resp, r, w, exitStatus)
 
 		select {
 		case <-ctx.Done():
@@ -91,7 +92,7 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 				return
 			} else if streamExitCode == 1 || streamExitCode == 2 {
 				// Retry on server-side connection errors
-				session.SetTestedIndexes(append(session.TestedIndexes, selectedIndex))
+				session.SetTestedIndexes(append(session.TestedIndexes, selectedIndex+"|"+selectedSubIndex))
 				utils.SafeLogf("Retrying other servers...\n")
 				proxyCtxCancel()
 			} else if streamExitCode == 4 {

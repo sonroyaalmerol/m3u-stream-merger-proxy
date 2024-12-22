@@ -10,9 +10,9 @@ import (
 	"m3u-stream-merger/utils"
 )
 
-func DownloadM3USource(m3uIndex int) (err error) {
+func DownloadM3USource(m3uIndex string) (err error) {
 	debug := os.Getenv("DEBUG") == "true"
-	m3uURL := os.Getenv(fmt.Sprintf("M3U_URL_%d", m3uIndex+1))
+	m3uURL := os.Getenv(fmt.Sprintf("M3U_URL_%s", m3uIndex))
 
 	if debug {
 		utils.SafeLogf("[DEBUG] Processing M3U from: %s\n", m3uURL)
