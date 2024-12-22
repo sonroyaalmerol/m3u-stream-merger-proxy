@@ -35,13 +35,13 @@ func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
 	for _, m3uIndex := range indexes {
 		fileName := fmt.Sprintf("%s_%s", base64.StdEncoding.EncodeToString([]byte(initInfo.Title)), m3uIndex)
 
-		fileMatches, err := filepath.Glob(filepath.Join(streamsDirPath, fileName, "___*"))
+		fileMatches, err := filepath.Glob(filepath.Join(streamsDirPath, fileName, "|*"))
 		if err != nil {
 			continue
 		}
 
 		for _, fileMatch := range fileMatches {
-			fileNameSplit := strings.Split(filepath.Base(fileMatch), "___")
+			fileNameSplit := strings.Split(filepath.Base(fileMatch), "|")
 			if len(fileNameSplit) != 2 {
 				continue
 			}
@@ -183,7 +183,7 @@ func parseLine(sessionId string, line string, nextLine string, m3uIndex string) 
 	sessionDirPath := filepath.Join(streamsDirPath, sessionId)
 
 	for i := 0; true; i++ {
-		fileName := fmt.Sprintf("%s_%s___%d", base64.StdEncoding.EncodeToString([]byte(currentStream.Title)), m3uIndex, i)
+		fileName := fmt.Sprintf("%s_%s|%d", base64.StdEncoding.EncodeToString([]byte(currentStream.Title)), m3uIndex, i)
 
 		err := os.MkdirAll(sessionDirPath, os.ModePerm)
 		if err != nil {

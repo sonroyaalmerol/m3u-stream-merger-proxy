@@ -92,7 +92,7 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 				return
 			} else if streamExitCode == 1 || streamExitCode == 2 {
 				// Retry on server-side connection errors
-				session.SetTestedIndexes(append(session.TestedIndexes, selectedIndex))
+				session.SetTestedIndexes(append(session.TestedIndexes, selectedIndex+"|"+selectedSubIndex))
 				utils.SafeLogf("Retrying other servers...\n")
 				proxyCtxCancel()
 			} else if streamExitCode == 4 {
