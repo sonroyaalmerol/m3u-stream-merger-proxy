@@ -9,7 +9,8 @@ import (
 	"sort"
 	"sync"
 	"time"
-	"vendor/golang.org/x/crypto/sha3"
+
+	"golang.org/x/crypto/sha3"
 )
 
 func GetStreamBySlug(slug string) (StreamInfo, error) {
