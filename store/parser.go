@@ -3,9 +3,7 @@ package store
 import (
 	"bufio"
 	"bytes"
-	"crypto/md5"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -13,7 +11,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"m3u-stream-merger/utils"
 
@@ -75,7 +72,7 @@ func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
 	return initInfo, nil
 }
 
-func M3UScanner(m3uIndex string, fn func(streamInfo StreamInfo)) error {
+func M3UScanner(m3uIndex string, sessionId string, fn func(streamInfo StreamInfo)) error {
 	utils.SafeLogf("Parsing M3U #%s...\n", m3uIndex)
 	filePath := utils.GetM3UFilePathByIndex(m3uIndex)
 
@@ -96,9 +93,6 @@ func M3UScanner(m3uIndex string, fn func(streamInfo StreamInfo)) error {
 	scanner := bufio.NewScanner(bytes.NewReader(mappedFile))
 	var currentLine string
 
-	sessionIdHash := md5.Sum([]byte(time.Now().String()))
-	sessionId := hex.EncodeToString(sessionIdHash[:])
-
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if strings.HasPrefix(line, "#EXTINF:") {
@@ -112,19 +106,6 @@ func M3UScanner(m3uIndex string, fn func(streamInfo StreamInfo)) error {
 			}
 		}
 	}
-
-	// entries, err := os.ReadDir(streamsDirPath)
-	// if err != nil {
-	// 	return fmt.Errorf("error reading dir path: %w", err)
-	// }
-
-	// for _, e := range entries {
-	// 	if e.Name() == sessionId {
-	// 		continue
-	// 	}
-
-	// 	_ = os.RemoveAll(filepath.Join(streamsDirPath, e.Name()))
-	// }
 
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("error reading M3U file: %w", err)

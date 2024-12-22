@@ -1,11 +1,15 @@
 package store
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"m3u-stream-merger/utils"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 )
 
 func GetStreamBySlug(slug string) (StreamInfo, error) {
@@ -24,13 +28,16 @@ func GetStreams() []StreamInfo {
 		streams sync.Map
 	)
 
+	sessionIdHash := sha1.Sum([]byte(time.Now().String()))
+	sessionId := hex.EncodeToString(sessionIdHash[:])
+
 	var wg sync.WaitGroup
 	for _, m3uIndex := range utils.GetM3UIndexes() {
 		wg.Add(1)
 		go func(m3uIndex string) {
 			defer wg.Done()
 
-			err := M3UScanner(m3uIndex, func(streamInfo StreamInfo) {
+			err := M3UScanner(m3uIndex, sessionId, func(streamInfo StreamInfo) {
 				// Check uniqueness and update if necessary
 				if existingStream, exists := streams.Load(streamInfo.Title); exists {
 					for idx, innerMap := range streamInfo.URLs {
@@ -54,6 +61,17 @@ func GetStreams() []StreamInfo {
 		}(m3uIndex)
 	}
 	wg.Wait()
+
+	entries, err := os.ReadDir(streamsDirPath)
+	if err == nil {
+		for _, e := range entries {
+			if e.Name() == sessionId {
+				continue
+			}
+
+			_ = os.RemoveAll(filepath.Join(streamsDirPath, e.Name()))
+		}
+	}
 
 	streams.Range(func(key, value any) bool {
 		stream := value.(StreamInfo)
