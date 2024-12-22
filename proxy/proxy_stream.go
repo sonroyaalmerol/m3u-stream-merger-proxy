@@ -73,12 +73,12 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex string
 		return
 	}
 
-	instance.Cm.UpdateConcurrency(m3uIndex, subIndex, true)
+	instance.Cm.UpdateConcurrency(m3uIndex, true)
 	defer func() {
 		if debug {
 			utils.SafeLogf("[DEBUG] Defer executed for stream: %s\n", r.RemoteAddr)
 		}
-		instance.Cm.UpdateConcurrency(m3uIndex, subIndex, false)
+		instance.Cm.UpdateConcurrency(m3uIndex, false)
 	}()
 
 	defer func() {

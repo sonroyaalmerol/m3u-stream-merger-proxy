@@ -10,46 +10,34 @@ import (
 
 type ConcurrencyManager struct {
 	mu    sync.Mutex
-	count map[string]map[string]int
+	count map[string]int
 }
 
 func NewConcurrencyManager() *ConcurrencyManager {
-	return &ConcurrencyManager{count: make(map[string]map[string]int)}
+	return &ConcurrencyManager{count: make(map[string]int)}
 }
 
-func (cm *ConcurrencyManager) Increment(m3uIndex string, subIndex string) {
+func (cm *ConcurrencyManager) Increment(m3uIndex string) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	if _, ok := cm.count[m3uIndex]; !ok {
-		cm.count[m3uIndex] = make(map[string]int)
-	}
-
-	cm.count[m3uIndex][subIndex]++
+	cm.count[m3uIndex]++
 }
 
-func (cm *ConcurrencyManager) Decrement(m3uIndex string, subIndex string) {
+func (cm *ConcurrencyManager) Decrement(m3uIndex string) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	if _, ok := cm.count[m3uIndex]; !ok {
-		cm.count[m3uIndex] = make(map[string]int)
-	}
-
-	if cm.count[m3uIndex][subIndex] > 0 {
-		cm.count[m3uIndex][subIndex]--
+	if cm.count[m3uIndex] > 0 {
+		cm.count[m3uIndex]--
 	}
 }
 
-func (cm *ConcurrencyManager) GetCount(m3uIndex string, subIndex string) int {
+func (cm *ConcurrencyManager) GetCount(m3uIndex string) int {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	if _, ok := cm.count[m3uIndex]; !ok {
-		cm.count[m3uIndex] = make(map[string]int)
-	}
-
-	return cm.count[m3uIndex][subIndex]
+	return cm.count[m3uIndex]
 }
 
 func (cm *ConcurrencyManager) ConcurrencyPriorityValue(m3uIndex string) int {
@@ -61,13 +49,9 @@ func (cm *ConcurrencyManager) ConcurrencyPriorityValue(m3uIndex string) int {
 		maxConcurrency = 1
 	}
 
-	totalCount := 0
-	for subIndex := range cm.count[m3uIndex] {
-		count := cm.GetCount(m3uIndex, subIndex)
-		totalCount += count
-	}
+	count := cm.GetCount(m3uIndex)
 
-	return maxConcurrency - totalCount
+	return maxConcurrency - count
 }
 
 func (cm *ConcurrencyManager) CheckConcurrency(m3uIndex string) bool {
@@ -79,31 +63,23 @@ func (cm *ConcurrencyManager) CheckConcurrency(m3uIndex string) bool {
 		maxConcurrency = 1
 	}
 
-	totalCount := 0
-	for subIndex := range cm.count[m3uIndex] {
-		count := cm.GetCount(m3uIndex, subIndex)
-		totalCount += count
-	}
+	count := cm.GetCount(m3uIndex)
 
-	utils.SafeLogf("Current number of connections for M3U_%s: %d", m3uIndex, totalCount)
-	return totalCount >= maxConcurrency
+	utils.SafeLogf("Current number of connections for M3U_%s: %d", m3uIndex, count)
+	return count >= maxConcurrency
 }
 
-func (cm *ConcurrencyManager) UpdateConcurrency(m3uIndex string, subIndex string, incr bool) {
+func (cm *ConcurrencyManager) UpdateConcurrency(m3uIndex string, incr bool) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
 	if incr {
-		cm.Increment(m3uIndex, subIndex)
+		cm.Increment(m3uIndex)
 	} else {
-		cm.Decrement(m3uIndex, subIndex)
+		cm.Decrement(m3uIndex)
 	}
 
-	totalCount := 0
-	for subIndex := range cm.count[m3uIndex] {
-		count := cm.GetCount(m3uIndex, subIndex)
-		totalCount += count
-	}
+	count := cm.GetCount(m3uIndex)
 
-	utils.SafeLogf("Current number of connections for M3U_%s: %d", m3uIndex, totalCount)
+	utils.SafeLogf("Current number of connections for M3U_%s: %d", m3uIndex, count)
 }
