@@ -1,7 +1,6 @@
 package store
 
 import (
-	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
 	"m3u-stream-merger/utils"
@@ -10,6 +9,7 @@ import (
 	"sort"
 	"sync"
 	"time"
+	"vendor/golang.org/x/crypto/sha3"
 )
 
 func GetStreamBySlug(slug string) (StreamInfo, error) {
@@ -28,7 +28,7 @@ func GetStreams() []StreamInfo {
 		streams sync.Map
 	)
 
-	sessionIdHash := sha1.Sum([]byte(time.Now().String()))
+	sessionIdHash := sha3.Sum224([]byte(time.Now().String()))
 	sessionId := hex.EncodeToString(sessionIdHash[:])
 
 	var wg sync.WaitGroup
