@@ -40,6 +40,8 @@ func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
 			continue
 		}
 
+		initInfo.URLs[m3uIndex] = make(map[string]string)
+
 		for _, fileMatch := range fileMatches {
 			fileNameSplit := strings.Split(filepath.Base(fileMatch), "|")
 			if len(fileNameSplit) != 2 {
@@ -196,11 +198,9 @@ func parseLine(sessionId string, line string, nextLine string, m3uIndex string) 
 				utils.SafeLogf("[DEBUG] Error indexing stream: %s (#%s) -> %v\n", currentStream.Title, m3uIndex, err)
 			}
 
-			currentStream.URLs = map[string]map[string]string{
-				m3uIndex: {
-					strconv.Itoa(i): cleanUrl,
-				},
-			}
+			currentStream.URLs = make(map[string]map[string]string)
+			currentStream.URLs[m3uIndex] = make(map[string]string)
+			currentStream.URLs[m3uIndex][strconv.Itoa(i)] = cleanUrl
 
 			break
 		}
