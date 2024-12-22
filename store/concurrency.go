@@ -20,12 +20,22 @@ func NewConcurrencyManager() *ConcurrencyManager {
 func (cm *ConcurrencyManager) Increment(m3uIndex string, subIndex string) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+
+	if _, ok := cm.count[m3uIndex]; !ok {
+		cm.count[m3uIndex] = make(map[string]int)
+	}
+
 	cm.count[m3uIndex][subIndex]++
 }
 
 func (cm *ConcurrencyManager) Decrement(m3uIndex string, subIndex string) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+
+	if _, ok := cm.count[m3uIndex]; !ok {
+		cm.count[m3uIndex] = make(map[string]int)
+	}
+
 	if cm.count[m3uIndex][subIndex] > 0 {
 		cm.count[m3uIndex][subIndex]--
 	}
@@ -34,6 +44,10 @@ func (cm *ConcurrencyManager) Decrement(m3uIndex string, subIndex string) {
 func (cm *ConcurrencyManager) GetCount(m3uIndex string, subIndex string) int {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+
+	if _, ok := cm.count[m3uIndex]; !ok {
+		cm.count[m3uIndex] = make(map[string]int)
+	}
 
 	return cm.count[m3uIndex][subIndex]
 }
