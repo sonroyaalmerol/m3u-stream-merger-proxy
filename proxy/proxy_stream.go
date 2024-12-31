@@ -160,7 +160,7 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex string
 				contextSleep(ctx)
 			case result.err != nil:
 				lastErr = time.Now()
-				utils.SafeLogf("Error reading stream: %s\n", err.Error())
+				utils.SafeLogf("Error reading stream: %s\n", result.err.Error())
 				returnStatus = 1
 				if timeoutSecond == 0 {
 					statusChan <- 1
