@@ -9,6 +9,7 @@ import (
 	"sort"
 	"sync"
 	"time"
+	"strings"
 
 	"golang.org/x/crypto/sha3"
 )
@@ -108,26 +109,32 @@ func GenerateStreamURL(baseUrl string, stream StreamInfo) string {
 
 func sortStreams(s []StreamInfo) {
 	key := os.Getenv("SORTING_KEY")
+	dir := os.Getenv("SORTING_DIRECTION")
 
 	switch key {
 	case "tvg-id":
 		sort.Slice(s, func(i, j int) bool {
+			if( strings.ToLower(dir) == `desc` ) { return s[i].TvgID > s[j].TvgID }
 			return s[i].TvgID < s[j].TvgID
 		})
 	case "tvg-chno":
 		sort.Slice(s, func(i, j int) bool {
+			if( strings.ToLower(dir) == `desc` ) { return s[i].TvgChNo > s[j].TvgChNo }
 			return s[i].TvgChNo < s[j].TvgChNo
 		})
 	case "tvg-group":
 		sort.Slice(s, func(i, j int) bool {
+			if( strings.ToLower(dir) == `desc` ) { return s[i].Group > s[j].Group }
 			return s[i].Group < s[j].Group
 		})
 	case "tvg-type":
 		sort.Slice(s, func(i, j int) bool {
+			if( strings.ToLower(dir) == `desc` ) { return s[i].TvgType > s[j].TvgType }
 			return s[i].TvgType < s[j].TvgType
 		})
 	default:
 		sort.Slice(s, func(i, j int) bool {
+			if( strings.ToLower(dir) == `desc` ) { return s[i].Title > s[j].Title }
 			return s[i].Title < s[j].Title
 		})
 	}

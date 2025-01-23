@@ -1,0 +1,31 @@
+services:
+  tprox:
+    image: localhost/kpmp_test:latest
+#    image: ghcr.io/sonroyaalmerol/m3u-stream-merger-proxy:pr-192
+    container_name: kpm_tprox
+    hostname: kpm_tprox
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/New_York
+      - CLEAR_ON_BOOT=true
+      - SYNC_ON_BOOT=true
+      - CACHE_ON_SYNC=true
+      - BASE_URL=http://192.168.2.200:9000/
+      - SYNC_CRON=0 0 * * *
+      - M3U_URL_1=https://tv.kevp.cc/stream/playlist.m3u?which=0&who=bkVZZzFHQVQwUk9DNjBmQlFBQmxzQT09
+      - M3U_MAX_CONCURRENCY_1=2
+      - SORTING_KEY=tvg-type
+      - SORTING_DIRECTION=desc
+      - PARSER_WORKERS=8
+      - MAX_RETRIES=5
+      - RETRY_WAIT=5
+      - BUFFER_MB=32
+      - STREAM_TIMEOUT=7
+      - DEBUG=true
+    ports:
+      - 9000:8080
+    network:
+      - bridge
+    tmpfs: /tmp
+    restart: unless-stopped
