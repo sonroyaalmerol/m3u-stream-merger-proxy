@@ -118,6 +118,14 @@ func sortStreams(s []StreamInfo) {
 		sort.Slice(s, func(i, j int) bool {
 			return s[i].TvgChNo < s[j].TvgChNo
 		})
+	case "tvg-group":
+		sort.Slice(s, func(i, j int) bool {
+			return s[i].Group < s[j].Group
+		})
+	case "tvg-type":
+		sort.Slice(s, func(i, j int) bool {
+			return s[i].TvgType < s[j].TvgType
+		})
 	default:
 		sort.Slice(s, func(i, j int) bool {
 			return s[i].Title < s[j].Title
