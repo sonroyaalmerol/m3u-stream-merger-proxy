@@ -149,6 +149,9 @@ func parseLine(sessionId string, line string, nextLine string, m3uIndex string) 
 			currentStream.TvgChNo = utils.TvgChNoParser(value)
 		case "tvg-name":
 			currentStream.Title = utils.TvgNameParser(value)
+		case "tvg-type":
+			currentStream.TvgType = utils.TvgTypeParser(value)
+		case "tvg-group":
 		case "group-title":
 			currentStream.Group = utils.GroupTitleParser(value)
 		case "tvg-logo":
