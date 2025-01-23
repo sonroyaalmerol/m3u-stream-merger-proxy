@@ -11,9 +11,9 @@ services:
       - CLEAR_ON_BOOT=true
       - SYNC_ON_BOOT=true
       - CACHE_ON_SYNC=true
-      - BASE_URL=http://192.168.2.200:9000/
+      - BASE_URL=MY_BASE_URL
       - SYNC_CRON=0 0 * * *
-      - M3U_URL_1=https://tv.kevp.cc/stream/playlist.m3u?which=0&who=bkVZZzFHQVQwUk9DNjBmQlFBQmxzQT09
+      - M3U_URL_1=MY_URL
       - M3U_MAX_CONCURRENCY_1=2
       - SORTING_KEY=tvg-type
       - SORTING_DIRECTION=desc
