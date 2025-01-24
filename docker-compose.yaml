@@ -1,0 +1,30 @@
+services:
+  tprox:
+    image: ghcr.io/sonroyaalmerol/m3u-stream-merger-proxy:latest
+    container_name: YOUR_CONTAINER_NAME
+    hostname: YOUR_CONTAINERS_HOSTNAME
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/New_York
+      - CLEAR_ON_BOOT=true
+      - SYNC_ON_BOOT=true
+      - CACHE_ON_SYNC=true
+      - BASE_URL=http://YOUR_BASE_URL:THE_PORT/
+      - SYNC_CRON=0 0 * * *
+      - M3U_URL_1=YOUR_LOCAL_OR_REMOTE_M3U
+      - M3U_MAX_CONCURRENCY_1=2
+      - SORTING_KEY=tvg-type # tvg-group, tvg-chno, tvg-id: default is Name
+      - SORTING_DIRECTION=asc # desc: default is asc
+      - PARSER_WORKERS=8
+      - MAX_RETRIES=5
+      - RETRY_WAIT=5
+      - BUFFER_MB=32
+      - STREAM_TIMEOUT=7
+      - DEBUG=false
+    ports:
+      - YOUR_PORT:8080
+    network:
+      - bridge
+    tmpfs: /tmp
+    restart: unless-stopped

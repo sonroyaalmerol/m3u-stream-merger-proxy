@@ -145,8 +145,16 @@ func formatStreamEntry(baseURL string, stream StreamInfo) string {
 	if stream.LogoURL != "" {
 		extInfTags = append(extInfTags, fmt.Sprintf("tvg-logo=\"%s\"", stream.LogoURL))
 	}
-	extInfTags = append(extInfTags, fmt.Sprintf("tvg-name=\"%s\"", stream.Title))
-	extInfTags = append(extInfTags, fmt.Sprintf("group-title=\"%s\"", stream.Group))
+	if stream.Group != "" {
+		extInfTags = append(extInfTags, fmt.Sprintf("tvg-group=\"%s\"", stream.Group))
+		extInfTags = append(extInfTags, fmt.Sprintf("group-title=\"%s\"", stream.Group))
+	}
+	if stream.TvgType != "" {
+		extInfTags = append(extInfTags, fmt.Sprintf("tvg-type=\"%s\"", stream.TvgType))
+	}
+	if stream.Title != "" {
+		extInfTags = append(extInfTags, fmt.Sprintf("tvg-name=\"%s\"", stream.Title))
+	}
 
 	entry.WriteString(fmt.Sprintf("%s,%s\n", strings.Join(extInfTags, " "), stream.Title))
 	entry.WriteString(GenerateStreamURL(baseURL, stream))
