@@ -42,6 +42,9 @@ func main() {
 	http.HandleFunc("/p/", func(w http.ResponseWriter, r *http.Request) {
 		handlers.StreamHandler(w, r, cm)
 	})
+	http.HandleFunc("/v/", func(w http.ResponseWriter, r *http.Request) {
+		handlers.M3UVideoHandler(w, r)
+	})
 
 	// Start the server
 	utils.SafeLogln(fmt.Sprintf("Server is running on port %s...", os.Getenv("PORT")))
