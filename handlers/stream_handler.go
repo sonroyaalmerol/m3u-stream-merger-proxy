@@ -9,10 +9,18 @@ import (
 	"os"
 	"path"
 	"strings"
+	//"bytes"
+	/*"fmt"
+	"os/exec"
+	"io"
+	"io/ioutil"*/
 )
 
 func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.ConcurrencyManager) {
 	debug := os.Getenv("DEBUG") == "true"
+	_use_ffmpeg := os.Getenv("USE_FFMPEG") == "true"
+	//_ffm_input := os.Getenv("FFMPEG_IN_ARGS")
+	//_ffm_output := os.Getenv("FFMPEG_OUT_ARGS")
 
 	ctx := r.Context()
 
@@ -74,11 +82,23 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 
 		exitStatus := make(chan int)
 
-		utils.SafeLogf("Proxying %s to %s\n", r.RemoteAddr, selectedUrl)
+		utils.SafeLogf("THIS: Proxying %s to %s\n", r.RemoteAddr, selectedUrl)
 		proxyCtx, proxyCtxCancel := context.WithCancel(ctx)
 		defer proxyCtxCancel()
 
-		go stream.ProxyStream(proxyCtx, selectedIndex, selectedSubIndex, resp, r, w, exitStatus)
+		// see if we're going to use ffmpeg
+		if( _use_ffmpeg ) {
+
+			// proxy via ffmpeg
+			go FfmpegHandler( w, r, selectedUrl )
+
+		// we are not
+		} else {
+
+			// use the default proxy
+			go stream.ProxyStream(proxyCtx, selectedIndex, selectedSubIndex, resp, r, w, exitStatus)
+
+		}
 
 		select {
 		case <-ctx.Done():
@@ -97,6 +117,9 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 				proxyCtxCancel()
 			} else if streamExitCode == 4 {
 				utils.SafeLogf("Finished handling %s request: %s\n", r.Method, r.RemoteAddr)
+				return
+			} else if streamExitCode == 5 {
+				utils.SafeLogf("FFMPEG Failed %s request: %s\n", r.Method, r.RemoteAddr)
 				return
 			} else {
 				// Consider client-side connection errors as complete closure
