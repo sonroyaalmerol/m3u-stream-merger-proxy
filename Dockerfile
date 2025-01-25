@@ -1,5 +1,5 @@
 # Start from the official Golang image
-FROM golang:alpine AS build
+FROM docker.io/library/golang:alpine AS build
 
 # Set the Current Working Directory inside the container
 WORKDIR /app
@@ -18,7 +18,7 @@ RUN go test ./tests/... && go build -ldflags='-s -w' -o m3u-proxy .
 
 # End from the latest alpine image
 # hadolint ignore=DL3007
-FROM alpine:latest
+FROM docker.io/library/alpine:latest
 
 # add bash and timezone data
 # hadolint ignore=DL3018

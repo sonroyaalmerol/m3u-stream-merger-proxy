@@ -1,0 +1,110 @@
+# Start from the official Golang image
+FROM docker.io/library/golang:alpine AS build
+
+# Set the Current Working Directory inside the container
+WORKDIR /app
+
+# Copy go mod and sum files
+COPY go.mod go.sum ./
+
+# Download all dependencies. Dependencies will be cached if the go.mod and go.sum files are not changed
+RUN go mod download
+
+# Copy the source code from the current directory to the Working Directory inside the container
+COPY . .
+
+# test and build the app.
+RUN go test ./tests/... && go build -ldflags='-s -w' -o m3u-proxy .
+
+# the build images
+FROM docker.io/library/alpine:latest AS ffmpeg
+
+# install curl, xz, and zip
+RUN \
+    apk --no-cache add \
+        curl \
+        xz \
+        zip
+
+# hold the latest ffmpeg static binaries download URL
+ARG FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
+
+# Download, uncompress, and copy ffmpeg and ffprobe
+RUN \
+    mkdir -p /tmp/ffmpeg && \
+    curl -L -o /tmp/ffmpeg.tar.xz $FFMPEG_URL && \
+    tar -Jxvvf /tmp/ffmpeg.tar.xz --strip-components=1 -C /tmp/ffmpeg/ && \
+    chmod +x /tmp/ffmpeg/bin/ffmpeg && \
+    chmod +x /tmp/ffmpeg/bin/ffprobe && \
+    rm -f /tmp/ffmpeg.tar.xz
+
+# the release 
+FROM docker.io/library/debian:bookworm-slim AS release
+
+# primary env
+ENV \
+    DEBIAN_FRONTEND="noninteractive" \
+    LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib/x86_64-linux-gnu" \
+    NVIDIA_DRIVER_CAPABILITIES="compute,video,utility" \
+    NVIDIA_VISIBLE_DEVICES="all"
+
+# ffmpeg ENV
+ENV \
+    FFMPEG_PATH=/usr/local/bin/ffmpeg \
+    FFPROBE_PATH=/usr/local/bin/ffprobe
+
+# create the abc user
+RUN \
+    useradd -u 911 -U -d /config -s /bin/false abc && \
+    usermod -G users abc
+
+# set the current workdir
+WORKDIR /m3u-proxy
+
+# install some stuff and then clean up
+RUN \
+    apt-get update && apt-get -y upgrade && \
+    apt-get install -y \
+        sudo \
+        libva-dev \
+        tzdata \
+        ca-certificates \
+        && \
+        update-ca-certificates \
+        && \
+    apt-get -y autoremove && \
+    apt-get -y clean && \
+    apt-get -y autoclean && \
+    rm -rf \
+        /var/lib/apt/lists/* \
+        /var/cache/apt \
+        /tmp/* \
+        /var/log/* \
+        /usr/share/man \
+        /usr/share/doc \
+        /usr/share/locale \
+        /usr/local/man \
+        /var/tmp/*
+
+# copy in our ffmpeg
+COPY --from=ffmpeg /tmp/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
+#COPY --from=ffmpeg /tmp/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe
+
+# copy in our compiled GO app
+COPY --from=build /app/m3u-proxy /m3u-proxy/
+
+# Copy the entrypoint script
+COPY entrypoint-ffmpeg.sh /m3u-proxy/entrypoint.sh
+
+# Make the entrypoint script executable
+RUN chmod +x /m3u-proxy/entrypoint.sh
+
+# Set PUID and PGID as environment variables
+ENV PUID=1000
+ENV PGID=1000
+
+# set the PORT as an environment variables
+ENV PORT=8080
+
+# The container entrypoint
+ENTRYPOINT ["/m3u-proxy/entrypoint.sh", "/m3u-proxy/m3u-proxy"]
