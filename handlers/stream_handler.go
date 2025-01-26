@@ -90,7 +90,7 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 		if( _use_ffmpeg ) {
 
 			// proxy via ffmpeg
-			go FfmpegHandler( w, r, selectedUrl )
+			go FfmpegHandler( w, r, selectedUrl, resp, exitStatus )
 
 		// we are not
 		} else {
@@ -120,6 +120,7 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 				return
 			} else if streamExitCode == 5 {
 				utils.SafeLogf("FFMPEG Failed %s request: %s\n", r.Method, r.RemoteAddr)
+				proxyCtxCancel()
 				return
 			} else {
 				// Consider client-side connection errors as complete closure

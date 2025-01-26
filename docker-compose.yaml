@@ -26,6 +26,8 @@ services:
       - USE_FFMPEG=true
     ports:
       - 9000:8080
+    devices: # optional if you want hw accell options to be available to ffmpeg
+      - /dev/dri:/dev/dri
     network:
       - bridge
     tmpfs: /tmp

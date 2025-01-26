@@ -88,7 +88,7 @@ RUN \
 
 # copy in our ffmpeg
 COPY --from=ffmpeg /tmp/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
-#COPY --from=ffmpeg /tmp/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe
+COPY --from=ffmpeg /tmp/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe
 
 # copy in our compiled GO app
 COPY --from=build /app/m3u-proxy /m3u-proxy/
