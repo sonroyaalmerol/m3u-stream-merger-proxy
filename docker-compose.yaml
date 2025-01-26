@@ -24,6 +24,8 @@ services:
       - STREAM_TIMEOUT=7
       - DEBUG=true
       - USE_FFMPEG=true
+      - FFMPEG_IN_ARGS=-hide_banner -loglevel panic -threads 8 -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device /dev/dri/renderD128 -fflags +genpts+discardcorrupt+igndts -analyzeduration 250000 -probesize 4194304 -max_delay 250000 -copytb 1
+      - FFMPEG_OUT_ARGS=-c copy -copyts -preset ultrafast -tune zerolatency -max_muxing_queue_size 2048 -movflags frag_keyframe+empty_moov -probesize 4194304 -analyzeduration 250000 -f mpegts -flags +cgop -sc_threshold 0 -g 60 
     ports:
       - 9000:8080
     devices: # optional if you want hw accell options to be available to ffmpeg

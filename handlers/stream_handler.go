@@ -82,12 +82,11 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 
 		exitStatus := make(chan int)
 
-		utils.SafeLogf("THIS: Proxying %s to %s\n", r.RemoteAddr, selectedUrl)
 		proxyCtx, proxyCtxCancel := context.WithCancel(ctx)
 		defer proxyCtxCancel()
 
-		// see if we're going to use ffmpeg
-		if( _use_ffmpeg ) {
+		// see if we're going to use ffmpeg... if the file is an .m3u8 file, it means it's HLS and we dont want to bother with FFMPEG
+		if( _use_ffmpeg && ! strings.HasSuffix(streamUrl, ".m3u8") ) {
 
 			// proxy via ffmpeg
 			go FfmpegHandler( w, r, selectedUrl, resp, exitStatus )

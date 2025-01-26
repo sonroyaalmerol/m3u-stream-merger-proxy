@@ -23,9 +23,9 @@ func FfmpegHandler(w http.ResponseWriter, r *http.Request, _url string, resp *ht
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Transfer-Encoding", "chunked")
 
-	// setup the command to run
+	// setup the command arguments to run
 	_cmd_args := fmt.Sprintf(
-		"%s -i pipe:0 -c copy -copyts -f mpegts %s pipe:1",
+		"%s -i pipe:0 %s pipe:1",
 		_ffm_input,
 		_ffm_output )
 
