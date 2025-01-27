@@ -13,9 +13,7 @@ import (
 
 func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.ConcurrencyManager) {
 	debug := os.Getenv("DEBUG") == "true"
-	_use_ffmpeg := os.Getenv("USE_FFMPEG") == "true"
-	//_ffm_input := os.Getenv("FFMPEG_IN_ARGS")
-	//_ffm_output := os.Getenv("FFMPEG_OUT_ARGS")
+	//_use_ffmpeg := os.Getenv("USE_FFMPEG") == "true"
 
 	ctx := r.Context()
 
@@ -83,18 +81,18 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 		utils.SafeLogf("[INFO] Playing Stream: %s", selectedUrl)
 
 		// see if we're going to use ffmpeg... if the file is an .m3u8 file, it means it's HLS and we dont want to bother with FFMPEG
-		if( _use_ffmpeg && ! strings.HasSuffix(streamUrl, ".m3u8") ) {
+		/*if( _use_ffmpeg && ! strings.HasSuffix(streamUrl, ".m3u8") ) {
 
 			// proxy via ffmpeg
 			go FfmpegHandler( proxyCtx, w, r, selectedUrl, resp, exitStatus )
 
 		// we are not
-		} else {
+		} else {*/
 
 			// use the default proxy
 			go stream.ProxyStream(proxyCtx, selectedIndex, selectedSubIndex, resp, r, w, exitStatus)
 
-		}
+		//}
 
 		select {
 		case <-ctx.Done():

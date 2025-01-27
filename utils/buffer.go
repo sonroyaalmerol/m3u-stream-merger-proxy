@@ -13,7 +13,7 @@ type BufferPool struct {
 
 // NewBufferPool creates a new BufferPool instance with local pools for each CPU core.
 func NewBufferPool() *BufferPool {
-	numPools := runtime.GOMAXPROCS(0)
+	numPools := runtime_procs()
 	pools := make([]sync.Pool, numPools)
 	for i := range pools {
 		pools[i] = sync.Pool{
@@ -29,7 +29,7 @@ func NewBufferPool() *BufferPool {
 
 // getLocalPool retrieves the local pool for the current goroutine using GOMAXPROCS.
 func (bp *BufferPool) getLocalPool() *sync.Pool {
-	pid := runtime_procID() % len(bp.pools)
+	pid := runtime_procs() % len(bp.pools)
 	return &bp.pools[pid]
 }
 
@@ -70,9 +70,12 @@ func (bp *BufferPool) Put(buf []byte) {
 	}
 	pool := bp.getLocalPool()
 	pool.Put(buf[:0])
+
+	// force a garbage collection
+	runtime.GC() // shouldn't have to do this, but for some reason the container holds on to this memory for dear life... 
 }
 
-// runtime_procID generates a pseudo-unique identifier for the current goroutine.
-func runtime_procID() int {
+// runtime_procs generates a pseudo-unique identifier for the current goroutine.
+func runtime_procs() int {
 	return runtime.GOMAXPROCS(0)
 }
