@@ -33,13 +33,20 @@ func NewStreamInstance(streamUrl string, cm *store.ConcurrencyManager) (*StreamI
 
 func (instance *StreamInstance) LoadBalancer(ctx context.Context, session *store.Session, method string) (*http.Response, string, string, string, error) {
 	debug := os.Getenv("DEBUG") == "true"
+	_sort_key_set := os.Getenv("SORTING_KEY") == "true"
 
 	m3uIndexes := utils.GetM3UIndexes()
+	
+	// if the sorting key is NOT set to anything
+	if( ! _sort_key_set ) {
 
-	sort.Slice(m3uIndexes, func(i, j int) bool {
-		return instance.Cm.ConcurrencyPriorityValue(m3uIndexes[i]) > instance.Cm.ConcurrencyPriorityValue(m3uIndexes[j])
-	})
+		// sort by the m3u index
+		sort.Slice(m3uIndexes, func(i, j int) bool {
+			return instance.Cm.ConcurrencyPriorityValue(m3uIndexes[i]) > instance.Cm.ConcurrencyPriorityValue(m3uIndexes[j])
+		})	
 
+	}
+	
 	maxLapsString := os.Getenv("MAX_RETRIES")
 	maxLaps, err := strconv.Atoi(strings.TrimSpace(maxLapsString))
 	if err != nil || maxLaps < 0 {
@@ -85,6 +92,7 @@ func (instance *StreamInstance) LoadBalancer(ctx context.Context, session *store
 						if debug {
 							utils.SafeLogf("[DEBUG] Successfully fetched stream from %s\n", url)
 						}
+						
 						return resp, url, index, subIndex, nil
 					}
 					utils.SafeLogf("Error fetching stream: %s\n", err.Error())

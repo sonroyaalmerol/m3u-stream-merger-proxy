@@ -10,7 +10,7 @@ services:
       - TZ=America/New_York
       - CLEAR_ON_BOOT=true
       - SYNC_ON_BOOT=true
-      - CACHE_ON_SYNC=true
+      - CACHE_ON_SYNC=false
       - BASE_URL=http://192.168.2.200:9000/
       - SYNC_CRON=0 0 * * *
       - M3U_URL_1=https://tv.kevp.cc/stream/playlist.m3u?which=0&who=bkVZZzFHQVQwUk9DNjBmQlFBQmxzQT09
@@ -20,12 +20,12 @@ services:
       - PARSER_WORKERS=8
       - MAX_RETRIES=5
       - RETRY_WAIT=5
-      - BUFFER_MB=32
+      - BUFFER_MB=4
       - STREAM_TIMEOUT=7
-      - DEBUG=true
-      - USE_FFMPEG=true
-      - FFMPEG_IN_ARGS=-hide_banner -loglevel panic -threads 8 -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device /dev/dri/renderD128 -fflags +genpts+discardcorrupt+igndts -analyzeduration 250000 -probesize 4194304 -max_delay 250000 -copytb 1
-      - FFMPEG_OUT_ARGS=-c copy -copyts -preset ultrafast -tune zerolatency -max_muxing_queue_size 2048 -movflags frag_keyframe+empty_moov -probesize 4194304 -analyzeduration 250000 -f mpegts -flags +cgop -sc_threshold 0 -g 60 
+      - DEBUG=false
+      #- USE_FFMPEG=true
+      #- FFMPEG_IN_ARGS=-hide_banner -loglevel panic -threads 8 -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device /dev/dri/renderD128 -fflags +genpts+discardcorrupt+igndts -analyzeduration 250000 -probesize 4194304 -max_delay 250000 -copytb 1
+      #- FFMPEG_OUT_ARGS=-c copy -copyts -preset ultrafast -tune zerolatency -max_muxing_queue_size 2048 -movflags frag_keyframe+empty_moov -probesize 4194304 -analyzeduration 250000 -f mpegts -flags +cgop -sc_threshold 0 -g 60 
     ports:
       - 9000:8080
     devices: # optional if you want hw accell options to be available to ffmpeg

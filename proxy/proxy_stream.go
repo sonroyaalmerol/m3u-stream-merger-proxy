@@ -16,14 +16,11 @@ import (
 func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex string, subIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, statusChan chan int) {
 	debug := os.Getenv("DEBUG") == "true"
 
-	bufferMbInt, err := strconv.Atoi(os.Getenv("BUFFER_MB"))
-	if err != nil || bufferMbInt < 0 {
-		bufferMbInt = 0
-	}
-	buffer := make([]byte, 1024)
-	if bufferMbInt > 0 {
-		buffer = make([]byte, bufferMbInt*1024*1024)
-	}
+	// setup the buffer pool
+	pool := utils.NewBufferPool()
+	
+	// Fetch buffer from pool
+	buffer := pool.Get() 
 
 	if r.Method != http.MethodGet || utils.EOFIsExpected(resp) {
 		scanner := bufio.NewScanner(resp.Body)
@@ -82,7 +79,10 @@ func (instance *StreamInstance) ProxyStream(ctx context.Context, m3uIndex string
 	}()
 
 	defer func() {
+		// release back to the pool
+		pool.Put(buffer)
 		buffer = nil
+		pool = nil
 	}()
 
 	timeoutSecond := 3

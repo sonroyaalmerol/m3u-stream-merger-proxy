@@ -8,12 +8,11 @@ import (
 	"strings"
 	"fmt"
 	"context"
-	"sync"
 	"m3u-stream-merger/utils"
 
 )
 
-func FfmpegHandler(w http.ResponseWriter, r *http.Request, _url string, resp *http.Response, statusChan chan int) {
+func FfmpegHandler(ctx context.Context, w http.ResponseWriter, r *http.Request, _url string, resp *http.Response, statusChan chan int) {
 	debug := os.Getenv("DEBUG") == "true"
 	_ffm_input := os.Getenv("FFMPEG_IN_ARGS")
 	_ffm_output := os.Getenv("FFMPEG_OUT_ARGS")
@@ -38,10 +37,11 @@ func FfmpegHandler(w http.ResponseWriter, r *http.Request, _url string, resp *ht
 	cmd := exec.Command("/usr/local/bin/ffmpeg", strings.Fields( _cmd_args )[0:]... )
 
 	// Cancel the process if the client disconnects
-	ctx, cancel := context.WithCancel(r.Context())
+	_ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	go func() {
-		<-ctx.Done() // Wait for context cancellation
+		<-_ctx.Done() // Wait for response context cancellation
+		ctx.Done() // mark the passed context as done
 		cmd.Process.Kill()
 		utils.SafeLogf("Client disconnected, FFmpeg process killed")
 	}()
@@ -83,19 +83,22 @@ func FfmpegHandler(w http.ResponseWriter, r *http.Request, _url string, resp *ht
 		}
 	}()
 	
-	// setup a heap for the output buffer
-	var bufferPool = sync.Pool{
-		New: func() interface{} {
-			return make([]byte, 16384) // Increased buffer size: 1024, 2048, 4096, 8192
-		},
-	}
+	// setup the buffer pool
+	pool := utils.NewBufferPool()
+	
+	// Fetch buffer from pool
+	buffer := pool.Get() 
 
 	// Stream FFmpeg's output to the HTTP response
 	for {
 
-		// In the function:
-		buffer := bufferPool.Get().([]byte) // Fetch buffer from pool
-		defer bufferPool.Put(buffer)       // Return buffer to pool when done
+		// defer cleaning up the buffer and releasing
+		defer func() {
+			// release back to the pool
+			pool.Put(buffer)
+			buffer = nil
+			pool = nil
+		}()
 
 		// read the ouput buffer
 		n, err := cmdOut.Read(buffer)

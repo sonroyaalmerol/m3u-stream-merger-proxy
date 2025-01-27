@@ -1,0 +1,21 @@
+2025/01/27 07:47:53 Received request from 10.89.2.4:56998 for URL: /p/live/383475603262/084947232825/KLUv_QQAxQMA0scaHWBrFdOOyF5KV5klWLEAKQN3VlPVSDnplQsAgBMBj38fFyzbkSOBghSCZIxCe2Ki0kAhDSSlkxs_XdNBfUxLjotkisf0VAaTRAMb8PByqhu7ne-58WOx0Sl976zvG7c0Rh_5wYD4nr12fUcDAD8HiZlNz8oY-DS3SA.ts
+
+[INFO] Slug: KLUv_QQAxQMA0scaHWBrFdOOyF5KV5klWLEAKQN3VlPVSDnplQsAgBMBj38fFyzbkSOBghSCZIxCe2Ki0kAhDSSlkxs_XdNBfUxLjotkisf0VAaTRAMb8PByqhu7ne-58WOx0Sl976zvG7c0Rh_5wYD4nr12fUcDAD8HiZlNz8oY-DS3SA 
+Stream Info: &{NBC  22  http://icon-tmdb.me/stalker_portal/misc/logos/320/13623.png?ver=41451  
+
+map[1:map[0:http://cf.1911-cdn.me:80/f3730e5d8d0d/07ba16727f/429863 1:http://cf.1911-cdn.me:80/dad895196f39/c75f88d0fa/429863 10:http://line.iptv-4k.cc:80/47D56D/D73857/1457584 11:http://line.iptv-4k.cc:80/7A67D1/A2FD0F/1457584 12:http://kgcrixtx.mexamo.xyz:900/XKRPHM45/DC45YGUJ/182082 13:http://wiajqcck.mexamo.xyz:900/59T5PKFM/J9Y72L25/182082 2:http://line.rs6ott.com:80/ade74cbe81/vq8o6g9y93/173995 3:http://line.argontv.nl:80/live/383475603262/084947232825/173995.ts 4:http://176.97.121.93:80/ktv68391635551/8717998361/1833 5:http://b1g.ooo:80/U9087152365/P9087152365/609675 6:http://b1g.ooo:80/U9087152365/P9087152365/609765 7:http://b1g.ooo:80/U9087152365/P9087152365/792382 8:http://94348-thinks.cdn-o2.me:80/79328c181e/3be8df11300e/550303 9:http://76224-extra.cdn-o2.me:80/39aa422c35/c57b960697bc/550303]]}
+
+
+
+
+
+2025/01/27 07:47:53 [DEBUG] Generating fingerprint from: 10.89.2.4|VLC/3.0.21 LibVLC/3.0.21|*/*|en_US|/p/live/383475603262/084947232825/KLUv_QQAxQMA0scaHWBrFdOOyF5KV5klWLEAKQN3VlPVSDnplQsAgBMBj38fFyzbkSOBghSCZIxCe2Ki0kAhDSSlkxs_XdNBfUxLjotkisf0VAaTRAMb8PByqhu7ne-58WOx0Sl976zvG7c0Rh_5wYD4nr12fUcDAD8HiZlNz8oY-DS3SA.ts
+2025/01/27 07:47:53 [DEBUG] Generating new session: d57f7cc11560bd86b627ca44ae07fc4b37a771a2cf488b9acaa057318a66caa2
+2025/01/27 07:47:53 [DEBUG] Stream attempt 1 out of 5
+2025/01/27 07:47:53 Current number of connections for M3U_1: 0
+2025/01/27 07:47:54 [DEBUG] Successfully fetched stream from http://line.rs6ott.com:80/ade74cbe81/vq8o6g9y93/173995
+2025/01/27 07:47:54 [DEBUG] Headers set for response: map[Access-Control-Allow-Origin:[*] Content-Type:[video/mp2t] Date:[Mon, 27 Jan 2025 12:47:54 GMT]]
+2025/01/27 07:47:54 [DEBUG] FFMpeg CMD Args: -hide_banner -loglevel panic -threads 8 -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device /dev/dri/renderD128 -fflags +genpts+discardcorrupt+igndts -analyzeduration 250000 -probesize 4194304 -max_delay 250000 -copytb 1 -i pipe:0 -c copy -copyts -preset ultrafast -tune zerolatency -max_muxing_queue_size 2048 -movflags frag_keyframe+empty_moov -probesize 4194304 -analyzeduration 250000 -f mpegts -flags +cgop -sc_threshold 0 -g 60 pipe:1
+2025/01/27 07:48:47 Client disconnected, FFmpeg process killed
+2025/01/27 07:48:47 Client has closed the stream: 10.89.2.4:56998
+2025/01/27 07:48:47 Error streaming to FFmpeg: read tcp 10.89.2.4:52318->185.245.0.140:8080: use of closed network connection
