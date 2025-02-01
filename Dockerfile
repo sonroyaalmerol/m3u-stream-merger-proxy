@@ -14,7 +14,7 @@ RUN go mod download
 COPY . .
 
 # test and build the app.
-RUN go test ./tests/... && go build -ldflags='-s -w' -o m3u-proxy .
+RUN go test ./... && go build -ldflags='-s -w' -o m3u-proxy .
 
 # End from the latest alpine image
 # hadolint ignore=DL3007
@@ -27,8 +27,8 @@ RUN apk --no-cache add tzdata \
   su-exec \
   && update-ca-certificates \
 
-# set the current workdir
-WORKDIR /m3u-proxy
+  # set the current workdir
+  WORKDIR /m3u-proxy
 
 # copy in our compiled GO app
 COPY --from=build /app/m3u-proxy /m3u-proxy/
