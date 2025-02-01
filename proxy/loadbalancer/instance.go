@@ -107,7 +107,7 @@ func (instance *LoadBalancerInstance) Balance(ctx context.Context, req *http.Req
 		return nil, fmt.Errorf("error fetching sources for: %s", streamUrl)
 	}
 
-	backoff := proxy.NewBackoffStrategy(200*time.Millisecond, 2*time.Second)
+	backoff := proxy.NewBackoffStrategy(time.Duration(instance.config.RetryWait)*time.Second, 0)
 
 	for lap := 0; lap < instance.config.MaxRetries || instance.config.MaxRetries == 0; lap++ {
 		instance.logger.Debugf("Stream attempt %d out of %d", lap+1, instance.config.MaxRetries)

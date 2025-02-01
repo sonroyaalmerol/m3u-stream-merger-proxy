@@ -20,6 +20,10 @@ func NewBackoffStrategy(initial, max time.Duration) *BackoffStrategy {
 }
 
 func (b *BackoffStrategy) Next() time.Duration {
+	if b.max == 0 {
+		return b.initial
+	}
+
 	current := b.current
 	b.current *= 2
 	if b.current > b.max {
@@ -37,5 +41,7 @@ func (b *BackoffStrategy) Sleep(ctx context.Context) {
 }
 
 func (b *BackoffStrategy) Reset() {
-	b.current = b.initial
+	if b.max > 0 {
+		b.current = b.initial
+	}
 }
