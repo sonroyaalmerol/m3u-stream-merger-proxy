@@ -114,4 +114,8 @@ func (instance *StreamInstance) handleMediaStream(
 	}
 
 	statusChan <- result.Status
+
+	current, max, _ := instance.Cm.GetConcurrencyStatus(m3uIndex)
+
+	logger.Default.Logf("Current connections for M3U_%s: %d/%d", m3uIndex, current, max)
 }
