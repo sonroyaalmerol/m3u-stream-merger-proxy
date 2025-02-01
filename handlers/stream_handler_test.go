@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"m3u-stream-merger/logger"
+	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/store"
 	"net/http"
 	"net/http/httptest"
@@ -59,7 +60,7 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 				}
 
 				manager.proxyStreamFunc = func(ctx context.Context, selectedIndex, selectedSubIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
-					exitStatus <- 4 // Normal completion
+					exitStatus <- proxy.StatusM3U8Parsed // Normal completion
 				}
 
 				return manager
@@ -86,9 +87,9 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 				manager.proxyStreamFunc = func(ctx context.Context, selectedIndex, selectedSubIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
 					if firstCall {
 						firstCall = false
-						exitStatus <- 1 // Trigger retry
+						exitStatus <- proxy.StatusM3U8ParseError // Trigger retry
 					} else {
-						exitStatus <- 4 // Success on retry
+						exitStatus <- proxy.StatusM3U8Parsed // Success on retry
 					}
 				}
 
@@ -111,9 +112,9 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 					// Simulate a long operation that gets cancelled
 					select {
 					case <-ctx.Done():
-						exitStatus <- 0
+						exitStatus <- proxy.StatusClientClosed
 					case <-time.After(100 * time.Millisecond):
-						exitStatus <- 4
+						exitStatus <- proxy.StatusM3U8Parsed
 					}
 				}
 
@@ -135,7 +136,7 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 				}
 
 				manager.proxyStreamFunc = func(ctx context.Context, selectedIndex, selectedSubIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
-					exitStatus <- 2 // EOF condition
+					exitStatus <- proxy.StatusEOF
 				}
 
 				return manager
@@ -196,7 +197,7 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 				}
 
 				manager.proxyStreamFunc = func(ctx context.Context, selectedIndex, selectedSubIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
-					exitStatus <- 4
+					exitStatus <- proxy.StatusM3U8Parsed
 				}
 
 				return manager

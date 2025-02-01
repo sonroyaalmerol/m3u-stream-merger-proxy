@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"m3u-stream-merger/logger"
+	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
 	"net/http"
@@ -24,20 +25,23 @@ func NewStreamHandler(manager StreamManager, logger logger.Logger) *StreamHandle
 
 func (h *StreamHandler) handleExitCode(code int, resp *http.Response, r *http.Request, session *store.Session, selectedIndex, selectedSubIndex string) bool {
 	switch code {
-	case 2:
+	case proxy.StatusEOF:
 		if utils.EOFIsExpected(resp) {
 			h.logger.Logf("Successfully proxied playlist: %s", r.RemoteAddr)
 			return true
 		}
 		fallthrough
-	case 1:
+	case proxy.StatusServerError:
 		indexes := append(session.GetTestedIndexes(), selectedIndex+"|"+selectedSubIndex)
 		session.SetTestedIndexes(indexes)
 		h.logger.Logf("Retrying other servers...")
 		return false
-	case 4:
-		h.logger.Logf("Finished handling %s request: %s", r.Method, r.RemoteAddr)
+	case proxy.StatusM3U8Parsed:
+		h.logger.Logf("Finished handling M3U8 %s request: %s", r.Method, r.RemoteAddr)
 		return true
+	case proxy.StatusM3U8ParseError:
+		h.logger.Errorf("Finished handling M3U8 %s request but failed to parse contents.", r.Method, r.RemoteAddr)
+		return false
 	default:
 		h.logger.Logf("Unable to write to client. Assuming stream has been closed: %s", r.RemoteAddr)
 		return true

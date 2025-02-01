@@ -35,7 +35,10 @@ func (h *StreamHandler) HandleStream(
 	remoteAddr string,
 ) StreamResult {
 	buffer := h.createBuffer()
-	defer func() { buffer = nil }()
+	defer func() {
+		buffer = nil
+		resp.Body.Close() // Ensure we always close the response body
+	}()
 
 	timeoutDuration := h.getTimeoutDuration()
 	backoff := proxy.NewBackoffStrategy(h.config.InitialBackoff, time.Duration(h.config.TimeoutSeconds-1)*time.Second)
@@ -45,57 +48,69 @@ func (h *StreamHandler) HandleStream(
 	var bytesWritten int64
 
 	for {
-		result := h.readChunk(ctx, resp, buffer)
+		select {
+		case <-ctx.Done():
+			// Client disconnected, clean up and return
+			h.logger.Debugf("Client disconnected from stream: %s", remoteAddr)
+			return StreamResult{bytesWritten, ctx.Err(), proxy.StatusClientClosed}
 
-		if h.shouldTimeout(timeStarted, timeoutDuration) {
-			h.logger.Errorf("Timeout reached while trying to stream: %s", remoteAddr)
-			return StreamResult{bytesWritten, nil, 0}
-		}
+		default:
+			result := h.readChunk(ctx, resp, buffer)
 
-		switch {
-		case result.Error == io.EOF:
-			if result.N > 0 {
-				written, err := writer.Write(buffer[:result.N])
-				if err != nil {
-					h.logger.Errorf("Error writing final buffer: %s", err.Error())
-					return StreamResult{bytesWritten, err, 0}
+			if h.shouldTimeout(timeStarted, timeoutDuration) {
+				h.logger.Errorf("Timeout reached while trying to stream: %s", remoteAddr)
+				return StreamResult{bytesWritten, nil, proxy.StatusServerError}
+			}
+
+			switch {
+			case result.Error == context.Canceled:
+				// Handle context cancellation from readChunk
+				h.logger.Debugf("Client disconnected while reading chunk: %s", remoteAddr)
+				return StreamResult{bytesWritten, result.Error, proxy.StatusClientClosed}
+
+			case result.Error == io.EOF:
+				if result.N > 0 {
+					written, err := writer.Write(buffer[:result.N])
+					if err != nil {
+						h.logger.Errorf("Error writing final buffer: %s", err.Error())
+						return StreamResult{bytesWritten, err, 0}
+					}
+					bytesWritten += int64(written)
+					if flusher, ok := writer.(proxy.StreamFlusher); ok {
+						flusher.Flush()
+					}
 				}
-				bytesWritten += int64(written)
+				return h.handleEOF(resp, remoteAddr, bytesWritten)
+
+			case result.Error != nil:
+				if h.shouldRetry(timeoutDuration) {
+					h.logger.Errorf("Error reading stream: %s", result.Error.Error())
+					backoff.Sleep(ctx)
+					lastErr = time.Now()
+					continue
+				}
+				return StreamResult{bytesWritten, result.Error, proxy.StatusServerError}
+
+			default:
+				n := result.N
+				totalWritten := 0
+				for totalWritten < n {
+					written, err := writer.Write(buffer[totalWritten:n])
+					if err != nil {
+						h.logger.Errorf("Error writing to response: %s", err.Error())
+						return StreamResult{bytesWritten, err, 0}
+					}
+					totalWritten += written
+				}
+				bytesWritten += int64(n)
 				if flusher, ok := writer.(proxy.StreamFlusher); ok {
 					flusher.Flush()
 				}
-			}
 
-			return h.handleEOF(resp, remoteAddr, bytesWritten)
-
-		case result.Error != nil:
-			if h.shouldRetry(timeoutDuration) {
-				h.logger.Errorf("Error reading stream: %s", result.Error.Error())
-				backoff.Sleep(ctx)
-				lastErr = time.Now()
-				continue
-			}
-			return StreamResult{bytesWritten, result.Error, 1}
-
-		default:
-			n := result.N
-			totalWritten := 0
-			for totalWritten < n {
-				written, err := writer.Write(buffer[totalWritten:n])
-				if err != nil {
-					h.logger.Errorf("Error writing to response: %s", err.Error())
-					return StreamResult{bytesWritten, err, 0}
+				if h.shouldResetTimer(lastErr, timeStarted) {
+					timeStarted = time.Now()
+					backoff.Reset()
 				}
-				totalWritten += written
-			}
-			bytesWritten += int64(n)
-			if flusher, ok := writer.(proxy.StreamFlusher); ok {
-				flusher.Flush()
-			}
-
-			if h.shouldResetTimer(lastErr, timeStarted) {
-				timeStarted = time.Now()
-				backoff.Reset()
 			}
 		}
 	}
@@ -165,9 +180,9 @@ func (h *StreamHandler) handleEOF(
 ) StreamResult {
 	if utils.EOFIsExpected(resp) || h.config.TimeoutSeconds == 0 {
 		h.logger.Debugf("Stream ended (expected EOF reached): %s", remoteAddr)
-		return StreamResult{bytesWritten, nil, 2}
+		return StreamResult{bytesWritten, nil, proxy.StatusEOF}
 	}
 
 	h.logger.Errorf("Stream ended (unexpected EOF reached): %s", remoteAddr)
-	return StreamResult{bytesWritten, io.EOF, 2}
+	return StreamResult{bytesWritten, io.EOF, proxy.StatusEOF}
 }

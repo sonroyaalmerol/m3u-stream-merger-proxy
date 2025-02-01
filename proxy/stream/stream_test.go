@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"m3u-stream-merger/logger"
+	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
 	"net/http"
@@ -122,7 +123,7 @@ func TestStreamHandler_HandleStream(t *testing.T) {
 			expectedResult: StreamResult{
 				BytesWritten: 12,
 				Error:        nil,
-				Status:       2,
+				Status:       proxy.StatusEOF,
 			},
 		},
 		{
@@ -137,7 +138,7 @@ func TestStreamHandler_HandleStream(t *testing.T) {
 			expectedResult: StreamResult{
 				BytesWritten: 0,
 				Error:        errors.New("write error"),
-				Status:       0,
+				Status:       proxy.StatusClientClosed,
 			},
 		},
 	}
@@ -158,7 +159,7 @@ func TestStreamHandler_HandleStream(t *testing.T) {
 			// For successful stream test, we expect EOF as the response body reader will be exhausted
 			if tt.name == "successful stream" && result.Error == io.EOF {
 				result.Error = nil
-				result.Status = 2
+				result.Status = proxy.StatusEOF
 			}
 
 			if result.Status != tt.expectedResult.Status {
@@ -190,14 +191,14 @@ func TestStreamInstance_ProxyStream(t *testing.T) {
 			method:         http.MethodGet,
 			contentType:    "application/vnd.apple.mpegurl",
 			responseBody:   "#EXTM3U\nhttp://example.com/stream.ts",
-			expectedStatus: 4,
+			expectedStatus: proxy.StatusM3U8Parsed,
 		},
 		{
 			name:           "handle media stream",
 			method:         http.MethodGet,
 			contentType:    "video/MP2T",
 			responseBody:   "media content",
-			expectedStatus: 2,
+			expectedStatus: proxy.StatusEOF,
 		},
 	}
 
