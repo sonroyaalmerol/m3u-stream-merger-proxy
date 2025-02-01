@@ -166,25 +166,36 @@ func (instance *LoadBalancerInstance) fetchBackendUrls(streamUrl string) error {
 
 func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, method string, session *store.Session) (*LoadBalancerResult, error) {
 	instance.logger.Logf("Trying all stream urls for session: %s", session.ID)
-
 	if instance.indexProvider == nil {
 		return nil, fmt.Errorf("index provider cannot be nil")
 	}
-
 	m3uIndexes := instance.indexProvider.GetM3UIndexes()
 	if len(m3uIndexes) == 0 {
 		return nil, fmt.Errorf("no M3U indexes available")
 	}
 
-	sort.Slice(m3uIndexes, func(i, j int) bool {
-		return instance.Cm.ConcurrencyPriorityValue(m3uIndexes[i]) > instance.Cm.ConcurrencyPriorityValue(m3uIndexes[j])
-	})
-
 	select {
 	case <-ctx.Done():
 		return nil, context.Canceled
 	default:
-		for _, index := range m3uIndexes {
+		done := make(map[string]bool)
+		initialCount := len(m3uIndexes)
+
+		for len(done) < initialCount {
+			sort.Slice(m3uIndexes, func(i, j int) bool {
+				return instance.Cm.ConcurrencyPriorityValue(m3uIndexes[i]) > instance.Cm.ConcurrencyPriorityValue(m3uIndexes[j])
+			})
+
+			var index string
+			for _, idx := range m3uIndexes {
+				if !done[idx] {
+					index = idx
+					break
+				}
+			}
+
+			done[index] = true
+
 			innerMap, ok := instance.Info.URLs[index]
 			if !ok {
 				instance.logger.Errorf("Channel not found from M3U_%s: %s", index, instance.Info.Title)
@@ -195,9 +206,15 @@ func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, method 
 			if err == nil {
 				return result, nil
 			}
+
+			select {
+			case <-ctx.Done():
+				return nil, context.Canceled
+			default:
+				continue
+			}
 		}
 	}
-
 	return nil, fmt.Errorf("no available streams")
 }
 
