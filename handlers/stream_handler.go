@@ -103,14 +103,17 @@ func (h *StreamHandler) handleStream(ctx context.Context, w http.ResponseWriter,
 		proxyCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
-		go h.manager.ProxyStream(proxyCtx, selectedIndex, selectedSubIndex, resp, r, w, exitStatus)
+		h.manager.GetConcurrencyManager().UpdateConcurrency(selectedIndex, true)
+		go h.manager.ProxyStream(proxyCtx, resp, r, w, exitStatus)
 
 		select {
 		case <-ctx.Done():
+			h.manager.GetConcurrencyManager().UpdateConcurrency(selectedIndex, false)
 			h.logger.Logf("Client has closed the stream: %s", r.RemoteAddr)
-			return nil
 
+			return nil
 		case code := <-exitStatus:
+			h.manager.GetConcurrencyManager().UpdateConcurrency(selectedIndex, false)
 			if handled := h.handleExitCode(code, resp, r, session, selectedIndex, selectedSubIndex); handled {
 				return nil
 			}

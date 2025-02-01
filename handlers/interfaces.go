@@ -7,7 +7,8 @@ import (
 )
 
 type StreamManager interface {
+	GetConcurrencyManager() *store.ConcurrencyManager
 	LoadBalancer(ctx context.Context, request *http.Request, session *store.Session) (*http.Response, string, string, string, error)
-	ProxyStream(ctx context.Context, selectedIndex, selectedSubIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int)
+	ProxyStream(ctx context.Context, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int)
 }
 

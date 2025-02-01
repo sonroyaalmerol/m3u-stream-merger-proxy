@@ -38,7 +38,7 @@ func (sm *DefaultStreamManager) LoadBalancer(ctx context.Context, req *http.Requ
 	return result.Response, result.URL, result.Index, result.SubIndex, nil
 }
 
-func (sm *DefaultStreamManager) ProxyStream(ctx context.Context, selectedIndex, selectedSubIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+func (sm *DefaultStreamManager) ProxyStream(ctx context.Context, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
 	instance, err := stream.NewStreamInstance(
 		sm.cm,
 		sm.streamConfig,
@@ -50,5 +50,9 @@ func (sm *DefaultStreamManager) ProxyStream(ctx context.Context, selectedIndex, 
 		return
 	}
 
-	instance.ProxyStream(ctx, selectedIndex, selectedSubIndex, resp, r, w, exitStatus)
+	instance.ProxyStream(ctx, resp, r, w, exitStatus)
+}
+
+func (sm *DefaultStreamManager) GetConcurrencyManager() *store.ConcurrencyManager {
+	return sm.cm
 }
