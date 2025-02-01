@@ -1,7 +1,6 @@
-package proxy
+package loadbalancer
 
 import (
-	"io"
 	"m3u-stream-merger/store"
 	"net/http"
 )
@@ -16,16 +15,4 @@ type IndexProvider interface {
 
 type SlugParser interface {
 	GetStreamBySlug(slug string) (store.StreamInfo, error)
-}
-
-type ResponseWriter interface {
-	http.ResponseWriter
-}
-
-type ResponseBodyReader interface {
-	io.ReadCloser
-}
-
-type StreamFlusher interface {
-	Flush()
 }

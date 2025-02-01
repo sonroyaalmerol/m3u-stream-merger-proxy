@@ -31,7 +31,7 @@ type StreamResult struct {
 func (h *StreamHandler) HandleStream(
 	ctx context.Context,
 	resp *http.Response,
-	writer proxy.ResponseWriter,
+	writer ResponseWriter,
 	remoteAddr string,
 ) StreamResult {
 	buffer := h.createBuffer()
@@ -76,7 +76,7 @@ func (h *StreamHandler) HandleStream(
 						return StreamResult{bytesWritten, err, 0}
 					}
 					bytesWritten += int64(written)
-					if flusher, ok := writer.(proxy.StreamFlusher); ok {
+					if flusher, ok := writer.(StreamFlusher); ok {
 						flusher.Flush()
 					}
 				}
@@ -103,7 +103,7 @@ func (h *StreamHandler) HandleStream(
 					totalWritten += written
 				}
 				bytesWritten += int64(n)
-				if flusher, ok := writer.(proxy.StreamFlusher); ok {
+				if flusher, ok := writer.(StreamFlusher); ok {
 					flusher.Flush()
 				}
 

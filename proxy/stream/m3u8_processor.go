@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"m3u-stream-merger/logger"
-	"m3u-stream-merger/proxy"
 	"net/url"
 )
 
@@ -18,7 +17,7 @@ func NewM3U8Processor(logger logger.Logger) *M3U8Processor {
 
 func (p *M3U8Processor) ProcessM3U8Stream(
 	reader *bufio.Scanner,
-	writer proxy.ResponseWriter,
+	writer ResponseWriter,
 	baseURL *url.URL,
 ) error {
 	for reader.Scan() {
@@ -32,7 +31,7 @@ func (p *M3U8Processor) ProcessM3U8Stream(
 
 func (p *M3U8Processor) processLine(
 	line string,
-	writer proxy.ResponseWriter,
+	writer ResponseWriter,
 	baseURL *url.URL,
 ) error {
 	if len(line) == 0 {
@@ -48,7 +47,7 @@ func (p *M3U8Processor) processLine(
 
 func (p *M3U8Processor) processURL(
 	line string,
-	writer proxy.ResponseWriter,
+	writer ResponseWriter,
 	baseURL *url.URL,
 ) error {
 	u, err := url.Parse(line)
@@ -64,7 +63,7 @@ func (p *M3U8Processor) processURL(
 	return p.writeLine(writer, u.String())
 }
 
-func (p *M3U8Processor) writeLine(writer proxy.ResponseWriter, line string) error {
+func (p *M3U8Processor) writeLine(writer ResponseWriter, line string) error {
 	_, err := writer.Write([]byte(line + "\n"))
 	if err != nil {
 		return fmt.Errorf("write line error: %w", err)

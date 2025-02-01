@@ -19,15 +19,15 @@ type LoadBalancerInstance struct {
 	Info          store.StreamInfo
 	Cm            *store.ConcurrencyManager
 	config        *LBConfig
-	httpClient    proxy.HTTPClient
+	httpClient    HTTPClient
 	logger        logger.Logger
-	indexProvider proxy.IndexProvider
-	slugParser    proxy.SlugParser
+	indexProvider IndexProvider
+	slugParser    SlugParser
 }
 
 type LoadBalancerInstanceOption func(*LoadBalancerInstance)
 
-func WithHTTPClient(client proxy.HTTPClient) LoadBalancerInstanceOption {
+func WithHTTPClient(client HTTPClient) LoadBalancerInstanceOption {
 	return func(s *LoadBalancerInstance) {
 		s.httpClient = client
 	}
@@ -39,13 +39,13 @@ func WithLogger(logger logger.Logger) LoadBalancerInstanceOption {
 	}
 }
 
-func WithIndexProvider(provider proxy.IndexProvider) LoadBalancerInstanceOption {
+func WithIndexProvider(provider IndexProvider) LoadBalancerInstanceOption {
 	return func(s *LoadBalancerInstance) {
 		s.indexProvider = provider
 	}
 }
 
-func WithSlugParser(parser proxy.SlugParser) LoadBalancerInstanceOption {
+func WithSlugParser(parser SlugParser) LoadBalancerInstanceOption {
 	return func(s *LoadBalancerInstance) {
 		s.slugParser = parser
 	}
@@ -61,8 +61,8 @@ func NewLoadBalancerInstance(
 		config:        cfg,
 		httpClient:    utils.HTTPClient,
 		logger:        &logger.DefaultLogger{},
-		indexProvider: &proxy.DefaultIndexProvider{},
-		slugParser:    &proxy.DefaultSlugParser{},
+		indexProvider: &DefaultIndexProvider{},
+		slugParser:    &DefaultSlugParser{},
 	}
 
 	for _, opt := range opts {
