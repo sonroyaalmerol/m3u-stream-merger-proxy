@@ -14,15 +14,6 @@ import (
 	"testing"
 )
 
-// Mock implementations
-type mockHTTPClient struct {
-	DoFunc func(req *http.Request) (*http.Response, error)
-}
-
-func (m *mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
-	return m.DoFunc(req)
-}
-
 type mockResponseWriter struct {
 	written     []byte
 	statusCode  int

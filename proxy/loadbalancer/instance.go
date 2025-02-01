@@ -144,7 +144,7 @@ func (instance *LoadBalancerInstance) fetchBackendUrls(streamUrl string) error {
 	instance.logger.Debugf("Decoded slug: %v", stream)
 
 	// Validate URLs map
-	if stream.URLs == nil || len(stream.URLs) == 0 {
+	if len(stream.URLs) == 0 {
 		return fmt.Errorf("stream has no URLs configured")
 	}
 

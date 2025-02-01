@@ -71,18 +71,6 @@ func (m *mockIndexProvider) GetM3UIndexes() []string {
 	return m.indexes
 }
 
-type mockSessionManager struct {
-	testedIndexes []string
-}
-
-func (m *mockSessionManager) GetTestedIndexes() []string {
-	return m.testedIndexes
-}
-
-func (m *mockSessionManager) SetTestedIndexes(indexes []string) {
-	m.testedIndexes = indexes
-}
-
 // Test helpers
 func setupTestInstance(t *testing.T) (*LoadBalancerInstance, *mockHTTPClient, *mockIndexProvider) {
 	client := &mockHTTPClient{
