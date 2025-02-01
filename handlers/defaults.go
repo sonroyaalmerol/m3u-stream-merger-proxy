@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"m3u-stream-merger/logger"
+	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/proxy/stream"
 	"m3u-stream-merger/store"
@@ -46,7 +47,7 @@ func (sm *DefaultStreamManager) ProxyStream(ctx context.Context, resp *http.Resp
 	)
 	if err != nil {
 		sm.logger.Errorf("Failed to create stream instance: %v", err)
-		exitStatus <- 1
+		exitStatus <- proxy.StatusServerError
 		return
 	}
 
