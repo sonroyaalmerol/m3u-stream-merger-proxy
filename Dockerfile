@@ -25,10 +25,10 @@ FROM alpine:latest
 RUN apk --no-cache add tzdata \
   ca-certificates \
   su-exec \
-  && update-ca-certificates \
+  && update-ca-certificates
 
-  # set the current workdir
-  WORKDIR /m3u-proxy
+# set the current workdir
+WORKDIR /m3u-proxy
 
 # copy in our compiled GO app
 COPY --from=build /app/m3u-proxy /m3u-proxy/
