@@ -8,7 +8,6 @@ import (
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
 	"net/http"
-	"net/url"
 	"path"
 	"slices"
 	"sort"
@@ -91,10 +90,10 @@ func (instance *LoadBalancerInstance) Balance(ctx context.Context, req *http.Req
 		return nil, fmt.Errorf("req cannot be nil")
 	}
 	if req.Method == "" {
-		return nil, fmt.Errorf("method cannot be empty")
+		return nil, fmt.Errorf("req.Method cannot be empty")
 	}
 	if req.URL == nil {
-		req.URL = &url.URL{Path: "/"}
+		return nil, fmt.Errorf("req.URL cannot be empty")
 	}
 
 	streamUrl := strings.Split(path.Base(req.URL.Path), ".")[0]

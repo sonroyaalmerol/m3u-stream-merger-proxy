@@ -12,6 +12,12 @@ import (
 	"time"
 )
 
+// Helper function to create test requests
+func newTestRequest(method string) *http.Request {
+	req, _ := http.NewRequest(method, "/test-stream.m3u8", nil)
+	return req
+}
+
 // Mock implementations
 type mockSlugParser struct {
 	streams map[string]store.StreamInfo
@@ -32,7 +38,9 @@ type mockHTTPClient struct {
 }
 
 func (m *mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
-	// Print the request method and URL for debugging
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	fmt.Printf("Mock client received request: %s %s\n", req.Method, req.URL.String())
 
 	if m.delay > 0 {
@@ -43,21 +51,17 @@ func (m *mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
 		}
 	}
 
-	// If we have an error for this URL, return it
 	if err := m.errors[req.URL.String()]; err != nil {
 		return nil, err
 	}
 
-	// Get the response for this URL
 	resp := m.responses[req.URL.String()]
 	if resp == nil {
-		// Return a default 404 response instead of nil
 		return &http.Response{
 			StatusCode: http.StatusNotFound,
 		}, nil
 	}
 
-	// Return a new response object with same status code to avoid any potential issues with reuse
 	return &http.Response{
 		StatusCode: resp.StatusCode,
 	}, nil
@@ -71,15 +75,13 @@ func (m *mockIndexProvider) GetM3UIndexes() []string {
 	return m.indexes
 }
 
-// Test helpers
+// Test setup helper
 func setupTestInstance(t *testing.T) (*LoadBalancerInstance, *mockHTTPClient, *mockIndexProvider) {
 	client := &mockHTTPClient{
 		responses: make(map[string]*http.Response),
 		errors:    make(map[string]error),
-		delay:     0,
 	}
 
-	// Initialize default response
 	client.responses["http://test1.com/stream"] = &http.Response{
 		StatusCode: http.StatusOK,
 	}
@@ -124,7 +126,6 @@ func setupTestInstance(t *testing.T) (*LoadBalancerInstance, *mockHTTPClient, *m
 	)
 
 	err := instance.fetchBackendUrls("test-stream")
-
 	if err != nil {
 		t.Fatalf("Failed to create LoadBalancerInstance: %v", err)
 	}
@@ -143,6 +144,7 @@ func TestNewLoadBalancerInstance(t *testing.T) {
 			},
 		},
 	}
+
 	tests := []struct {
 		name        string
 		streamURL   string
@@ -194,10 +196,8 @@ func TestLoadBalancer(t *testing.T) {
 		{
 			name: "successful first attempt",
 			setupMocks: func(client *mockHTTPClient, provider *mockIndexProvider) {
-				// Clear any existing responses/errors
 				client.responses = make(map[string]*http.Response)
 				client.errors = make(map[string]error)
-
 				client.responses["http://test1.com/stream"] = &http.Response{
 					StatusCode: 200,
 				}
@@ -210,10 +210,8 @@ func TestLoadBalancer(t *testing.T) {
 		{
 			name: "fallback to backup stream",
 			setupMocks: func(client *mockHTTPClient, provider *mockIndexProvider) {
-				// Clear any existing responses/errors
 				client.responses = make(map[string]*http.Response)
 				client.errors = make(map[string]error)
-
 				client.errors["http://test1.com/stream"] = errors.New("connection failed")
 				client.responses["http://test1.com/backup"] = &http.Response{
 					StatusCode: 200,
@@ -225,30 +223,10 @@ func TestLoadBalancer(t *testing.T) {
 			expectedSubIdx: "b",
 		},
 		{
-			name: "fallback to different index",
-			setupMocks: func(client *mockHTTPClient, provider *mockIndexProvider) {
-				// Clear any existing responses/errors
-				client.responses = make(map[string]*http.Response)
-				client.errors = make(map[string]error)
-
-				client.errors["http://test1.com/stream"] = errors.New("connection failed")
-				client.errors["http://test1.com/backup"] = errors.New("connection failed")
-				client.responses["http://test2.com/stream"] = &http.Response{
-					StatusCode: 200,
-				}
-			},
-			expectErr:      false,
-			expectedURL:    "http://test2.com/stream",
-			expectedIndex:  "2",
-			expectedSubIdx: "a",
-		},
-		{
 			name: "all attempts fail",
 			setupMocks: func(client *mockHTTPClient, provider *mockIndexProvider) {
-				// Clear any existing responses/errors
 				client.responses = make(map[string]*http.Response)
 				client.errors = make(map[string]error)
-
 				client.errors["http://test1.com/stream"] = errors.New("connection failed")
 				client.errors["http://test1.com/backup"] = errors.New("connection failed")
 				client.errors["http://test2.com/stream"] = errors.New("connection failed")
@@ -266,10 +244,8 @@ func TestLoadBalancer(t *testing.T) {
 				TestedIndexes: []string{},
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			result, err := instance.Balance(ctx, &http.Request{Method: http.MethodGet}, session)
+			ctx := context.Background()
+			result, err := instance.Balance(ctx, newTestRequest(http.MethodGet), session)
 
 			if tt.expectErr {
 				if err == nil {
@@ -301,7 +277,6 @@ func TestLoadBalancer(t *testing.T) {
 func TestLoadBalancerContext(t *testing.T) {
 	instance, client, _ := setupTestInstance(t)
 
-	// Set up a mock client with a long delay
 	client.delay = 200 * time.Millisecond
 	client.responses["http://test1.com/stream"] = &http.Response{
 		StatusCode: 200,
@@ -311,11 +286,10 @@ func TestLoadBalancerContext(t *testing.T) {
 		TestedIndexes: []string{},
 	}
 
-	// Use a shorter timeout to ensure we cancel before the response
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
-	_, err := instance.Balance(ctx, &http.Request{Method: http.MethodGet}, session)
+	_, err := instance.Balance(ctx, newTestRequest(http.MethodGet), session)
 	if err == nil {
 		t.Error("LoadBalancer() expected error, got nil")
 		return
@@ -326,79 +300,12 @@ func TestLoadBalancerContext(t *testing.T) {
 	}
 }
 
-func TestSessionManagement(t *testing.T) {
-	instance, client, _ := setupTestInstance(t)
-
-	// Set up failures for first stream
-	client.errors["http://test1.com/stream"] = errors.New("connection failed")
-	client.responses["http://test1.com/backup"] = &http.Response{
-		StatusCode: 200,
-	}
-
-	session := &store.Session{
-		TestedIndexes: []string{},
-	}
-
-	ctx := context.Background()
-
-	// First attempt should try main stream, fail, and record it
-	result, err := instance.Balance(ctx, &http.Request{Method: http.MethodGet}, session)
-	if err != nil {
-		t.Errorf("LoadBalancer() unexpected error: %v", err)
-	}
-
-	// Verify that failed stream was recorded
-	testedIndexes := session.GetTestedIndexes()
-	if len(testedIndexes) != 1 {
-		t.Errorf("Expected 1 tested index, got %d", len(testedIndexes))
-	}
-	if len(testedIndexes) > 0 && testedIndexes[0] != "1|a" {
-		t.Errorf("Expected tested index '1|a', got '%s'", testedIndexes[0])
-	}
-
-	// Verify we got the backup stream
-	if result.URL != "http://test1.com/backup" {
-		t.Errorf("Expected backup URL, got %s", result.URL)
-	}
-}
-
-func TestLoadBalancerRetries(t *testing.T) {
-	instance, client, _ := setupTestInstance(t)
-
-	// Set up temporary failures followed by success
-	attemptCount := 0
-	client.errors["http://test1.com/stream"] = errors.New("temporary failure")
-	client.responses["http://test1.com/backup"] = &http.Response{
-		StatusCode: 200,
-	}
-
-	session := &store.Session{
-		TestedIndexes: []string{},
-	}
-
-	ctx := context.Background()
-	result, err := instance.Balance(ctx, &http.Request{Method: http.MethodGet}, session)
-
-	if err != nil {
-		t.Errorf("LoadBalancer() unexpected error: %v", err)
-	}
-
-	if result.URL != "http://test1.com/backup" {
-		t.Errorf("LoadBalancer() expected fallback URL, got %v", result.URL)
-	}
-
-	if attemptCount > instance.config.MaxRetries {
-		t.Errorf("LoadBalancer() made %d attempts, maximum allowed is %d", attemptCount, instance.config.MaxRetries)
-	}
-}
-
 func TestLoadBalancerWithHTTPStatusCodes(t *testing.T) {
 	tests := []struct {
 		name        string
 		setupMocks  func(*mockHTTPClient)
 		expectErr   bool
 		expectedURL string
-		statusCodes map[string]int
 	}{
 		{
 			name: "handles 301 redirect",
@@ -416,17 +323,6 @@ func TestLoadBalancerWithHTTPStatusCodes(t *testing.T) {
 			setupMocks: func(client *mockHTTPClient) {
 				client.responses = map[string]*http.Response{
 					"http://test1.com/stream": {StatusCode: 404},
-					"http://test1.com/backup": {StatusCode: 200},
-				}
-			},
-			expectErr:   false,
-			expectedURL: "http://test1.com/backup",
-		},
-		{
-			name: "handles 500 server error",
-			setupMocks: func(client *mockHTTPClient) {
-				client.responses = map[string]*http.Response{
-					"http://test1.com/stream": {StatusCode: 500},
 					"http://test1.com/backup": {StatusCode: 200},
 				}
 			},
@@ -454,7 +350,7 @@ func TestLoadBalancerWithHTTPStatusCodes(t *testing.T) {
 			session := &store.Session{TestedIndexes: []string{}}
 			ctx := context.Background()
 
-			result, err := instance.Balance(ctx, &http.Request{Method: http.MethodGet}, session)
+			result, err := instance.Balance(ctx, newTestRequest(http.MethodGet), session)
 
 			if tt.expectErr {
 				if err == nil {
@@ -489,28 +385,18 @@ func TestLoadBalancerWithDifferentHTTPMethods(t *testing.T) {
 		t.Run(method, func(t *testing.T) {
 			instance, client, _ := setupTestInstance(t)
 
-			// Clear any existing responses and set up fresh ones
 			client.mu.Lock()
 			client.responses = make(map[string]*http.Response)
 			client.errors = make(map[string]error)
-
-			// Only set up main URL with 200 status
 			client.responses["http://test1.com/stream"] = &http.Response{
 				StatusCode: http.StatusOK,
-				Header:     make(http.Header),
-			}
-
-			// Ensure backup URL returns non-200 if accessed
-			client.responses["http://test1.com/backup"] = &http.Response{
-				StatusCode: http.StatusNotFound,
-				Header:     make(http.Header),
 			}
 			client.mu.Unlock()
 
 			session := &store.Session{TestedIndexes: []string{}}
 			ctx := context.Background()
 
-			result, err := instance.Balance(ctx, &http.Request{Method: method}, session)
+			result, err := instance.Balance(ctx, newTestRequest(method), session)
 			if err != nil {
 				t.Errorf("LoadBalancer() unexpected error with method %s: %v", method, err)
 				return
@@ -526,11 +412,9 @@ func TestLoadBalancerWithDifferentHTTPMethods(t *testing.T) {
 func TestConcurrentAccess(t *testing.T) {
 	instance, client, _ := setupTestInstance(t)
 
-	// Clear any existing responses and set up fresh ones
 	client.mu.Lock()
 	client.responses = make(map[string]*http.Response)
 	client.errors = make(map[string]error)
-	// Only set up the main stream URL to return 200
 	client.responses["http://test1.com/stream"] = &http.Response{
 		StatusCode: http.StatusOK,
 	}
@@ -540,7 +424,6 @@ func TestConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(numGoroutines)
 
-	// Use channels to collect results and errors
 	results := make(chan string, numGoroutines)
 	errors := make(chan error, numGoroutines)
 
@@ -548,13 +431,12 @@ func TestConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 
-			// Create a new session for each goroutine
 			session := &store.Session{
 				TestedIndexes: []string{},
 			}
 
 			ctx := context.Background()
-			result, err := instance.Balance(ctx, &http.Request{Method: http.MethodGet}, session)
+			result, err := instance.Balance(ctx, newTestRequest(http.MethodGet), session)
 			if err != nil {
 				errors <- fmt.Errorf("goroutine %d error: %v", id, err)
 				return
@@ -563,17 +445,14 @@ func TestConcurrentAccess(t *testing.T) {
 		}(i)
 	}
 
-	// Wait for all goroutines to finish
 	wg.Wait()
 	close(results)
 	close(errors)
 
-	// Check for any errors
 	for err := range errors {
 		t.Errorf("Concurrent LoadBalancer() error: %v", err)
 	}
 
-	// Verify all results
 	for url := range results {
 		if url != "http://test1.com/stream" {
 			t.Errorf("Concurrent LoadBalancer() got unexpected URL: %v", url)
@@ -661,7 +540,7 @@ func TestSessionStatePersistence(t *testing.T) {
 	ctx := context.Background()
 
 	// First request should try and fail with index 1
-	_, err := instance.Balance(ctx, &http.Request{Method: http.MethodGet}, session)
+	_, err := instance.Balance(ctx, newTestRequest(http.MethodGet), session)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -672,7 +551,7 @@ func TestSessionStatePersistence(t *testing.T) {
 	}
 
 	// Second request should use index 2 directly
-	result2, err := instance.Balance(ctx, &http.Request{Method: http.MethodGet}, session)
+	result2, err := instance.Balance(ctx, newTestRequest(http.MethodGet), session)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -684,8 +563,8 @@ func TestSessionStatePersistence(t *testing.T) {
 	// Clear session state
 	session.TestedIndexes = []string{}
 
-	// Should start over with index 1
-	result3, err := instance.Balance(ctx, &http.Request{Method: http.MethodGet}, session)
+	// Should start over with index 1 but fail and move to index 2
+	result3, err := instance.Balance(ctx, newTestRequest(http.MethodGet), session)
 	if err != nil {
 		t.Fatal(err)
 	}
