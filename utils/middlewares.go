@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"m3u-stream-merger/logger"
 	"os"
 	"regexp"
 	"strings"
@@ -20,7 +21,7 @@ func TvgNameParser(value string) string {
 	if substrFilter != "" {
 		re, err := regexp.Compile(substrFilter)
 		if err != nil {
-			SafeLogf("Error compiling character filter regex: %v\n", err)
+			logger.Default.Errorf("Error compiling character filter regex: %v", err)
 		} else {
 			value = re.ReplaceAllString(value, "")
 		}

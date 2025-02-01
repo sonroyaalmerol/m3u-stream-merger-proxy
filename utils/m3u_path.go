@@ -1,9 +1,13 @@
 package utils
 
-import "fmt"
+import (
+	"fmt"
+	"m3u-stream-merger/config"
+	"path/filepath"
+)
 
 func GetM3UFilePathByIndex(m3uIndex string) string {
-	m3uFile := fmt.Sprintf("/tmp/m3u-proxy/sources/%s.m3u", m3uIndex)
+	m3uFile := filepath.Join(config.GetSourcesDirPath(), fmt.Sprintf("%s.m3u", m3uIndex))
 
 	return m3uFile
 }

@@ -12,16 +12,14 @@ import (
 	"strconv"
 	"strings"
 
+	"m3u-stream-merger/config"
+	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
 
 	"github.com/edsrzf/mmap-go"
 )
 
-const streamsDirPath = "/m3u-proxy/data/streams"
-
 func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
-	debug := os.Getenv("DEBUG") == "true"
-
 	initInfo, err := DecodeSlug(slug)
 	if err != nil {
 		return nil, err
@@ -35,13 +33,11 @@ func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
 		safeTitle := base64.StdEncoding.EncodeToString([]byte(initInfo.Title))
 
 		fileName := fmt.Sprintf("%s_%s*", safeTitle, m3uIndex)
-		globPattern := filepath.Join(streamsDirPath, "*", fileName)
+		globPattern := filepath.Join(config.GetStreamsDirPath(), "*", fileName)
 
 		fileMatches, err := filepath.Glob(globPattern)
 		if err != nil {
-			if debug {
-				utils.SafeLogf("Error finding files for pattern %s: %v", globPattern, err)
-			}
+			logger.Default.Debugf("Error finding files for pattern %s: %v", globPattern, err)
 			continue
 		}
 
@@ -72,8 +68,8 @@ func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
 	return initInfo, nil
 }
 
-func M3UScanner(m3uIndex string, sessionId string, fn func(streamInfo StreamInfo)) error {
-	utils.SafeLogf("Parsing M3U #%s...\n", m3uIndex)
+func M3UScanner(m3uIndex string, sessionId string, fn func(streamInfo *StreamInfo)) error {
+	logger.Default.Logf("Parsing M3U #%s...", m3uIndex)
 	filePath := utils.GetM3UFilePathByIndex(m3uIndex)
 
 	file, err := os.Open(filePath)
@@ -114,13 +110,10 @@ func M3UScanner(m3uIndex string, sessionId string, fn func(streamInfo StreamInfo
 	return nil
 }
 
-func parseLine(sessionId string, line string, nextLine string, m3uIndex string) StreamInfo {
-	debug := os.Getenv("DEBUG") == "true"
-	if debug {
-		utils.SafeLogf("[DEBUG] Parsing line: %s\n", line)
-		utils.SafeLogf("[DEBUG] Next line: %s\n", nextLine)
-		utils.SafeLogf("[DEBUG] M3U index: %s\n", m3uIndex)
-	}
+func parseLine(sessionId string, line string, nextLine string, m3uIndex string) *StreamInfo {
+	logger.Default.Debugf("Parsing line: %s", line)
+	logger.Default.Debugf("Next line: %s", nextLine)
+	logger.Default.Debugf("M3U index: %s", m3uIndex)
 
 	cleanUrl := strings.TrimSpace(nextLine)
 
@@ -138,9 +131,7 @@ func parseLine(sessionId string, line string, nextLine string, m3uIndex string) 
 		key := strings.TrimSpace(match[1])
 		value := strings.TrimSpace(match[2])
 
-		if debug {
-			utils.SafeLogf("[DEBUG] Processing attribute: %s=%s\n", key, value)
-		}
+		logger.Default.Debugf("Processing attribute: %s=%s", key, value)
 
 		switch strings.ToLower(key) {
 		case "tvg-id":
@@ -162,9 +153,7 @@ func parseLine(sessionId string, line string, nextLine string, m3uIndex string) 
 		case "tvg-logo":
 			currentStream.LogoURL = utils.TvgLogoParser(value)
 		default:
-			if debug {
-				utils.SafeLogf("[DEBUG] Uncaught attribute: %s=%s\n", key, value)
-			}
+			logger.Default.Debugf("Uncaught attribute: %s=%s", key, value)
 		}
 
 		lineWithoutPairs = strings.Replace(lineWithoutPairs, match[0], "", 1)
@@ -173,19 +162,17 @@ func parseLine(sessionId string, line string, nextLine string, m3uIndex string) 
 	lineCommaSplit := strings.SplitN(lineWithoutPairs, ",", 2)
 
 	if len(lineCommaSplit) > 1 {
-		if debug {
-			utils.SafeLogf("[DEBUG] Line comma split detected, title: %s\n", strings.TrimSpace(lineCommaSplit[1]))
-		}
+		logger.Default.Debugf("Line comma split detected, title: %s", strings.TrimSpace(lineCommaSplit[1]))
 		currentStream.Title = utils.TvgNameParser(strings.TrimSpace(lineCommaSplit[1]))
 	}
 
 	encodedUrl := base64.StdEncoding.EncodeToString([]byte(cleanUrl))
 
-	sessionDirPath := filepath.Join(streamsDirPath, sessionId)
+	sessionDirPath := filepath.Join(config.GetStreamsDirPath(), sessionId)
 
 	err := os.MkdirAll(sessionDirPath, os.ModePerm)
 	if err != nil {
-		utils.SafeLogf("[DEBUG] Error creating stream cache folder: %s -> %v\n", sessionDirPath, err)
+		logger.Default.Debugf("Error creating stream cache folder: %s -> %v", sessionDirPath, err)
 	}
 
 	for i := 0; true; i++ {
@@ -195,7 +182,7 @@ func parseLine(sessionId string, line string, nextLine string, m3uIndex string) 
 		if _, err := os.Stat(filePath); errors.Is(err, os.ErrNotExist) {
 			err = os.WriteFile(filePath, []byte(encodedUrl), 0644)
 			if err != nil {
-				utils.SafeLogf("[DEBUG] Error indexing stream: %s (#%s) -> %v\n", currentStream.Title, m3uIndex, err)
+				logger.Default.Debugf("Error indexing stream: %s (#%s) -> %v", currentStream.Title, m3uIndex, err)
 			}
 
 			// Initialize maps if not already initialized
@@ -212,5 +199,5 @@ func parseLine(sessionId string, line string, nextLine string, m3uIndex string) 
 		}
 	}
 
-	return currentStream
+	return &currentStream
 }

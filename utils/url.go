@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-func EOFIsExpected(resp *http.Response) bool {
+func IsAnM3U8Media(resp *http.Response) bool {
 	knownMimeTypes := []string{
 		"application/x-mpegurl",
 		"text/plain",
@@ -16,13 +16,32 @@ func EOFIsExpected(resp *http.Response) bool {
 		"application/vnd.apple.mpegurl",
 	}
 
-	knownExtensions := []string{
-		".m3u",
-		".m3u8",
+	conditionTwo := false
+	if resp.Request != nil && resp.Request.URL != nil {
+		urlPath := resp.Request.URL.Path
+		knownExtensions := []string{
+			".m3u",
+			".m3u8",
+		}
+
+		extension := strings.ToLower(filepath.Ext(urlPath))
+		conditionTwo = slices.Contains(knownExtensions, extension)
 	}
 
-	urlPath := resp.Request.URL.Path
-	extension := strings.ToLower(filepath.Ext(urlPath))
+	return slices.Contains(knownMimeTypes, strings.ToLower(resp.Header.Get("Content-Type"))) || conditionTwo
+}
 
-	return slices.Contains(knownMimeTypes, strings.ToLower(resp.Header.Get("Content-Type"))) || slices.Contains(knownExtensions, extension)
+func EOFIsExpected(resp *http.Response) bool {
+	conditionTwo := false
+	if resp.Request != nil && resp.Request.URL != nil {
+		urlPath := resp.Request.URL.Path
+		knownExtensions := []string{
+			".mp4",
+		}
+
+		extension := strings.ToLower(filepath.Ext(urlPath))
+		conditionTwo = slices.Contains(knownExtensions, extension)
+	}
+
+	return IsAnM3U8Media(resp) || conditionTwo
 }
