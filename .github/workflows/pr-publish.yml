@@ -1,6 +1,6 @@
 name: Pull Request Publish
 on:
-  pull_request:
+  pull_request_target:
     types:
       - synchronize
       - opened
@@ -11,6 +11,11 @@ on:
       - '**.sh'
       - 'go.mod'
       - 'go.sum'
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
 
 jobs:
   fetch-pr-details:
@@ -31,18 +36,19 @@ jobs:
   build-and-push:
     needs: fetch-pr-details
     runs-on: ubuntu-latest
+    environment: 
+      name: pr-approval
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ needs.fetch-pr-details.outputs.sha }}
-
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.repository_owner }}
+          username: ${{ github.actor }}
           password: ${{ secrets.GHCR_PAT }}
 
       - name: Set up Docker Buildx
