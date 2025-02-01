@@ -28,7 +28,7 @@ func GetStreamBySlug(slug string) (StreamInfo, error) {
 func scanSources() []StreamInfo {
 	var (
 		result  = make([]StreamInfo, 0) // Slice to store final results
-		streams sync.Map
+		streams sync.Map                // map[string]*StreamInfo
 	)
 
 	sessionIdHash := sha3.Sum224([]byte(time.Now().String()))
@@ -44,13 +44,13 @@ func scanSources() []StreamInfo {
 				// Check uniqueness and update if necessary
 				if existingStream, exists := streams.Load(streamInfo.Title); exists {
 					for idx, innerMap := range streamInfo.URLs {
-						if _, ok := existingStream.(StreamInfo).URLs[idx]; !ok {
-							existingStream.(StreamInfo).URLs[idx] = innerMap
+						if _, ok := existingStream.(*StreamInfo).URLs[idx]; !ok {
+							existingStream.(*StreamInfo).URLs[idx] = innerMap
 							continue
 						}
 
 						for subIdx, url := range innerMap {
-							existingStream.(StreamInfo).URLs[idx][subIdx] = url
+							existingStream.(*StreamInfo).URLs[idx][subIdx] = url
 						}
 					}
 					streams.Store(streamInfo.Title, existingStream)
