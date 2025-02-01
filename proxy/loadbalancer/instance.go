@@ -103,7 +103,10 @@ func (instance *LoadBalancerInstance) Balance(ctx context.Context, req *http.Req
 	}
 	streamUrl = strings.TrimPrefix(streamUrl, "/")
 
-	instance.FetchBackendUrls(streamUrl)
+	err := instance.fetchBackendUrls(streamUrl)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching sources for: %s", streamUrl)
+	}
 
 	backoff := proxy.NewBackoffStrategy(200*time.Millisecond, 2*time.Second)
 
@@ -132,7 +135,7 @@ func (instance *LoadBalancerInstance) Balance(ctx context.Context, req *http.Req
 	return nil, fmt.Errorf("error fetching stream: exhausted all streams")
 }
 
-func (instance *LoadBalancerInstance) FetchBackendUrls(streamUrl string) error {
+func (instance *LoadBalancerInstance) fetchBackendUrls(streamUrl string) error {
 	stream, err := instance.slugParser.GetStreamBySlug(streamUrl)
 	if err != nil {
 		return err
