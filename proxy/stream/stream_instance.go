@@ -1,16 +1,13 @@
 package stream
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"m3u-stream-merger/logger"
-	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
 	"net/http"
-	"net/url"
 )
 
 type StreamInstance struct {
@@ -74,22 +71,19 @@ func (instance *StreamInstance) handleM3U8Stream(
 	w http.ResponseWriter,
 	statusChan chan<- int,
 ) {
-	scanner := bufio.NewScanner(resp.Body)
-	base, err := url.Parse(resp.Request.URL.String())
-	if err != nil {
-		instance.logger.Errorf("Invalid base URL for M3U8 stream: %v", err)
-		statusChan <- proxy.StatusM3U8ParseError
-		return
+	// Initialize stream handler
+	handler := NewM3U8StreamHandler(instance.config, instance.logger)
+
+	// Get the base URL from the response
+	baseURL := resp.Request.URL
+
+	result := handler.HandleHLSStream(resp, w, baseURL)
+
+	if result.Error != nil {
+		instance.logger.Errorf("Stream handler error: %v", result.Error)
 	}
 
-	processor := NewM3U8Processor(instance.logger)
-	if err := processor.ProcessM3U8Stream(scanner, w, base); err != nil {
-		instance.logger.Errorf("Failed to process M3U8 stream: %v", err)
-		statusChan <- proxy.StatusM3U8ParseError
-		return
-	}
-
-	statusChan <- proxy.StatusM3U8Parsed
+	statusChan <- result.Status
 }
 
 func (instance *StreamInstance) handleMediaStream(
