@@ -2,6 +2,7 @@ package updater
 
 import (
 	"context"
+	"m3u-stream-merger/logger"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
 	"os"
@@ -24,13 +25,13 @@ func Initialize(ctx context.Context) (*Updater, error) {
 	}
 
 	if clearOnBoot == "true" {
-		utils.SafeLogln("CLEAR_ON_BOOT enabled. Clearing current cache.")
+		logger.Default.Log("CLEAR_ON_BOOT enabled. Clearing current cache.")
 		store.ClearCache()
 	}
 
 	cronSched := os.Getenv("SYNC_CRON")
 	if len(strings.TrimSpace(cronSched)) == 0 {
-		utils.SafeLogln("SYNC_CRON not initialized. Defaulting to 0 0 * * * (12am every day).")
+		logger.Default.Log("SYNC_CRON not initialized. Defaulting to 0 0 * * * (12am every day).")
 		cronSched = "0 0 * * *"
 	}
 
@@ -43,7 +44,7 @@ func Initialize(ctx context.Context) (*Updater, error) {
 		go updateInstance.UpdateSources(ctx)
 	})
 	if err != nil {
-		utils.SafeLogf("Error initializing background processes: %v", err)
+		logger.Default.Logf("Error initializing background processes: %v", err)
 		return nil, err
 	}
 	c.Start()
@@ -54,7 +55,7 @@ func Initialize(ctx context.Context) (*Updater, error) {
 	}
 
 	if syncOnBoot == "true" {
-		utils.SafeLogln("SYNC_ON_BOOT enabled. Starting initial M3U update.")
+		logger.Default.Log("SYNC_ON_BOOT enabled. Starting initial M3U update.")
 
 		go updateInstance.UpdateSources(ctx)
 	}
@@ -65,8 +66,6 @@ func Initialize(ctx context.Context) (*Updater, error) {
 }
 
 func (instance *Updater) UpdateSources(ctx context.Context) {
-	debug := os.Getenv("DEBUG") == "true"
-
 	// Ensure only one job is running at a time
 	instance.Lock()
 	defer instance.Unlock()
@@ -75,25 +74,25 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 	case <-ctx.Done():
 		return
 	default:
-		utils.SafeLogln("Background process: Checking M3U_URLs...")
+		logger.Default.Log("Background process: Checking M3U_URLs...")
 		var wg sync.WaitGroup
 
 		indexes := utils.GetM3UIndexes()
 		for _, idx := range indexes {
-			utils.SafeLogf("Background process: Fetching M3U_URL_%s...\n", idx)
+			logger.Default.Logf("Background process: Fetching M3U_URL_%s...", idx)
 			wg.Add(1)
 			// Start the goroutine for periodic updates
 			go func(idx string) {
 				defer wg.Done()
 				err := store.DownloadM3USource(idx)
-				if err != nil && debug {
-					utils.SafeLogf("Background process: Error fetching M3U_URL_%s: %v\n", idx, err)
+				if err != nil {
+					logger.Default.Debugf("Background process: Error fetching M3U_URL_%s: %v", idx, err)
 				}
 			}(idx)
 		}
 		wg.Wait()
 
-		utils.SafeLogf("Background process: M3U fetching complete.\n")
+		logger.Default.Logf("Background process: M3U fetching complete.")
 
 		store.ClearSessionStore()
 
@@ -102,12 +101,12 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 			cacheOnSync = "false"
 		}
 
-		utils.SafeLogln("Background process: Updated M3U store.")
+		logger.Default.Log("Background process: Updated M3U store.")
 		if cacheOnSync == "true" {
 			if _, ok := os.LookupEnv("BASE_URL"); !ok {
-				utils.SafeLogln("BASE_URL is required for CACHE_ON_SYNC to work.")
+				logger.Default.Log("BASE_URL is required for CACHE_ON_SYNC to work.")
 			}
-			utils.SafeLogln("CACHE_ON_SYNC enabled. Building cache.")
+			logger.Default.Log("CACHE_ON_SYNC enabled. Building cache.")
 			_ = store.RevalidatingGetM3U(nil, true)
 		}
 	}

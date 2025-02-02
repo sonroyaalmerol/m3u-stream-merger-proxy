@@ -5,39 +5,30 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"m3u-stream-merger/utils"
-	"os"
+	"m3u-stream-merger/logger"
 	"strings"
 
 	"github.com/goccy/go-json"
 	"github.com/klauspost/compress/zstd"
 )
 
-var debug = os.Getenv("DEBUG") == "true"
-
 func EncodeSlug(stream StreamInfo) string {
 	jsonData, err := json.Marshal(stream)
 	if err != nil {
-		if debug {
-			utils.SafeLogf("[DEBUG] Error json marshal for slug: %v\n", err)
-		}
+		logger.Default.Debugf("[DEBUG] Error json marshal for slug: %v", err)
 		return ""
 	}
 
 	var compressedData bytes.Buffer
 	writer, err := zstd.NewWriter(&compressedData)
 	if err != nil {
-		if debug {
-			utils.SafeLogf("[DEBUG] Error zstd compression for slug: %v\n", err)
-		}
+		logger.Default.Debugf("[DEBUG] Error zstd compression for slug: %v", err)
 		return ""
 	}
 
 	_, err = writer.Write(jsonData)
 	if err != nil {
-		if debug {
-			utils.SafeLogf("[DEBUG] Error zstd compression for slug: %v\n", err)
-		}
+		logger.Default.Debugf("[DEBUG] Error zstd compression for slug: %v", err)
 		return ""
 	}
 	writer.Close()

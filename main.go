@@ -4,9 +4,8 @@ import (
 	"context"
 	"fmt"
 	"m3u-stream-merger/handlers"
-	"m3u-stream-merger/store"
+	"m3u-stream-merger/logger"
 	"m3u-stream-merger/updater"
-	"m3u-stream-merger/utils"
 	"net/http"
 	"os"
 	"time"
@@ -17,12 +16,10 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cm := store.NewConcurrencyManager()
-
-	utils.SafeLogln("Starting updater...")
+	logger.Default.Log("Starting updater...")
 	_, err := updater.Initialize(ctx)
 	if err != nil {
-		utils.SafeLogFatalf("Error initializing updater: %v", err)
+		logger.Default.Fatalf("Error initializing updater: %v", err)
 	}
 
 	// manually set time zone
@@ -30,25 +27,28 @@ func main() {
 		var err error
 		time.Local, err = time.LoadLocation(tz)
 		if err != nil {
-			utils.SafeLogf("error loading location '%s': %v\n", tz, err)
+			logger.Default.Fatalf("error loading location '%s': %v\n", tz, err)
 		}
 	}
 
-	utils.SafeLogln("Setting up HTTP handlers...")
+	m3uHandler := handlers.NewM3UHandler(logger.Default)
+	streamHandler := handlers.NewStreamHandler(handlers.NewDefaultStreamManager(), logger.Default)
+
+	logger.Default.Log("Setting up HTTP handlers...")
 	// HTTP handlers
 	http.HandleFunc("/playlist.m3u", func(w http.ResponseWriter, r *http.Request) {
-		handlers.M3UHandler(w, r)
+		m3uHandler.ServeHTTP(w, r)
 	})
 	http.HandleFunc("/p/", func(w http.ResponseWriter, r *http.Request) {
-		handlers.StreamHandler(w, r, cm)
+		streamHandler.ServeHTTP(w, r)
 	})
 
 	// Start the server
-	utils.SafeLogln(fmt.Sprintf("Server is running on port %s...", os.Getenv("PORT")))
-	utils.SafeLogln("Playlist Endpoint is running (`/playlist.m3u`)")
-	utils.SafeLogln("Stream Endpoint is running (`/p/{originalBasePath}/{streamID}.{fileExt}`)")
+	logger.Default.Logf("Server is running on port %s...", os.Getenv("PORT"))
+	logger.Default.Log("Playlist Endpoint is running (`/playlist.m3u`)")
+	logger.Default.Log("Stream Endpoint is running (`/p/{originalBasePath}/{streamID}.{fileExt}`)")
 	err = http.ListenAndServe(fmt.Sprintf(":%s", os.Getenv("PORT")), nil)
 	if err != nil {
-		utils.SafeLogFatalf("HTTP server error: %v", err)
+		logger.Default.Fatalf("HTTP server error: %v", err)
 	}
 }
