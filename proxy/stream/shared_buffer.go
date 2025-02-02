@@ -301,7 +301,7 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) ([]*ChunkData, *
 					Status:    0,
 					Timestamp: chunk.Timestamp,
 				}
-				newChunk.Buffer.Write(chunk.Buffer.Bytes())
+				_, _ = newChunk.Buffer.Write(chunk.Buffer.Bytes())
 				chunks = append(chunks, newChunk)
 			}
 
