@@ -161,7 +161,7 @@ func (h *StreamHandler) handleBufferedStream(
 			if len(chunks) > 0 {
 				batchBuffer.Reset()
 				for _, chunk := range chunks {
-					batchBuffer.Write(chunk.Buffer.B)
+					_, _ = batchBuffer.Write(chunk.Buffer.B)
 					chunk.Reset() // Return buffers to pool immediately
 				}
 				if written, err := writer.Write(batchBuffer.B); err != nil {
