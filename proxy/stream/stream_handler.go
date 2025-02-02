@@ -150,18 +150,57 @@ func (h *StreamHandler) handleBufferedStream(
 	var bytesWritten int64
 	lastPosition := h.coordinator.buffer.Prev() // Start from previous to get first new chunk
 
-	for {
+	// Create a channel to signal writer goroutine to stop
+	done := make(chan struct{})
+	defer close(done)
+
+	// Create a context with cancel for the writer goroutine
+	writerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Handle context cancellation in a separate goroutine
+	go func() {
 		select {
 		case <-ctx.Done():
-			return StreamResult{bytesWritten, ctx.Err(), proxy.StatusClientClosed}
+			h.logger.Debugf("Client disconnected: %s", remoteAddr)
+			cancel()
+		case <-done:
+			return
+		}
+	}()
+
+	for {
+		select {
+		case <-writerCtx.Done():
+			h.logger.Debugf("Context cancelled for client: %s", remoteAddr)
+			return StreamResult{bytesWritten, writerCtx.Err(), proxy.StatusClientClosed}
+
 		default:
 			chunks, errChunk, newPos := h.coordinator.ReadChunks(lastPosition)
 
 			// Process any available chunks first
 			if len(chunks) > 0 {
 				for _, chunk := range chunks {
+					// Check context before each write
+					if writerCtx.Err() != nil {
+						// Clean up remaining chunks
+						for _, c := range chunks {
+							if c != nil {
+								c.Reset()
+							}
+						}
+						return StreamResult{bytesWritten, writerCtx.Err(), proxy.StatusClientClosed}
+					}
+
 					if chunk != nil && chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
-						n, err := writer.Write(chunk.Buffer.Bytes())
+						// Protect against nil writer
+						if writer == nil {
+							h.logger.Error("Writer is nil")
+							return StreamResult{bytesWritten, fmt.Errorf("writer is nil"), proxy.StatusServerError}
+						}
+
+						// Use a separate function for writing to handle panics
+						n, err := h.safeWrite(writer, chunk.Buffer.Bytes())
 						if err != nil {
 							// Clean up remaining chunks
 							for _, c := range chunks {
@@ -169,12 +208,15 @@ func (h *StreamHandler) handleBufferedStream(
 									c.Reset()
 								}
 							}
-							return StreamResult{bytesWritten, err, 0}
+							return StreamResult{bytesWritten, err, proxy.StatusClientClosed}
 						}
 						bytesWritten += int64(n)
 
 						if flusher, ok := writer.(StreamFlusher); ok {
-							flusher.Flush()
+							// Protect against panic in flush
+							if err := h.safeFlush(flusher); err != nil {
+								return StreamResult{bytesWritten, err, proxy.StatusClientClosed}
+							}
 						}
 					}
 					if chunk != nil {
@@ -186,7 +228,7 @@ func (h *StreamHandler) handleBufferedStream(
 			// Handle any error chunk
 			if errChunk != nil {
 				if flusher, ok := writer.(StreamFlusher); ok {
-					flusher.Flush()
+					h.safeFlush(flusher)
 				}
 				return StreamResult{bytesWritten, errChunk.Error, errChunk.Status}
 			}
@@ -258,4 +300,28 @@ func (h *StreamHandler) readChunk(
 	case result := <-readChan:
 		return result
 	}
+}
+
+// safeWrite attempts to write to the writer and recovers from panics
+func (h *StreamHandler) safeWrite(writer ResponseWriter, data []byte) (n int, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			h.logger.Errorf("Panic in write: %v", r)
+			err = fmt.Errorf("write failed: %v", r)
+		}
+	}()
+
+	return writer.Write(data)
+}
+
+// safeFlush attempts to flush the writer and recovers from panics
+func (h *StreamHandler) safeFlush(flusher StreamFlusher) error {
+	defer func() {
+		if r := recover(); r != nil {
+			h.logger.Errorf("Panic in flush: %v", r)
+		}
+	}()
+
+	flusher.Flush()
+	return nil
 }
