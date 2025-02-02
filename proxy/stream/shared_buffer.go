@@ -3,6 +3,7 @@ package stream
 import (
 	"container/ring"
 	"context"
+	"fmt"
 	"io"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
@@ -40,17 +41,18 @@ func (c *ChunkData) Reset() {
 }
 
 type StreamCoordinator struct {
-	buffer      *ring.Ring
-	mu          sync.Mutex
-	clientCount int32
-	writerChan  chan struct{}
-	lastError   atomic.Value
-	logger      logger.Logger
-	config      *StreamConfig
-	cm          *store.ConcurrencyManager
-	streamID    string
-	dataNotify  *sync.Cond
-	active      atomic.Bool
+	buffer          *ring.Ring
+	mu              sync.Mutex
+	clientCount     int32
+	writerChan      chan struct{}
+	lastError       atomic.Value
+	logger          logger.Logger
+	config          *StreamConfig
+	cm              *store.ConcurrencyManager
+	streamID        string
+	dataNotify      *sync.Cond
+	active          atomic.Bool
+	initialBuffered sync.Map
 }
 
 func NewStreamCoordinator(streamID string, config *StreamConfig, cm *store.ConcurrencyManager, logger logger.Logger) *StreamCoordinator {
@@ -98,6 +100,7 @@ func (c *StreamCoordinator) UnregisterClient() {
 			c.logger.Debug("Writer channel already has shutdown signal")
 		}
 		c.clearBuffer()
+		c.initialBuffered = sync.Map{} // Reset the buffering state
 	}
 }
 
@@ -265,6 +268,50 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) ([]*ChunkData, *
 
 	c.logger.Debugf("ReadChunks: Starting read. Active=%v", c.active.Load())
 
+	// Check if this is a new client position
+	clientKey := fmt.Sprintf("%p", fromPosition)
+	if _, exists := c.initialBuffered.Load(clientKey); !exists {
+		c.initialBuffered.Store(clientKey, false)
+
+		// Calculate required buffer fill
+		requiredChunks := int(float64(c.config.SharedBufferSize) * 0.3)
+
+		// Count available chunks
+		current := fromPosition
+		availableChunks := 0
+		for current != c.buffer {
+			if chunk, ok := current.Value.(*ChunkData); ok {
+				if chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
+					availableChunks++
+				}
+			}
+			current = current.Next()
+		}
+
+		// Wait until we have enough chunks or stream becomes inactive
+		for availableChunks < requiredChunks && c.active.Load() {
+			c.logger.Debugf("ReadChunks: Waiting for initial buffer. Have %d/%d chunks",
+				availableChunks, requiredChunks)
+			c.dataNotify.Wait()
+
+			// Recount available chunks
+			availableChunks = 0
+			current = fromPosition
+			for current != c.buffer {
+				if chunk, ok := current.Value.(*ChunkData); ok {
+					if chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
+						availableChunks++
+					}
+				}
+				current = current.Next()
+			}
+		}
+
+		c.initialBuffered.Store(clientKey, true)
+		c.logger.Debug("ReadChunks: Initial buffer threshold met")
+	}
+
+	// Regular waiting for new data
 	for fromPosition == c.buffer && c.active.Load() {
 		c.logger.Debug("ReadChunks: Waiting for new data")
 		c.dataNotify.Wait()
@@ -274,7 +321,7 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) ([]*ChunkData, *
 	chunks := make([]*ChunkData, 0, 32)
 	current := fromPosition
 
-	// Process available chunks first
+	// Process available chunks
 	bufferCount := 0
 	for current != c.buffer {
 		if chunk, ok := current.Value.(*ChunkData); ok {
@@ -299,10 +346,10 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) ([]*ChunkData, *
 	c.logger.Debugf("ReadChunks: Processed %d positions, found %d chunks with data",
 		bufferCount, len(chunks))
 
-	// Only check for error after processing available chunks
+	// Check for error after processing chunks
 	if err := c.lastError.Load().(*ChunkData); err != nil {
 		c.logger.Debugf("ReadChunks: Found error after processing chunks: %v", err.Error)
-		return chunks, err, current // Return processed chunks along with error
+		return chunks, err, current
 	}
 
 	return chunks, nil, current
