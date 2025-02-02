@@ -139,13 +139,13 @@ func (h *StreamHandler) handleBufferedStream(
 		return StreamResult{0, fmt.Errorf("coordinator is nil"), proxy.StatusServerError}
 	}
 
-	h.coordinator.mu.Lock()
+	h.coordinator.writerCtxMu.Lock()
 	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 0
 	if isFirstClient {
 		h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
 		go h.coordinator.StartWriter(h.coordinator.writerCtx, lbResult)
 	}
-	h.coordinator.mu.Unlock()
+	h.coordinator.writerCtxMu.Unlock()
 
 	h.coordinator.RegisterClient()
 	defer func() {
