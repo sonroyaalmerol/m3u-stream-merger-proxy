@@ -176,7 +176,7 @@ func (c *StreamCoordinator) StartWriter(ctx context.Context, m3uIndex string, re
 			if err == io.EOF {
 				if n > 0 {
 					tempChunk.Reset()
-					tempChunk.Buffer.Write(buffer[:n])
+					_, _ = tempChunk.Buffer.Write(buffer[:n])
 					tempChunk.Timestamp = time.Now()
 					c.Write(tempChunk)
 				}
@@ -205,7 +205,7 @@ func (c *StreamCoordinator) StartWriter(ctx context.Context, m3uIndex string, re
 
 			zeroReads = 0
 			tempChunk.Reset()
-			tempChunk.Buffer.Write(buffer[:n])
+			_, _ = tempChunk.Buffer.Write(buffer[:n])
 			tempChunk.Timestamp = time.Now()
 			c.Write(tempChunk)
 
@@ -287,7 +287,7 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) ([]*ChunkData, *
 					Buffer:    bytebufferpool.Get(),
 				}
 				if chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
-					newChunk.Buffer.Write(chunk.Buffer.Bytes())
+					_, _ = newChunk.Buffer.Write(chunk.Buffer.Bytes())
 					c.logger.Debugf("ReadChunks: Found chunk with %d bytes", chunk.Buffer.Len())
 				}
 				chunks = append(chunks, newChunk)
@@ -326,20 +326,6 @@ func (c *StreamCoordinator) getTimeoutDuration() time.Duration {
 		return time.Minute
 	}
 	return time.Duration(c.config.TimeoutSeconds) * time.Second
-}
-
-func (c *StreamCoordinator) writeData(data []byte) {
-	c.logger.Debugf("writeData: Writing %d bytes", len(data))
-	chunk := newChunkData()
-	n, err := chunk.Buffer.Write(data)
-	if err != nil {
-		c.logger.Errorf("Error writing to buffer: %v", err)
-	}
-	c.logger.Debugf("writeData: Wrote %d bytes to chunk", n)
-	chunk.Timestamp = time.Now()
-	wrote := c.Write(chunk)
-	c.logger.Debugf("writeData: Write completed, success=%v", wrote)
-	chunk.Reset() // Reset after writing
 }
 
 func (c *StreamCoordinator) writeError(err error, status int) {
