@@ -68,6 +68,7 @@ func mockResponse(status int, body string) *http.Response {
 func TestStreamHandler_ServeHTTP(t *testing.T) {
 	cm := store.NewConcurrencyManager()
 	config := stream.NewDefaultStreamConfig()
+	config.ChunkSize = 1024 * 1024
 	coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 	tests := []struct {
@@ -335,6 +336,7 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
 	cm := store.NewConcurrencyManager()
 	config := stream.NewDefaultStreamConfig()
+	config.ChunkSize = 1024 * 1024
 	coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 	tests := []struct {

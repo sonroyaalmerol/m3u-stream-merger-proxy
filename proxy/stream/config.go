@@ -35,7 +35,7 @@ func NewDefaultStreamConfig() *StreamConfig {
 
 	return &StreamConfig{
 		SharedBufferSize: finalBufferSize,
-		ChunkSize:        1024 * 1024,
+		ChunkSize:        1024 * 1024 * 1024,
 		TimeoutSeconds:   finalTimeoutSeconds,
 		InitialBackoff:   200 * time.Millisecond,
 	}
