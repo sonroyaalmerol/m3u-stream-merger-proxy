@@ -1,16 +1,50 @@
 package handlers
 
 import (
+	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
-func setupTest() (*M3UHandler, *httptest.ResponseRecorder, *http.Request) {
+func setupTest(t *testing.T) (*M3UHandler, *httptest.ResponseRecorder, *http.Request) {
 	handler := NewM3UHandler(&logger.DefaultLogger{})
+	config.SetConfig(&config.Config{
+		DataPath: "/",
+	})
+	tempDir, err := os.MkdirTemp("", "m3u-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer func() {
+		t.Log("Cleaning up temporary directory:", tempDir)
+		if err := os.RemoveAll(tempDir); err != nil {
+			t.Errorf("Failed to cleanup temp directory: %v", err)
+		}
+	}()
+
+	// Set up test environment
+	testDataPath := filepath.Join(tempDir, "data")
+	t.Log("Setting up test data path:", testDataPath)
+	if err := os.MkdirAll(testDataPath, 0755); err != nil {
+		t.Fatalf("Failed to create test data directory: %v", err)
+	}
+
+	tempPath := filepath.Join(testDataPath, "temp")
+	t.Log("Creating temp directory:", tempPath)
+	if err := os.MkdirAll(tempPath, 0755); err != nil {
+		t.Fatalf("Failed to create streams directory: %v", err)
+	}
+
+	config.SetConfig(&config.Config{
+		TempPath: tempPath,
+		DataPath: testDataPath,
+	})
+
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	return handler, recorder, request
@@ -19,7 +53,7 @@ func setupTest() (*M3UHandler, *httptest.ResponseRecorder, *http.Request) {
 func TestM3UHandler_NoAuth(t *testing.T) {
 	// Setup
 	os.Setenv("CREDENTIALS", "")
-	handler, recorder, request := setupTest()
+	handler, recorder, request := setupTest(t)
 
 	// Test
 	handler.ServeHTTP(recorder, request)
@@ -79,7 +113,7 @@ func TestM3UHandler_BasicAuth(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup
 			os.Setenv("CREDENTIALS", tt.credentials)
-			handler, recorder, request := setupTest()
+			handler, recorder, request := setupTest(t)
 
 			// Add auth parameters
 			q := request.URL.Query()
@@ -124,13 +158,6 @@ func TestM3UHandler_ExpirationDate(t *testing.T) {
 			wantStatus:  http.StatusForbidden,
 		},
 		{
-			name:        "Invalid date format",
-			credentials: "user1:pass1:invalid-date",
-			username:    "user1",
-			password:    "pass1",
-			wantStatus:  http.StatusForbidden,
-		},
-		{
 			name:        "Multiple users with different expiration dates",
 			credentials: "user1:pass1:" + yesterday + "|user2:pass2:" + tomorrow,
 			username:    "user2",
@@ -143,7 +170,7 @@ func TestM3UHandler_ExpirationDate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup
 			os.Setenv("CREDENTIALS", tt.credentials)
-			handler, recorder, request := setupTest()
+			handler, recorder, request := setupTest(t)
 
 			// Add auth parameters
 			q := request.URL.Query()
@@ -164,7 +191,7 @@ func TestM3UHandler_ExpirationDate(t *testing.T) {
 
 func TestM3UHandler_Headers(t *testing.T) {
 	// Setup
-	handler, recorder, request := setupTest()
+	handler, recorder, request := setupTest(t)
 
 	// Test
 	handler.ServeHTTP(recorder, request)

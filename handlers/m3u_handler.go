@@ -26,31 +26,31 @@ func (h *M3UHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	credentials := os.Getenv("CREDENTIALS")
 	var credentialsArr [][]string
+	authRequired := false // Add this flag
+
 	if credentials != "" && strings.ToLower(credentials) != "none" {
+		authRequired = true // Set flag if credentials are configured
 		arr := strings.Split(credentials, "|")
 		for _, arrItem := range arr {
 			cred := strings.Split(arrItem, ":")
-			// if only username is set, set password to ""
-			if len(cred) == 1 {
-				cred = append(cred, "")
-			} else if len(cred) == 3 {
-				// date is also provided, check if we are before the provided date (expiration date)
+			if len(cred) == 3 {
 				d, err := time.Parse(time.DateOnly, cred[2])
 				if err != nil {
 					h.logger.Warnf("invalid credential format: %s\n", arrItem)
 					continue
 				}
 				if time.Now().After(d) {
-					// Expired access
+					h.logger.Debugf("Credential expired")
 					continue
 				}
+				credentialsArr = append(credentialsArr, cred[:2])
+				continue
 			}
 			credentialsArr = append(credentialsArr, cred)
 		}
 	}
 
-	if len(credentialsArr) > 0 {
-		// download requires authorization
+	if authRequired { // Check auth if credentials were configured
 		user := r.URL.Query().Get("username")
 		pass := r.URL.Query().Get("password")
 		if len(user) == 0 || len(pass) == 0 {
