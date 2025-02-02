@@ -12,7 +12,7 @@ import (
 
 type M3UHTTPHandler struct {
 	logger logger.Logger
-	Cache  *store.Cache
+	Cache  *store.M3UCache
 }
 
 func NewM3UHTTPHandler(logger logger.Logger) *M3UHTTPHandler {
