@@ -66,6 +66,10 @@ func mockResponse(status int, body string) *http.Response {
 }
 
 func TestStreamHandler_ServeHTTP(t *testing.T) {
+	cm := store.NewConcurrencyManager()
+	config := stream.NewDefaultStreamConfig()
+	coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
+
 	tests := []struct {
 		name           string
 		path           string
@@ -78,10 +82,6 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 			path: "/test.m3u8",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
-
-				cm := store.NewConcurrencyManager()
-				config := stream.NewDefaultStreamConfig()
-				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
 					return mockResponse(http.StatusOK, "test content"), "http://example.com", "1", "1", nil
@@ -109,10 +109,6 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 			path: "/test.m3u8",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
-
-				cm := store.NewConcurrencyManager()
-				config := stream.NewDefaultStreamConfig()
-				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				callCount := 0
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
@@ -152,10 +148,6 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
 
-				cm := store.NewConcurrencyManager()
-				config := stream.NewDefaultStreamConfig()
-				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
-
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
 					return mockResponse(http.StatusOK, "timeout content"), "http://timeout.com", "1", "1", nil
 				}
@@ -189,10 +181,6 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
 
-				cm := store.NewConcurrencyManager()
-				config := stream.NewDefaultStreamConfig()
-				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
-
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
 					resp := mockResponse(http.StatusOK, "EOF content")
 					resp.Header.Set("Content-Type", "application/vnd.apple.mpegurl")
@@ -222,10 +210,6 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
 
-				cm := store.NewConcurrencyManager()
-				config := stream.NewDefaultStreamConfig()
-				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
-
 				manager.getRegistryFunc = func() *stream.StreamRegistry {
 					return coordinator
 				}
@@ -240,10 +224,6 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 			path: "/test.m3u8",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
-
-				cm := store.NewConcurrencyManager()
-				config := stream.NewDefaultStreamConfig()
-				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
 					return nil, "", "", "", errors.New("network connection error")
@@ -268,10 +248,6 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
 
-				cm := store.NewConcurrencyManager()
-				config := stream.NewDefaultStreamConfig()
-				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
-
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
 					return mockResponse(http.StatusInternalServerError, "server error"), "http://error.com", "1", "1", nil
 				}
@@ -294,10 +270,6 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 			path: "/test.m3u8",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
-
-				cm := store.NewConcurrencyManager()
-				config := stream.NewDefaultStreamConfig()
-				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
 					resp := mockResponse(http.StatusOK, "content with headers")
@@ -361,6 +333,10 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 }
 
 func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
+	cm := store.NewConcurrencyManager()
+	config := stream.NewDefaultStreamConfig()
+	coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
+
 	tests := []struct {
 		name         string
 		setupMocks   func() *mockStreamManager
@@ -371,10 +347,6 @@ func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
 			name: "random client disconnections",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
-
-				cm := store.NewConcurrencyManager()
-				config := stream.NewDefaultStreamConfig()
-				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
 					return mockResponse(http.StatusOK, "test content"), "http://example.com", "1", "m3u_1", nil
@@ -416,10 +388,6 @@ func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
 
-				cm := store.NewConcurrencyManager()
-				config := stream.NewDefaultStreamConfig()
-				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
-
 				var streamWG sync.WaitGroup
 				streamWG.Add(5) // Wait for 5 streams to be active
 
@@ -456,10 +424,6 @@ func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
 			name: "mixed completion statuses with retries",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
-
-				cm := store.NewConcurrencyManager()
-				config := stream.NewDefaultStreamConfig()
-				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				completionCount := int32(0)
 
@@ -519,10 +483,6 @@ func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
 			name: "rapid connect/disconnect cycles",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
-
-				cm := store.NewConcurrencyManager()
-				config := stream.NewDefaultStreamConfig()
-				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
 					return mockResponse(http.StatusOK, "test content"), "http://example.com", "1", "m3u_5", nil
