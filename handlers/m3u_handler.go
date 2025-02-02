@@ -4,6 +4,9 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/store"
 	"net/http"
+	"os"
+	"strings"
+	"time"
 )
 
 type M3UHandler struct {
@@ -19,12 +22,59 @@ func NewM3UHandler(logger logger.Logger) *M3UHandler {
 }
 
 func (h *M3UHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	credentials := os.Getenv("CREDENTIALS")
+	var credentialsArr [][]string
+	authRequired := false // Add this flag
+
+	if credentials != "" && strings.ToLower(credentials) != "none" {
+		authRequired = true // Set flag if credentials are configured
+		arr := strings.Split(credentials, "|")
+		for _, arrItem := range arr {
+			cred := strings.Split(arrItem, ":")
+			if len(cred) == 3 {
+				d, err := time.Parse(time.DateOnly, cred[2])
+				if err != nil {
+					h.logger.Warnf("invalid credential format: %s\n", arrItem)
+					continue
+				}
+				if time.Now().After(d) {
+					h.logger.Debugf("Credential expired")
+					continue
+				}
+				credentialsArr = append(credentialsArr, cred[:2])
+				continue
+			}
+			credentialsArr = append(credentialsArr, cred)
+		}
+	}
+
+	if authRequired { // Check auth if credentials were configured
+		user := r.URL.Query().Get("username")
+		pass := r.URL.Query().Get("password")
+		if len(user) == 0 || len(pass) == 0 {
+			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+			return
+		}
+		authCorrect := false
+		for _, cred := range credentialsArr {
+			if strings.EqualFold(user, cred[0]) && strings.EqualFold(pass, cred[1]) {
+				authCorrect = true
+				break
+			}
+		}
+		if !authCorrect {
+			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
 
 	content := store.RevalidatingGetM3U(r, false)
 
 	if _, err := w.Write([]byte(content)); err != nil {
-	h.logger.Debugf("Error writing http response: %v\n", err)
+		h.logger.Debugf("Error writing http response: %v\n", err)
 	}
 }
