@@ -7,8 +7,8 @@ import (
 	"io"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
+	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/store"
-	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -41,17 +41,18 @@ func (c *ChunkData) Reset() {
 }
 
 type StreamCoordinator struct {
-	buffer      *ring.Ring
-	mu          sync.Mutex
-	clientCount int32
-	writerChan  chan struct{}
-	lastError   atomic.Value
-	logger      logger.Logger
-	config      *StreamConfig
-	cm          *store.ConcurrencyManager
-	streamID    string
-	dataNotify  *sync.Cond
-	active      atomic.Bool
+	buffer          *ring.Ring
+	mu              sync.Mutex
+	clientCount     int32
+	writerChan      chan struct{}
+	lastError       atomic.Value
+	logger          logger.Logger
+	config          *StreamConfig
+	cm              *store.ConcurrencyManager
+	streamID        string
+	dataNotify      *sync.Cond
+	active          atomic.Bool
+	lbResultOnWrite *loadbalancer.LoadBalancerResult
 }
 
 func NewStreamCoordinator(streamID string, config *StreamConfig, cm *store.ConcurrencyManager, logger logger.Logger) *StreamCoordinator {
@@ -108,6 +109,10 @@ func (c *StreamCoordinator) HasClient() bool {
 	return count > 0
 }
 
+func (c *StreamCoordinator) GetWriterLBResult() *loadbalancer.LoadBalancerResult {
+	return c.lbResultOnWrite
+}
+
 func (c *StreamCoordinator) shouldTimeout(timeStarted time.Time, timeout time.Duration) bool {
 	shouldTimeout := c.config.TimeoutSeconds > 0 && time.Since(timeStarted) >= timeout
 	if shouldTimeout {
@@ -124,14 +129,18 @@ func (c *StreamCoordinator) shouldResetTimer(lastErr, timeStarted time.Time) boo
 	return lastErr.Equal(timeStarted) || time.Since(lastErr) >= time.Second
 }
 
-func (c *StreamCoordinator) StartWriter(ctx context.Context, m3uIndex string, resp *http.Response) {
+func (c *StreamCoordinator) StartWriter(ctx context.Context, lbResult *loadbalancer.LoadBalancerResult) {
 	defer func() {
+		c.lbResultOnWrite = nil
 		if r := recover(); r != nil {
 			c.logger.Errorf("Panic in StartWriter: %v", r)
 			c.writeError(fmt.Errorf("internal server error"), proxy.StatusServerError)
 		}
 	}()
-	defer resp.Body.Close()
+	defer lbResult.Response.Body.Close()
+
+	c.lbResultOnWrite = lbResult
+
 	c.logger.Debug("StartWriter: Beginning read loop")
 
 	buffer := make([]byte, c.config.ChunkSize)
@@ -139,8 +148,8 @@ func (c *StreamCoordinator) StartWriter(ctx context.Context, m3uIndex string, re
 	backoff := proxy.NewBackoffStrategy(c.config.InitialBackoff,
 		time.Duration(c.config.TimeoutSeconds-1)*time.Second)
 
-	c.cm.UpdateConcurrency(m3uIndex, true)
-	defer c.cm.UpdateConcurrency(m3uIndex, false)
+	c.cm.UpdateConcurrency(lbResult.Index, true)
+	defer c.cm.UpdateConcurrency(lbResult.Index, false)
 
 	start := time.Now()
 	lastErr := start
@@ -177,7 +186,7 @@ func (c *StreamCoordinator) StartWriter(ctx context.Context, m3uIndex string, re
 				return
 			}
 
-			n, err := resp.Body.Read(buffer)
+			n, err := lbResult.Response.Body.Read(buffer)
 			c.logger.Debugf("StartWriter: Read %d bytes, err: %v", n, err)
 
 			if err == io.EOF {

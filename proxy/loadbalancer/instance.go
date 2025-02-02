@@ -240,10 +240,10 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 			continue
 		}
 
-		//if instance.Cm.CheckConcurrency(index) {
-		//	instance.logger.Debugf("Concurrency limit reached for M3U_%s: %s", index, url)
-		//	continue
-		//}
+		if instance.Cm.CheckConcurrency(index) {
+			instance.logger.Debugf("Concurrency limit reached for M3U_%s: %s", index, url)
+			continue
+		}
 
 		req, err := http.NewRequestWithContext(ctx, method, url, nil)
 		if err != nil {

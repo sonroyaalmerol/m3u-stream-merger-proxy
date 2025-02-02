@@ -4,6 +4,7 @@ import (
 	"context"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
+	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/proxy/stream"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
@@ -25,16 +26,16 @@ func NewStreamHandler(manager StreamManager, logger logger.Logger) *StreamHandle
 	}
 }
 
-func (h *StreamHandler) handleExitCode(code int, resp *http.Response, r *http.Request, session *store.Session, selectedIndex, selectedSubIndex string) bool {
+func (h *StreamHandler) handleExitCode(code int, lbResult *loadbalancer.LoadBalancerResult, r *http.Request, session *store.Session) bool {
 	switch code {
 	case proxy.StatusEOF:
-		if utils.EOFIsExpected(resp) {
+		if utils.EOFIsExpected(lbResult.Response) {
 			h.logger.Logf("Successfully proxied playlist: %s", r.RemoteAddr)
 			return true
 		}
 		fallthrough
 	case proxy.StatusServerError:
-		indexes := append(session.GetTestedIndexes(), selectedIndex+"|"+selectedSubIndex)
+		indexes := append(session.GetTestedIndexes(), lbResult.Index+"|"+lbResult.SubIndex)
 		session.SetTestedIndexes(indexes)
 		h.logger.Logf("Retrying other servers...")
 		return false
@@ -89,25 +90,30 @@ func (h *StreamHandler) handleStream(ctx context.Context, w http.ResponseWriter,
 	}()
 
 	for {
+		var lbResults *loadbalancer.LoadBalancerResult
 		var err error
-		var selectedURL, selectedIndex, selectedSubIndex string
 
-		resp, selectedURL, selectedIndex, selectedSubIndex, err = h.manager.LoadBalancer(ctx, r, session)
-		if err != nil {
-			return err
+		if lbResults = h.coordinator.GetWriterLBResult(); lbResults == nil {
+			lbResults, err = h.manager.LoadBalancer(ctx, r, session)
+			if err != nil {
+				return err
+			}
 		}
+
+		resp = lbResults.Response
+
 		if err := h.writeHeaders(w, resp, firstWrite); err != nil {
 			return err
 		}
 		firstWrite = false
 
 		exitStatus := make(chan int)
-		h.logger.Logf("Proxying %s to %s", r.RemoteAddr, selectedURL)
+		h.logger.Logf("Proxying %s to %s", r.RemoteAddr, lbResults.URL)
 
 		proxyCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
-		go h.manager.ProxyStream(proxyCtx, h.coordinator, selectedIndex, resp, r, w, exitStatus)
+		go h.manager.ProxyStream(proxyCtx, h.coordinator, lbResults, r, w, exitStatus)
 
 		select {
 		case <-ctx.Done():
@@ -115,7 +121,7 @@ func (h *StreamHandler) handleStream(ctx context.Context, w http.ResponseWriter,
 
 			return nil
 		case code := <-exitStatus:
-			if handled := h.handleExitCode(code, resp, r, session, selectedIndex, selectedSubIndex); handled {
+			if handled := h.handleExitCode(code, lbResults, r, session); handled {
 				return nil
 			}
 			// Continue to retry if not handled

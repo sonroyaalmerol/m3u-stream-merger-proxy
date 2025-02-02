@@ -8,6 +8,7 @@ import (
 	"io"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
+	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
 	"net/http"
@@ -169,7 +170,8 @@ func TestStreamHandler_HandleStream(t *testing.T) {
 			writer := &mockResponseWriter{err: tt.writeError}
 
 			// Run handler with context
-			result := handler.HandleStream(ctx, "1", resp, writer, "test-addr")
+			lbRes := loadbalancer.LoadBalancerResult{Response: resp, Index: "1"}
+			result := handler.HandleStream(ctx, &lbRes, writer, "test-addr")
 
 			// Verify results
 			if result.Status != tt.expectedResult.Status {
@@ -236,7 +238,8 @@ func TestStreamInstance_ProxyStream(t *testing.T) {
 			statusChan := make(chan int, 1)
 			ctx := context.Background()
 
-			instance.ProxyStream(ctx, coordinator, "1", resp, req, writer, statusChan)
+			lbRes := loadbalancer.LoadBalancerResult{Response: resp, Index: "1"}
+			instance.ProxyStream(ctx, coordinator, &lbRes, req, writer, statusChan)
 
 			status := <-statusChan
 			if status != tt.expectedStatus {

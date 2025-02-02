@@ -6,6 +6,7 @@ import (
 	"io"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
+	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/utils"
 	"net/http"
 	"sync/atomic"
@@ -34,17 +35,16 @@ type StreamResult struct {
 
 func (h *StreamHandler) HandleStream(
 	ctx context.Context,
-	m3uIndex string,
-	resp *http.Response,
+	lbResult *loadbalancer.LoadBalancerResult,
 	writer ResponseWriter,
 	remoteAddr string,
 ) StreamResult {
 	// If EOF is expected, bypass shared buffer and stream directly
-	if resp != nil && utils.EOFIsExpected(resp) {
-		return h.handleDirectStream(ctx, resp, writer, remoteAddr)
+	if lbResult.Response != nil && utils.EOFIsExpected(lbResult.Response) {
+		return h.handleDirectStream(ctx, lbResult.Response, writer, remoteAddr)
 	}
 
-	return h.handleBufferedStream(ctx, m3uIndex, resp, writer, remoteAddr)
+	return h.handleBufferedStream(ctx, lbResult, writer, remoteAddr)
 }
 
 func (h *StreamHandler) handleDirectStream(
@@ -130,8 +130,7 @@ func (h *StreamHandler) handleDirectStream(
 
 func (h *StreamHandler) handleBufferedStream(
 	ctx context.Context,
-	m3uIndex string,
-	resp *http.Response,
+	lbResult *loadbalancer.LoadBalancerResult,
 	writer ResponseWriter,
 	remoteAddr string,
 ) StreamResult {
@@ -144,7 +143,7 @@ func (h *StreamHandler) handleBufferedStream(
 	defer h.coordinator.UnregisterClient()
 
 	if atomic.LoadInt32(&h.coordinator.clientCount) == 1 {
-		go h.coordinator.StartWriter(ctx, m3uIndex, resp)
+		go h.coordinator.StartWriter(ctx, lbResult)
 	}
 
 	var bytesWritten int64

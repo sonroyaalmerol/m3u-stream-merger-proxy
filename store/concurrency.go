@@ -31,19 +31,7 @@ func (cm *ConcurrencyManager) GetConcurrencyStatus(m3uIndex string) (current int
 
 	max = cm.getMaxConcurrency(m3uIndex)
 	current = cm.count[m3uIndex]
-
-	// Priority logic:
-	// Highest priority (2) for count == 1
-	// Medium priority (1) for count > 1
-	// Lowest priority (0) for count == 0
-	switch {
-	case current == 1:
-		priority = 2
-	case current > 1:
-		priority = 1
-	default: // current == 0
-		priority = 0
-	}
+	priority = max - current // Higher value = more available slots
 	return
 }
 

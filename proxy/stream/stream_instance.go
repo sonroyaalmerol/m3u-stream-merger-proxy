@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
+	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
 	"net/http"
@@ -55,18 +56,17 @@ func NewStreamInstance(
 func (instance *StreamInstance) ProxyStream(
 	ctx context.Context,
 	coordinator *StreamCoordinator,
-	m3uIndex string,
-	resp *http.Response,
+	lbResult *loadbalancer.LoadBalancerResult,
 	r *http.Request,
 	w http.ResponseWriter,
 	statusChan chan<- int,
 ) {
-	if r.Method != http.MethodGet || utils.IsAnM3U8Media(resp) {
-		instance.handleM3U8Stream(resp, w, statusChan)
+	if r.Method != http.MethodGet || utils.IsAnM3U8Media(lbResult.Response) {
+		instance.handleM3U8Stream(lbResult.Response, w, statusChan)
 		return
 	}
 
-	instance.handleMediaStream(ctx, coordinator, m3uIndex, resp, r, w, statusChan)
+	instance.handleMediaStream(ctx, coordinator, lbResult, r, w, statusChan)
 }
 
 func (instance *StreamInstance) handleM3U8Stream(
@@ -95,14 +95,13 @@ func (instance *StreamInstance) handleM3U8Stream(
 func (instance *StreamInstance) handleMediaStream(
 	ctx context.Context,
 	coordinator *StreamCoordinator,
-	m3uIndex string,
-	resp *http.Response,
+	lbResult *loadbalancer.LoadBalancerResult,
 	r *http.Request,
 	w http.ResponseWriter,
 	statusChan chan<- int,
 ) {
 	handler := NewStreamHandler(instance.config, coordinator, instance.logger)
-	result := handler.HandleStream(ctx, m3uIndex, resp, w, r.RemoteAddr)
+	result := handler.HandleStream(ctx, lbResult, w, r.RemoteAddr)
 
 	if result.Error != nil {
 		instance.logger.Logf("Stream handler status: %v", result.Error)
