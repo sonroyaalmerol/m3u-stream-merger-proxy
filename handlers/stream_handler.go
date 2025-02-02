@@ -83,12 +83,6 @@ func (h *StreamHandler) handleStream(ctx context.Context, w http.ResponseWriter,
 	firstWrite := true
 	var resp *http.Response
 
-	defer func() {
-		if resp != nil && resp.Body != nil {
-			resp.Body.Close()
-		}
-	}()
-
 	for {
 		var lbResults *loadbalancer.LoadBalancerResult
 		var err error
