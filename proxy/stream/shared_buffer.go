@@ -11,10 +11,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/valyala/bytebufferpool"
 )
 
 type ChunkData struct {
-	Data      []byte
+	Buffer    *bytebufferpool.ByteBuffer
 	Error     error
 	Status    int
 	Timestamp time.Time
@@ -23,7 +25,7 @@ type ChunkData struct {
 var chunkPool = sync.Pool{
 	New: func() interface{} {
 		return &ChunkData{
-			Data: make([]byte, 0, 4096), // Initial capacity
+			Buffer: bytebufferpool.Get(),
 		}
 	},
 }
@@ -53,7 +55,7 @@ func NewStreamCoordinator(streamID string, config *StreamConfig, cm *store.Concu
 
 	coord := &StreamCoordinator{
 		buffer:     r,
-		writerChan: make(chan struct{}, 1), // Buffered channel
+		writerChan: make(chan struct{}, 1),
 		logger:     logger,
 		config:     config,
 		cm:         cm,
@@ -120,7 +122,6 @@ func (c *StreamCoordinator) StartWriter(ctx context.Context, m3uIndex string, re
 	lastErr := start
 	zeroReads := 0
 
-	// Use buffered channel for graceful shutdown
 	done := make(chan struct{}, 1)
 	defer close(done)
 
@@ -204,32 +205,29 @@ func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 	newChunk.Timestamp = chunk.Timestamp
 
 	// Only copy data if there is any
-	if len(chunk.Data) > 0 {
-		if cap(newChunk.Data) < len(chunk.Data) {
-			newChunk.Data = make([]byte, len(chunk.Data))
-		} else {
-			newChunk.Data = newChunk.Data[:len(chunk.Data)]
+	if chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
+		newChunk.Buffer.Reset()
+		_, err := newChunk.Buffer.Write(chunk.Buffer.Bytes())
+		if err != nil {
+			c.logger.Errorf("Error copying buffer: %v", err)
 		}
-		copy(newChunk.Data, chunk.Data)
-	} else {
-		newChunk.Data = newChunk.Data[:0]
 	}
 
 	// Return current chunk to pool if it exists
 	if current := c.buffer.Value.(*ChunkData); current != nil {
+		current.Buffer.Reset()
+		bytebufferpool.Put(current.Buffer)
 		chunkPool.Put(current)
 	}
 
 	c.buffer.Value = newChunk
 	c.buffer = c.buffer.Next()
 
-	// Update error state if necessary
 	if chunk.Error != nil || chunk.Status != 0 {
 		c.lastError.Store(newChunk)
 		c.active.Store(false)
 	}
 
-	// Notify waiting readers
 	c.dataNotify.Broadcast()
 	return true
 }
@@ -238,12 +236,10 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) ([]*ChunkData, *
 	c.dataNotify.L.Lock()
 	defer c.dataNotify.L.Unlock()
 
-	// Wait for new data if buffer is empty
 	for fromPosition == c.buffer && c.active.Load() {
 		c.dataNotify.Wait()
 	}
 
-	// Check for errors first
 	if err := c.lastError.Load().(*ChunkData); err != nil {
 		return nil, err, fromPosition
 	}
@@ -254,20 +250,20 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) ([]*ChunkData, *
 	chunks := make([]*ChunkData, 0, 32)
 	current := fromPosition
 
-	// Only process new chunks up to the current buffer position
 	for current != c.buffer {
 		if chunk, ok := current.Value.(*ChunkData); ok {
-			// Only include chunks with actual data or status
-			if len(chunk.Data) > 0 || chunk.Error != nil || chunk.Status != 0 {
-				// Create a single copy of the chunk data
+			if (chunk.Buffer != nil && chunk.Buffer.Len() > 0) || chunk.Error != nil || chunk.Status != 0 {
 				newChunk := &ChunkData{
 					Status:    chunk.Status,
 					Error:     chunk.Error,
 					Timestamp: chunk.Timestamp,
+					Buffer:    bytebufferpool.Get(),
 				}
-				if len(chunk.Data) > 0 {
-					newChunk.Data = make([]byte, len(chunk.Data))
-					copy(newChunk.Data, chunk.Data)
+				if chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
+					_, err := newChunk.Buffer.Write(chunk.Buffer.Bytes())
+					if err != nil {
+						c.logger.Errorf("Error copying buffer in ReadChunks: %v", err)
+					}
 				}
 				chunks = append(chunks, newChunk)
 			}
@@ -285,6 +281,10 @@ func (c *StreamCoordinator) clearBuffer() {
 	current := c.buffer
 	for i := 0; i < c.config.SharedBufferSize; i++ {
 		if chunk, ok := current.Value.(*ChunkData); ok {
+			if chunk.Buffer != nil {
+				chunk.Buffer.Reset()
+				bytebufferpool.Put(chunk.Buffer)
+			}
 			chunkPool.Put(chunk)
 		}
 		current.Value = chunkPool.Get()
@@ -300,18 +300,20 @@ func (c *StreamCoordinator) getTimeoutDuration() time.Duration {
 }
 
 func (c *StreamCoordinator) writeData(data []byte) {
-	chunk := &ChunkData{
-		Data:      data,
-		Timestamp: time.Now(),
+	chunk := chunkPool.Get().(*ChunkData)
+	chunk.Buffer.Reset()
+	_, err := chunk.Buffer.Write(data)
+	if err != nil {
+		c.logger.Errorf("Error writing to buffer: %v", err)
 	}
+	chunk.Timestamp = time.Now()
 	c.Write(chunk)
 }
 
 func (c *StreamCoordinator) writeError(err error, status int) {
-	chunk := &ChunkData{
-		Error:     err,
-		Status:    status,
-		Timestamp: time.Now(),
-	}
+	chunk := chunkPool.Get().(*ChunkData)
+	chunk.Error = err
+	chunk.Status = status
+	chunk.Timestamp = time.Now()
 	c.Write(chunk)
 }

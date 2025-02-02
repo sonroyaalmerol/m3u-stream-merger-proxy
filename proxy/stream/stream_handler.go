@@ -137,10 +137,12 @@ func (h *StreamHandler) handleBufferedStream(
 ) StreamResult {
 	h.coordinator.RegisterClient()
 	defer h.coordinator.UnregisterClient()
+
 	if atomic.LoadInt32(&h.coordinator.clientCount) == 1 {
 		h.logger.Debugf("Starting writer goroutine for m3uIndex: %s", m3uIndex)
 		go h.coordinator.StartWriter(ctx, m3uIndex, resp)
 	}
+
 	var bytesWritten int64
 	var lastPosition *ring.Ring
 
@@ -162,11 +164,14 @@ func (h *StreamHandler) handleBufferedStream(
 
 				currentPos := lastPosition
 				h.logger.Debugf("Processing remaining chunks before error, starting from: %p", currentPos)
+
 				for currentPos != h.coordinator.buffer {
 					if chunk, ok := currentPos.Value.(*ChunkData); ok {
-						h.logger.Debugf("Found chunk: len(Data)=%d, Error=%v, Status=%d", len(chunk.Data), chunk.Error, chunk.Status)
-						if len(chunk.Data) > 0 {
-							written, err := writer.Write(chunk.Data)
+						h.logger.Debugf("Found chunk: len(Buffer)=%d, Error=%v, Status=%d",
+							chunk.Buffer.Len(), chunk.Error, chunk.Status)
+
+						if chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
+							written, err := writer.Write(chunk.Buffer.Bytes())
 							if err != nil {
 								h.logger.Errorf("Error writing remaining chunks: %s", err.Error())
 								return StreamResult{bytesWritten, err, 0}
@@ -186,10 +191,12 @@ func (h *StreamHandler) handleBufferedStream(
 			hasNewData := false
 			for lastPosition != h.coordinator.buffer {
 				if chunk, ok := lastPosition.Value.(*ChunkData); ok {
-					h.logger.Debugf("Processing chunk: len(Data)=%d, Error=%v, Status=%d", len(chunk.Data), chunk.Error, chunk.Status)
-					if len(chunk.Data) > 0 {
+					h.logger.Debugf("Processing chunk: len(Buffer)=%d, Error=%v, Status=%d",
+						chunk.Buffer.Len(), chunk.Error, chunk.Status)
+
+					if chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
 						hasNewData = true
-						written, err := writer.Write(chunk.Data)
+						written, err := writer.Write(chunk.Buffer.Bytes())
 						if err != nil {
 							h.coordinator.mu.RUnlock()
 							h.logger.Errorf("Error writing to client: %s", err.Error())
@@ -205,10 +212,10 @@ func (h *StreamHandler) handleBufferedStream(
 				lastPosition = lastPosition.Next()
 				h.logger.Debugf("Moving to next position: %p", lastPosition)
 			}
-
 			h.coordinator.mu.RUnlock()
+
 			if !hasNewData {
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(10 * time.Millisecond)
 			}
 		}
 	}
