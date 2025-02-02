@@ -111,14 +111,14 @@ func TestM3UHandler_ExpirationDate(t *testing.T) {
 	}{
 		{
 			name:        "Valid credentials with future expiration",
-			credentials: "user1:pass1::" + tomorrow,
+			credentials: "user1:pass1:" + tomorrow,
 			username:    "user1",
 			password:    "pass1",
 			wantStatus:  http.StatusOK,
 		},
 		{
 			name:        "Expired credentials",
-			credentials: "user1:pass1::" + yesterday,
+			credentials: "user1:pass1:" + yesterday,
 			username:    "user1",
 			password:    "pass1",
 			wantStatus:  http.StatusForbidden,
@@ -132,7 +132,7 @@ func TestM3UHandler_ExpirationDate(t *testing.T) {
 		},
 		{
 			name:        "Multiple users with different expiration dates",
-			credentials: "user1:pass1::" + yesterday + "|user2:pass2::" + tomorrow,
+			credentials: "user1:pass1:" + yesterday + "|user2:pass2:" + tomorrow,
 			username:    "user2",
 			password:    "pass2",
 			wantStatus:  http.StatusOK,
@@ -172,7 +172,7 @@ func TestM3UHandler_Headers(t *testing.T) {
 	// Assert headers
 	expectedHeaders := map[string]string{
 		"Access-Control-Allow-Origin": "*",
-		"Content-Type":                "text/plain",
+		"Content-Type":                "text/plain; charset=utf-8",
 	}
 
 	for header, expectedValue := range expectedHeaders {

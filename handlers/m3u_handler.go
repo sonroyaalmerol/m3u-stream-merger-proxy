@@ -35,7 +35,7 @@ func (h *M3UHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				cred = append(cred, "")
 			} else if len(cred) == 3 {
 				// date is also provided, check if we are before the provided date (expiration date)
-				d, err := time.Parse(time.DateOnly, cred[3])
+				d, err := time.Parse(time.DateOnly, cred[2])
 				if err != nil {
 					h.logger.Warnf("invalid credential format: %s\n", arrItem)
 					continue
