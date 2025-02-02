@@ -3,6 +3,7 @@ package stream
 import (
 	"container/ring"
 	"context"
+	"fmt"
 	"io"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
@@ -124,6 +125,12 @@ func (c *StreamCoordinator) shouldResetTimer(lastErr, timeStarted time.Time) boo
 }
 
 func (c *StreamCoordinator) StartWriter(ctx context.Context, m3uIndex string, resp *http.Response) {
+	defer func() {
+		if r := recover(); r != nil {
+			c.logger.Errorf("Panic in StartWriter: %v", r)
+			c.writeError(fmt.Errorf("internal server error"), proxy.StatusServerError)
+		}
+	}()
 	defer resp.Body.Close()
 	c.logger.Debug("StartWriter: Beginning read loop")
 
@@ -218,41 +225,45 @@ func (c *StreamCoordinator) StartWriter(ctx context.Context, m3uIndex string, re
 }
 
 func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.logger.Debugf("Write: Starting write operation. Active=%v, ChunkSize=%d",
-		c.active.Load(), chunk.Buffer.Len())
-
-	if !c.active.Load() {
-		c.logger.Debug("Write: Stream not active, skipping write")
+	if chunk == nil {
+		c.logger.Debug("Write: Received nil chunk")
 		return false
 	}
 
-	// Get the current chunk and reset it
-	current := c.buffer.Value.(*ChunkData)
-	current.Reset()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	// Copy data if there is any
-	if chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
-		n, err := current.Buffer.Write(chunk.Buffer.B)
-		c.logger.Debugf("Write: Copied %d bytes to buffer, err=%v", n, err)
-		if err != nil {
-			c.logger.Errorf("Error copying buffer: %v", err)
-		}
+	if !c.active.Load() {
+		c.logger.Debug("Write: Stream not active")
+		return false
 	}
 
-	current.Status = chunk.Status
+	current := c.buffer.Value.(*ChunkData)
+	if current == nil {
+		c.logger.Debug("Write: Current buffer position is nil")
+		return false
+	}
+
+	// Swap buffers to avoid copying
+	oldBuffer := current.Buffer
+	current.Buffer = chunk.Buffer
+	chunk.Buffer = oldBuffer // Will be reset by caller
+
 	current.Error = chunk.Error
+	current.Status = chunk.Status
 	current.Timestamp = chunk.Timestamp
 
 	c.buffer = c.buffer.Next()
 	c.logger.Debug("Write: Advanced buffer position")
 
-	if chunk.Error != nil || chunk.Status != 0 {
+	// Store error state but don't deactivate until next write
+	if current.Error != nil || current.Status != 0 {
 		c.lastError.Store(current)
-		c.active.Store(false)
-		c.logger.Debugf("Write: Setting error state: err=%v, status=%d", chunk.Error, chunk.Status)
+		// Mark inactive for next write
+		defer func() {
+			c.active.Store(false)
+			c.logger.Debugf("Write: Setting error state: err=%v, status=%d", current.Error, current.Status)
+		}()
 	}
 
 	c.dataNotify.Broadcast()
@@ -260,49 +271,64 @@ func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 }
 
 func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) ([]*ChunkData, *ChunkData, *ring.Ring) {
+	if fromPosition == nil {
+		c.logger.Debug("ReadChunks: fromPosition is nil, using current buffer")
+		fromPosition = c.buffer
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.logger.Debugf("ReadChunks: Starting read. Active=%v", c.active.Load())
-
-	for fromPosition == c.buffer && c.active.Load() {
-		c.logger.Debug("ReadChunks: Waiting for new data")
-		c.dataNotify.Wait()
-		c.logger.Debug("ReadChunks: Woke up from wait")
-	}
-
-	chunks := make([]*ChunkData, 0, 32)
+	chunks := make([]*ChunkData, 0, c.config.SharedBufferSize)
 	current := fromPosition
 
-	// Process available chunks first
-	bufferCount := 0
-	for current != c.buffer {
-		if chunk, ok := current.Value.(*ChunkData); ok {
-			bufferCount++
-			if (chunk.Buffer != nil && chunk.Buffer.Len() > 0) || chunk.Error != nil || chunk.Status != 0 {
+	// If we've caught up with the writer and the stream is still active, wait
+	for current == c.buffer && c.active.Load() {
+		c.dataNotify.Wait()
+	}
+
+	// First read all available data chunks
+	errorFound := false
+	var errorChunk *ChunkData
+
+	for current != nil && current != c.buffer {
+		if chunk, ok := current.Value.(*ChunkData); ok && chunk != nil {
+			if chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
+				// Create new chunk for data
 				newChunk := &ChunkData{
-					Status:    chunk.Status,
-					Error:     chunk.Error,
-					Timestamp: chunk.Timestamp,
 					Buffer:    bytebufferpool.Get(),
+					Error:     nil,
+					Status:    0,
+					Timestamp: chunk.Timestamp,
 				}
-				if chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
-					_, _ = newChunk.Buffer.Write(chunk.Buffer.Bytes())
-					c.logger.Debugf("ReadChunks: Found chunk with %d bytes", chunk.Buffer.Len())
-				}
+				newChunk.Buffer.Write(chunk.Buffer.Bytes())
 				chunks = append(chunks, newChunk)
+			}
+
+			// If this chunk has an error, store it but continue processing data
+			if chunk.Error != nil || chunk.Status != 0 {
+				errorFound = true
+				errorChunk = &ChunkData{
+					Buffer:    nil,
+					Error:     chunk.Error,
+					Status:    chunk.Status,
+					Timestamp: chunk.Timestamp,
+				}
 			}
 		}
 		current = current.Next()
 	}
 
-	c.logger.Debugf("ReadChunks: Processed %d positions, found %d chunks with data",
-		bufferCount, len(chunks))
+	// After processing all data, handle any error state
+	if errorFound && errorChunk != nil {
+		return chunks, errorChunk, current
+	}
 
-	// Only check for error after processing available chunks
-	if err := c.lastError.Load().(*ChunkData); err != nil {
-		c.logger.Debugf("ReadChunks: Found error after processing chunks: %v", err.Error)
-		return chunks, err, current // Return processed chunks along with error
+	// If no error was found in chunks, check stored error state
+	if lastErr := c.lastError.Load(); lastErr != nil {
+		if errChunk, ok := lastErr.(*ChunkData); ok && errChunk != nil {
+			return chunks, errChunk, current
+		}
 	}
 
 	return chunks, nil, current
@@ -330,9 +356,16 @@ func (c *StreamCoordinator) getTimeoutDuration() time.Duration {
 
 func (c *StreamCoordinator) writeError(err error, status int) {
 	chunk := newChunkData()
+	if chunk == nil {
+		c.logger.Debug("writeError: Failed to create new chunk")
+		return
+	}
+
 	chunk.Error = err
 	chunk.Status = status
 	chunk.Timestamp = time.Now()
-	c.Write(chunk)
-	chunk.Reset() // Reset after writing
+
+	if !c.Write(chunk) {
+		chunk.Reset()
+	}
 }

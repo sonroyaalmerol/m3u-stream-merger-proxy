@@ -1,8 +1,8 @@
 package stream
 
 import (
-	"container/ring"
 	"context"
+	"fmt"
 	"io"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"sync/atomic"
 	"time"
-
-	"github.com/valyala/bytebufferpool"
 )
 
 type StreamHandler struct {
@@ -137,52 +135,70 @@ func (h *StreamHandler) handleBufferedStream(
 	writer ResponseWriter,
 	remoteAddr string,
 ) StreamResult {
+	if h.coordinator == nil {
+		h.logger.Error("handleBufferedStream: coordinator is nil")
+		return StreamResult{0, fmt.Errorf("coordinator is nil"), proxy.StatusServerError}
+	}
+
 	h.coordinator.RegisterClient()
 	defer h.coordinator.UnregisterClient()
+
 	if atomic.LoadInt32(&h.coordinator.clientCount) == 1 {
-		h.logger.Debugf("Starting writer goroutine for m3uIndex: %s", m3uIndex)
 		go h.coordinator.StartWriter(ctx, m3uIndex, resp)
 	}
+
 	var bytesWritten int64
-	var lastPosition *ring.Ring
-	lastPosition = h.coordinator.buffer
-	batchBuffer := bytebufferpool.Get()
-	defer bytebufferpool.Put(batchBuffer)
+	lastPosition := h.coordinator.buffer.Prev() // Start from previous to get first new chunk
 
 	for {
 		select {
 		case <-ctx.Done():
 			return StreamResult{bytesWritten, ctx.Err(), proxy.StatusClientClosed}
 		default:
-			// First read chunks
 			chunks, errChunk, newPos := h.coordinator.ReadChunks(lastPosition)
 
-			// Process any available chunks
+			// Process any available chunks first
 			if len(chunks) > 0 {
-				batchBuffer.Reset()
 				for _, chunk := range chunks {
-					_, _ = batchBuffer.Write(chunk.Buffer.B)
-					chunk.Reset() // Return buffers to pool immediately
-				}
+					if chunk != nil && chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
+						n, err := writer.Write(chunk.Buffer.Bytes())
+						if err != nil {
+							// Clean up remaining chunks
+							for _, c := range chunks {
+								if c != nil {
+									c.Reset()
+								}
+							}
+							return StreamResult{bytesWritten, err, 0}
+						}
+						bytesWritten += int64(n)
 
-				if ctx.Err() != nil {
-					return StreamResult{bytesWritten, ctx.Err(), proxy.StatusClientClosed}
+						if flusher, ok := writer.(StreamFlusher); ok {
+							flusher.Flush()
+						}
+					}
+					if chunk != nil {
+						chunk.Reset()
+					}
 				}
+			}
 
-				if written, err := writer.Write(batchBuffer.B); err != nil {
-					return StreamResult{bytesWritten, err, 0}
-				} else {
-					bytesWritten += int64(written)
-				}
+			// Handle any error chunk
+			if errChunk != nil {
 				if flusher, ok := writer.(StreamFlusher); ok {
 					flusher.Flush()
 				}
-			}
-			lastPosition = newPos
-
-			// After processing chunks, check for error
-			if errChunk != nil {
 				return StreamResult{bytesWritten, errChunk.Error, errChunk.Status}
+			}
+
+			// Update position if we have a valid new position
+			if newPos != nil {
+				lastPosition = newPos
+			}
+
+			// Small sleep to prevent tight loop when no data
+			if len(chunks) == 0 {
+				time.Sleep(10 * time.Millisecond)
 			}
 		}
 	}
