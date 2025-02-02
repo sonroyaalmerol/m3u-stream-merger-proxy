@@ -101,6 +101,12 @@ func (c *StreamCoordinator) UnregisterClient() {
 	}
 }
 
+func (c *StreamCoordinator) HasClient() bool {
+	count := atomic.LoadInt32(&c.clientCount)
+
+	return count > 0
+}
+
 func (c *StreamCoordinator) shouldTimeout(timeStarted time.Time, timeout time.Duration) bool {
 	shouldTimeout := c.config.TimeoutSeconds > 0 && time.Since(timeStarted) >= timeout
 	if shouldTimeout {

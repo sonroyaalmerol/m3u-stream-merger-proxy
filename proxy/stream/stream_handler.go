@@ -42,7 +42,7 @@ func (h *StreamHandler) HandleStream(
 	remoteAddr string,
 ) StreamResult {
 	// If EOF is expected, bypass shared buffer and stream directly
-	if utils.EOFIsExpected(resp) {
+	if resp != nil && utils.EOFIsExpected(resp) {
 		return h.handleDirectStream(ctx, resp, writer, remoteAddr)
 	}
 
