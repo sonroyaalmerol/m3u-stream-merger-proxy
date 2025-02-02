@@ -139,12 +139,28 @@ func (h *StreamHandler) handleBufferedStream(
 		return StreamResult{0, fmt.Errorf("coordinator is nil"), proxy.StatusServerError}
 	}
 
-	h.coordinator.RegisterClient()
-	defer h.coordinator.UnregisterClient()
-
-	if atomic.LoadInt32(&h.coordinator.clientCount) == 1 {
-		go h.coordinator.StartWriter(ctx, lbResult)
+	h.coordinator.mu.Lock()
+	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 0
+	if isFirstClient {
+		h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
+		go h.coordinator.StartWriter(h.coordinator.writerCtx, lbResult)
 	}
+	h.coordinator.mu.Unlock()
+
+	h.coordinator.RegisterClient()
+	defer func() {
+		h.coordinator.UnregisterClient()
+		remainingClients := atomic.LoadInt32(&h.coordinator.clientCount)
+		if remainingClients == 0 {
+			// Cancel the writer context when the last client disconnects
+			h.coordinator.mu.Lock()
+			if h.coordinator.writerCancel != nil {
+				h.coordinator.writerCancel()
+				h.coordinator.writerCancel = nil
+			}
+			h.coordinator.mu.Unlock()
+		}
+	}()
 
 	var bytesWritten int64
 	lastPosition := h.coordinator.buffer.Prev() // Start from previous to get first new chunk

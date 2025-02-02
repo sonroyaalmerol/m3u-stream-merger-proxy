@@ -41,10 +41,15 @@ func (c *ChunkData) Reset() {
 }
 
 type StreamCoordinator struct {
-	buffer          *ring.Ring
-	mu              sync.Mutex
-	clientCount     int32
-	writerChan      chan struct{}
+	buffer      *ring.Ring
+	mu          sync.Mutex
+	clientCount int32
+
+	writerCtx    context.Context
+	writerCancel context.CancelFunc
+	writerCtxMu  sync.Mutex
+	writerChan   chan struct{}
+
 	lastError       atomic.Value
 	logger          logger.Logger
 	config          *StreamConfig
