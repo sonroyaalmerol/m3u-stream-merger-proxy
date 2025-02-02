@@ -22,17 +22,26 @@ type ChunkData struct {
 	Timestamp time.Time
 }
 
-var chunkPool = sync.Pool{
-	New: func() interface{} {
-		return &ChunkData{
-			Buffer: bytebufferpool.Get(),
-		}
-	},
+func newChunkData() *ChunkData {
+	return &ChunkData{
+		Buffer: bytebufferpool.Get(),
+	}
+}
+
+func (c *ChunkData) Reset() {
+	if c.Buffer != nil {
+		c.Buffer.Reset()
+		bytebufferpool.Put(c.Buffer)
+	}
+	c.Buffer = bytebufferpool.Get()
+	c.Error = nil
+	c.Status = 0
+	c.Timestamp = time.Time{}
 }
 
 type StreamCoordinator struct {
 	buffer      *ring.Ring
-	mu          sync.RWMutex
+	mu          sync.Mutex
 	clientCount int32
 	writerChan  chan struct{}
 	lastError   atomic.Value
@@ -49,7 +58,7 @@ func NewStreamCoordinator(streamID string, config *StreamConfig, cm *store.Concu
 
 	r := ring.New(config.SharedBufferSize)
 	for i := 0; i < config.SharedBufferSize; i++ {
-		r.Value = chunkPool.Get()
+		r.Value = newChunkData()
 		r = r.Next()
 	}
 
@@ -64,6 +73,7 @@ func NewStreamCoordinator(streamID string, config *StreamConfig, cm *store.Concu
 	}
 	coord.active.Store(true)
 	coord.lastError.Store((*ChunkData)(nil))
+	coord.dataNotify = sync.NewCond(&coord.mu)
 
 	logger.Debugf("StreamCoordinator initialized with buffer size: %d, chunk size: %d",
 		config.SharedBufferSize, config.ChunkSize)
@@ -109,6 +119,7 @@ func (c *StreamCoordinator) shouldResetTimer(lastErr, timeStarted time.Time) boo
 
 func (c *StreamCoordinator) StartWriter(ctx context.Context, m3uIndex string, resp *http.Response) {
 	defer resp.Body.Close()
+	c.logger.Debug("StartWriter: Beginning read loop")
 
 	buffer := make([]byte, c.config.ChunkSize)
 	timeout := c.getTimeoutDuration()
@@ -134,12 +145,17 @@ func (c *StreamCoordinator) StartWriter(ctx context.Context, m3uIndex string, re
 		}
 	}()
 
+	tempChunk := newChunkData()
+	defer tempChunk.Reset()
+
 	for c.active.Load() {
 		select {
 		case <-ctx.Done():
+			c.logger.Debug("StartWriter: Context cancelled")
 			c.writeError(ctx.Err(), proxy.StatusClientClosed)
 			return
 		case <-c.writerChan:
+			c.logger.Debug("StartWriter: Received shutdown signal")
 			c.writeError(io.EOF, proxy.StatusEOF)
 			return
 		default:
@@ -149,10 +165,14 @@ func (c *StreamCoordinator) StartWriter(ctx context.Context, m3uIndex string, re
 			}
 
 			n, err := resp.Body.Read(buffer)
+			c.logger.Debugf("StartWriter: Read %d bytes, err: %v", n, err)
 
 			if err == io.EOF {
 				if n > 0 {
-					c.writeData(buffer[:n])
+					tempChunk.Reset()
+					tempChunk.Buffer.Write(buffer[:n])
+					tempChunk.Timestamp = time.Now()
+					c.Write(tempChunk)
 				}
 				c.writeError(io.EOF, proxy.StatusEOF)
 				return
@@ -178,7 +198,10 @@ func (c *StreamCoordinator) StartWriter(ctx context.Context, m3uIndex string, re
 			}
 
 			zeroReads = 0
-			c.writeData(buffer[:n])
+			tempChunk.Reset()
+			tempChunk.Buffer.Write(buffer[:n])
+			tempChunk.Timestamp = time.Now()
+			c.Write(tempChunk)
 
 			if c.shouldResetTimer(lastErr, start) {
 				start = time.Now()
@@ -192,40 +215,38 @@ func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	c.logger.Debugf("Write: Starting write operation. Active=%v, ChunkSize=%d",
+		c.active.Load(), chunk.Buffer.Len())
+
 	if !c.active.Load() {
+		c.logger.Debug("Write: Stream not active, skipping write")
 		return false
 	}
 
-	// Get a new chunk from the pool
-	newChunk := chunkPool.Get().(*ChunkData)
+	// Get the current chunk and reset it
+	current := c.buffer.Value.(*ChunkData)
+	current.Reset()
 
-	// Reset the chunk
-	newChunk.Status = chunk.Status
-	newChunk.Error = chunk.Error
-	newChunk.Timestamp = chunk.Timestamp
-
-	// Only copy data if there is any
+	// Copy data if there is any
 	if chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
-		newChunk.Buffer.Reset()
-		_, err := newChunk.Buffer.Write(chunk.Buffer.Bytes())
+		n, err := current.Buffer.Write(chunk.Buffer.B)
+		c.logger.Debugf("Write: Copied %d bytes to buffer, err=%v", n, err)
 		if err != nil {
 			c.logger.Errorf("Error copying buffer: %v", err)
 		}
 	}
 
-	// Return current chunk to pool if it exists
-	if current := c.buffer.Value.(*ChunkData); current != nil {
-		current.Buffer.Reset()
-		bytebufferpool.Put(current.Buffer)
-		chunkPool.Put(current)
-	}
+	current.Status = chunk.Status
+	current.Error = chunk.Error
+	current.Timestamp = chunk.Timestamp
 
-	c.buffer.Value = newChunk
 	c.buffer = c.buffer.Next()
+	c.logger.Debug("Write: Advanced buffer position")
 
 	if chunk.Error != nil || chunk.Status != 0 {
-		c.lastError.Store(newChunk)
+		c.lastError.Store(current)
 		c.active.Store(false)
+		c.logger.Debugf("Write: Setting error state: err=%v, status=%d", chunk.Error, chunk.Status)
 	}
 
 	c.dataNotify.Broadcast()
@@ -233,25 +254,25 @@ func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 }
 
 func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) ([]*ChunkData, *ChunkData, *ring.Ring) {
-	c.dataNotify.L.Lock()
-	defer c.dataNotify.L.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.logger.Debugf("ReadChunks: Starting read. Active=%v", c.active.Load())
 
 	for fromPosition == c.buffer && c.active.Load() {
+		c.logger.Debug("ReadChunks: Waiting for new data")
 		c.dataNotify.Wait()
+		c.logger.Debug("ReadChunks: Woke up from wait")
 	}
-
-	if err := c.lastError.Load().(*ChunkData); err != nil {
-		return nil, err, fromPosition
-	}
-
-	c.mu.RLock()
-	defer c.mu.RUnlock()
 
 	chunks := make([]*ChunkData, 0, 32)
 	current := fromPosition
 
+	// Process available chunks first
+	bufferCount := 0
 	for current != c.buffer {
 		if chunk, ok := current.Value.(*ChunkData); ok {
+			bufferCount++
 			if (chunk.Buffer != nil && chunk.Buffer.Len() > 0) || chunk.Error != nil || chunk.Status != 0 {
 				newChunk := &ChunkData{
 					Status:    chunk.Status,
@@ -260,15 +281,22 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) ([]*ChunkData, *
 					Buffer:    bytebufferpool.Get(),
 				}
 				if chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
-					_, err := newChunk.Buffer.Write(chunk.Buffer.Bytes())
-					if err != nil {
-						c.logger.Errorf("Error copying buffer in ReadChunks: %v", err)
-					}
+					newChunk.Buffer.Write(chunk.Buffer.Bytes())
+					c.logger.Debugf("ReadChunks: Found chunk with %d bytes", chunk.Buffer.Len())
 				}
 				chunks = append(chunks, newChunk)
 			}
 		}
 		current = current.Next()
+	}
+
+	c.logger.Debugf("ReadChunks: Processed %d positions, found %d chunks with data",
+		bufferCount, len(chunks))
+
+	// Only check for error after processing available chunks
+	if err := c.lastError.Load().(*ChunkData); err != nil {
+		c.logger.Debugf("ReadChunks: Found error after processing chunks: %v", err.Error)
+		return chunks, err, current // Return processed chunks along with error
 	}
 
 	return chunks, nil, current
@@ -281,13 +309,8 @@ func (c *StreamCoordinator) clearBuffer() {
 	current := c.buffer
 	for i := 0; i < c.config.SharedBufferSize; i++ {
 		if chunk, ok := current.Value.(*ChunkData); ok {
-			if chunk.Buffer != nil {
-				chunk.Buffer.Reset()
-				bytebufferpool.Put(chunk.Buffer)
-			}
-			chunkPool.Put(chunk)
+			chunk.Reset()
 		}
-		current.Value = chunkPool.Get()
 		current = current.Next()
 	}
 }
@@ -300,20 +323,24 @@ func (c *StreamCoordinator) getTimeoutDuration() time.Duration {
 }
 
 func (c *StreamCoordinator) writeData(data []byte) {
-	chunk := chunkPool.Get().(*ChunkData)
-	chunk.Buffer.Reset()
-	_, err := chunk.Buffer.Write(data)
+	c.logger.Debugf("writeData: Writing %d bytes", len(data))
+	chunk := newChunkData()
+	n, err := chunk.Buffer.Write(data)
 	if err != nil {
 		c.logger.Errorf("Error writing to buffer: %v", err)
 	}
+	c.logger.Debugf("writeData: Wrote %d bytes to chunk", n)
 	chunk.Timestamp = time.Now()
-	c.Write(chunk)
+	wrote := c.Write(chunk)
+	c.logger.Debugf("writeData: Write completed, success=%v", wrote)
+	chunk.Reset() // Reset after writing
 }
 
 func (c *StreamCoordinator) writeError(err error, status int) {
-	chunk := chunkPool.Get().(*ChunkData)
+	chunk := newChunkData()
 	chunk.Error = err
 	chunk.Status = status
 	chunk.Timestamp = time.Now()
 	c.Write(chunk)
+	chunk.Reset() // Reset after writing
 }

@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"sync/atomic"
 	"time"
+
+	"github.com/valyala/bytebufferpool"
 )
 
 type StreamHandler struct {
@@ -137,85 +139,45 @@ func (h *StreamHandler) handleBufferedStream(
 ) StreamResult {
 	h.coordinator.RegisterClient()
 	defer h.coordinator.UnregisterClient()
-
 	if atomic.LoadInt32(&h.coordinator.clientCount) == 1 {
 		h.logger.Debugf("Starting writer goroutine for m3uIndex: %s", m3uIndex)
 		go h.coordinator.StartWriter(ctx, m3uIndex, resp)
 	}
-
 	var bytesWritten int64
 	var lastPosition *ring.Ring
-
-	h.coordinator.mu.RLock()
 	lastPosition = h.coordinator.buffer
-	h.logger.Debugf("Initial buffer position set: %p", lastPosition)
-	h.coordinator.mu.RUnlock()
+	batchBuffer := bytebufferpool.Get()
+	defer bytebufferpool.Put(batchBuffer)
 
 	for {
 		select {
 		case <-ctx.Done():
-			h.logger.Debugf("Context done, bytes written: %d", bytesWritten)
 			return StreamResult{bytesWritten, ctx.Err(), proxy.StatusClientClosed}
 		default:
-			h.coordinator.mu.RLock()
-			if errChunk := h.coordinator.lastError.Load().(*ChunkData); errChunk != nil {
-				h.logger.Debugf("Found error chunk: error=%v, status=%d", errChunk.Error, errChunk.Status)
-				h.coordinator.mu.RUnlock()
+			// First read chunks
+			chunks, errChunk, newPos := h.coordinator.ReadChunks(lastPosition)
 
-				currentPos := lastPosition
-				h.logger.Debugf("Processing remaining chunks before error, starting from: %p", currentPos)
-
-				for currentPos != h.coordinator.buffer {
-					if chunk, ok := currentPos.Value.(*ChunkData); ok {
-						h.logger.Debugf("Found chunk: len(Buffer)=%d, Error=%v, Status=%d",
-							chunk.Buffer.Len(), chunk.Error, chunk.Status)
-
-						if chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
-							written, err := writer.Write(chunk.Buffer.Bytes())
-							if err != nil {
-								h.logger.Errorf("Error writing remaining chunks: %s", err.Error())
-								return StreamResult{bytesWritten, err, 0}
-							}
-							bytesWritten += int64(written)
-							h.logger.Debugf("Wrote %d bytes, total written: %d", written, bytesWritten)
-							if flusher, ok := writer.(StreamFlusher); ok {
-								flusher.Flush()
-							}
-						}
-					}
-					currentPos = currentPos.Next()
+			// Process any available chunks
+			if len(chunks) > 0 {
+				batchBuffer.Reset()
+				for _, chunk := range chunks {
+					batchBuffer.Write(chunk.Buffer.B)
+					chunk.Reset() // Return buffers to pool immediately
 				}
+				if written, err := writer.Write(batchBuffer.B); err != nil {
+					return StreamResult{bytesWritten, err, 0}
+				} else {
+					bytesWritten += int64(written)
+				}
+				if flusher, ok := writer.(StreamFlusher); ok {
+					flusher.Flush()
+				}
+			}
+			lastPosition = newPos
+
+			// After processing chunks, check for error
+			if errChunk != nil {
 				return StreamResult{bytesWritten, errChunk.Error, errChunk.Status}
-			}
-
-			hasNewData := false
-			for lastPosition != h.coordinator.buffer {
-				if chunk, ok := lastPosition.Value.(*ChunkData); ok {
-					h.logger.Debugf("Processing chunk: len(Buffer)=%d, Error=%v, Status=%d",
-						chunk.Buffer.Len(), chunk.Error, chunk.Status)
-
-					if chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
-						hasNewData = true
-						written, err := writer.Write(chunk.Buffer.Bytes())
-						if err != nil {
-							h.coordinator.mu.RUnlock()
-							h.logger.Errorf("Error writing to client: %s", err.Error())
-							return StreamResult{bytesWritten, err, 0}
-						}
-						bytesWritten += int64(written)
-						h.logger.Debugf("Wrote %d bytes, total written: %d", written, bytesWritten)
-						if flusher, ok := writer.(StreamFlusher); ok {
-							flusher.Flush()
-						}
-					}
-				}
-				lastPosition = lastPosition.Next()
-				h.logger.Debugf("Moving to next position: %p", lastPosition)
-			}
-			h.coordinator.mu.RUnlock()
-
-			if !hasNewData {
-				time.Sleep(10 * time.Millisecond)
 			}
 		}
 	}
