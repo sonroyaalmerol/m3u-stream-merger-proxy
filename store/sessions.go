@@ -1,9 +1,9 @@
 package store
 
 import (
+	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 )
@@ -12,28 +12,26 @@ type Session struct {
 	ID            string
 	CreatedAt     time.Time
 	TestedIndexes []string
+	Mutex         sync.RWMutex
 }
 
 var sessionStore = struct {
 	sync.RWMutex
-	sessions map[string]Session
-}{sessions: make(map[string]Session)}
+	sessions map[string]*Session
+}{sessions: make(map[string]*Session)}
 
-func GetOrCreateSession(r *http.Request) Session {
-	debug := os.Getenv("DEBUG") == "true"
+func GetOrCreateSession(r *http.Request) *Session {
 	fingerprint := utils.GenerateFingerprint(r)
 
 	sessionStore.RLock()
 	session, exists := sessionStore.sessions[fingerprint]
 	sessionStore.RUnlock()
 	if exists {
-		if debug {
-			utils.SafeLogf("[DEBUG] Existing session found: %s\n", fingerprint)
-		}
+		logger.Default.Debugf("Existing session found: %s", fingerprint)
 		return session
 	}
 
-	session = Session{
+	session = &Session{
 		ID:            fingerprint,
 		CreatedAt:     time.Now(),
 		TestedIndexes: []string{},
@@ -43,9 +41,7 @@ func GetOrCreateSession(r *http.Request) Session {
 	sessionStore.sessions[session.ID] = session
 	sessionStore.Unlock()
 
-	if debug {
-		utils.SafeLogf("[DEBUG] Generating new session: %s\n", fingerprint)
-	}
+	logger.Default.Debugf("Generating new session: %s", fingerprint)
 
 	return session
 }
@@ -59,15 +55,18 @@ func ClearSessionStore() {
 }
 
 func (s *Session) SetTestedIndexes(indexes []string) {
-	debug := os.Getenv("DEBUG") == "true"
-
 	s.TestedIndexes = indexes
 
-	if debug {
-		utils.SafeLogf("[DEBUG] Setting tested indexes for session - %s: %v\n", s.ID, s.TestedIndexes)
-	}
+	logger.Default.Debugf("Setting tested indexes for session - %s: %v", s.ID, s.TestedIndexes)
 
 	sessionStore.Lock()
-	sessionStore.sessions[s.ID] = *s
+	sessionStore.sessions[s.ID] = s
 	sessionStore.Unlock()
+}
+
+func (s *Session) GetTestedIndexes() []string {
+	sessionStore.RLock()
+	defer sessionStore.RUnlock()
+
+	return s.TestedIndexes
 }

@@ -9,7 +9,7 @@ var includeFilters [][]string
 var excludeFilters [][]string
 var filtersInitialized bool
 
-func checkFilter(stream StreamInfo) bool {
+func checkFilter(stream *StreamInfo) bool {
 	if !filtersInitialized {
 		excludeFilters = [][]string{
 			utils.GetFilters("EXCLUDE_GROUPS"),

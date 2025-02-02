@@ -7,16 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 
+	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
 )
 
 func DownloadM3USource(m3uIndex string) (err error) {
-	debug := os.Getenv("DEBUG") == "true"
 	m3uURL := os.Getenv(fmt.Sprintf("M3U_URL_%s", m3uIndex))
 
-	if debug {
-		utils.SafeLogf("[DEBUG] Processing M3U from: %s\n", m3uURL)
-	}
+	logger.Default.Debugf("Processing M3U from: %s", m3uURL)
 
 	finalPath := utils.GetM3UFilePathByIndex(m3uIndex)
 	tmpPath := finalPath + ".new"
@@ -24,9 +22,7 @@ func DownloadM3USource(m3uIndex string) (err error) {
 	// Handle local file URLs
 	if strings.HasPrefix(m3uURL, "file://") {
 		localPath := strings.TrimPrefix(m3uURL, "file://")
-		if debug {
-			utils.SafeLogf("[DEBUG] Local M3U file detected: %s\n", localPath)
-		}
+		logger.Default.Debugf("Local M3U file detected: %s", localPath)
 
 		// Ensure finalPath's directory exists
 		err := os.MkdirAll(filepath.Dir(finalPath), os.ModePerm)
@@ -42,17 +38,13 @@ func DownloadM3USource(m3uIndex string) (err error) {
 			return fmt.Errorf("Error creating symlink: %v", err)
 		}
 
-		if debug {
-			utils.SafeLogf("[DEBUG] Symlink created from %s to %s\n", localPath, finalPath)
-		}
+		logger.Default.Debugf("Symlink created from %s to %s", localPath, finalPath)
 
 		return nil
 	}
 
 	// Handle remote URLs
-	if debug {
-		utils.SafeLogf("[DEBUG] Remote M3U URL detected: %s\n", m3uURL)
-	}
+	logger.Default.Debugf("Remote M3U URL detected: %s", m3uURL)
 
 	resp, err := utils.CustomHttpRequest("GET", m3uURL)
 	if err != nil {
@@ -84,9 +76,7 @@ func DownloadM3USource(m3uIndex string) (err error) {
 	_ = os.Remove(finalPath)
 	_ = os.Rename(tmpPath, finalPath)
 
-	if debug {
-		utils.SafeLogf("[DEBUG] M3U file downloaded to %s\n", finalPath)
-	}
+	logger.Default.Debugf("M3U file downloaded to %s", finalPath)
 
 	return nil
 }

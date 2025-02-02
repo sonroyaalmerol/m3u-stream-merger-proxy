@@ -7,18 +7,20 @@ import (
 	"strings"
 )
 
+var HTTPClient = &http.Client{
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		userAgent := GetEnv("USER_AGENT")
+
+		// Follow redirects while preserving the custom User-Agent header
+		req.Header.Set("User-Agent", userAgent)
+		return nil
+	},
+}
+
 func CustomHttpRequest(method string, url string) (*http.Response, error) {
 	userAgent := GetEnv("USER_AGENT")
 
 	// Create a new HTTP client with a custom User-Agent header
-	client := &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			// Follow redirects while preserving the custom User-Agent header
-			req.Header.Set("User-Agent", userAgent)
-			return nil
-		},
-	}
-
 	req, err := http.NewRequest(method, url, nil)
 	if err != nil {
 		return nil, err
@@ -26,7 +28,7 @@ func CustomHttpRequest(method string, url string) (*http.Response, error) {
 
 	req.Header.Set("User-Agent", userAgent)
 
-	resp, err := client.Do(req)
+	resp, err := HTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

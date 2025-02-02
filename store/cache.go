@@ -2,6 +2,8 @@ package store
 
 import (
 	"fmt"
+	"m3u-stream-merger/config"
+	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
 	"net/http"
 	"os"
@@ -11,26 +13,18 @@ import (
 )
 
 type Cache struct {
-	sync.Mutex
+	sync.RWMutex
+	currentStreams []StreamInfo
 }
 
 var M3uCache = &Cache{}
 
-const cacheFilePath = "/m3u-proxy/data/cache.m3u"
-
-func isDebugMode() bool {
-	return os.Getenv("DEBUG") == "true"
-}
-
 func RevalidatingGetM3U(r *http.Request, force bool) string {
-	debug := isDebugMode()
-	if debug {
-		utils.SafeLogln("[DEBUG] Revalidating M3U cache")
-	}
+	logger.Default.Debug("Revalidating M3U cache")
 
-	if _, err := os.Stat(cacheFilePath); err != nil || force {
-		if debug && !force {
-			utils.SafeLogln("[DEBUG] Existing cache not found, generating content")
+	if _, err := os.Stat(config.GetM3UCachePath()); err != nil || force {
+		if !force {
+			logger.Default.Debug("Existing cache not found, generating content")
 		}
 
 		return generateM3UContent(r)
@@ -40,92 +34,87 @@ func RevalidatingGetM3U(r *http.Request, force bool) string {
 }
 
 func generateM3UContent(r *http.Request) string {
-	debug := isDebugMode()
-	if debug {
-		utils.SafeLogln("[DEBUG] Regenerating M3U cache in the background")
-	}
+	logger.Default.Debug("Regenerating M3U cache in the background")
 
 	baseURL := utils.DetermineBaseURL(r)
-	if debug {
-		utils.SafeLogf("[DEBUG] Base URL set to %s\n", baseURL)
-	}
+	logger.Default.Debugf("Base URL set to %s", baseURL)
 
 	var content strings.Builder
 
 	M3uCache.Lock()
 	defer M3uCache.Unlock()
 
-	streams := GetStreams()
+	M3uCache.currentStreams = scanSources()
 
 	content.WriteString("#EXTM3U\n")
 
-	for _, stream := range streams {
+	for _, stream := range M3uCache.currentStreams {
 		if len(stream.URLs) == 0 {
 			continue
 		}
 
-		if debug {
-			utils.SafeLogf("[DEBUG] Processing stream title: %s\n", stream.Title)
-		}
-
+		logger.Default.Debugf("Processing stream title: %s", stream.Title)
 		content.WriteString(formatStreamEntry(baseURL, stream))
 	}
 
 	if err := writeCacheToFile(content.String()); err != nil {
-		utils.SafeLogf("[DEBUG] Error writing cache to file: %v\n", err)
+		logger.Default.Errorf("Error writing cache to file: %v", err)
 	}
 
-	utils.SafeLogln("Background process: Finished building M3U content.")
+	logger.Default.Log("Background process: Finished building M3U content.")
 
 	return content.String()
 }
 
-func ClearCache() {
-	debug := isDebugMode()
+func GetCurrentStreams() []StreamInfo {
+	M3uCache.RLock()
+	defer M3uCache.RUnlock()
 
+	return M3uCache.currentStreams
+}
+
+func ClearCache() {
 	M3uCache.Lock()
 	defer M3uCache.Unlock()
 
-	if debug {
-		utils.SafeLogln("[DEBUG] Clearing memory and disk M3U cache.")
+	M3uCache.currentStreams = nil
+
+	logger.Default.Debug("Clearing memory and disk M3U cache.")
+
+	if err := os.Remove(config.GetM3UCachePath()); err != nil {
+		logger.Default.Debugf("Cache file deletion failed: %v", err)
 	}
-	if err := os.Remove(cacheFilePath); err != nil && debug {
-		utils.SafeLogf("[DEBUG] Cache file deletion failed: %v\n", err)
-	}
-	if err := os.RemoveAll(streamsDirPath); err != nil && debug {
-		utils.SafeLogf("[DEBUG] Stream files deletion failed: %v\n", err)
+
+	if err := os.RemoveAll(config.GetStreamsDirPath()); err != nil {
+		logger.Default.Debugf("Stream files deletion failed: %v", err)
 	}
 }
 
 func readCacheFromFile() string {
-	debug := isDebugMode()
-
-	data, err := os.ReadFile(cacheFilePath)
+	data, err := os.ReadFile(config.GetM3UCachePath())
 	if err != nil {
-		if debug {
-			utils.SafeLogf("[DEBUG] Cache file reading failed: %v\n", err)
-		}
+		logger.Default.Debugf("Cache file reading failed: %v", err)
 
-		return "#EXTM3U\n"
+		return "#EXTM3U"
 	}
 
 	return string(data)
 }
 
 func writeCacheToFile(content string) error {
-	err := os.MkdirAll(filepath.Dir(cacheFilePath), os.ModePerm)
+	err := os.MkdirAll(filepath.Dir(config.GetM3UCachePath()), os.ModePerm)
 	if err != nil {
 		return err
 	}
 
-	err = os.WriteFile(cacheFilePath+".new", []byte(content), 0644)
+	err = os.WriteFile(config.GetM3UCachePath()+".new", []byte(content), 0644)
 	if err != nil {
 		return err
 	}
 
-	_ = os.Remove(cacheFilePath)
+	_ = os.Remove(config.GetM3UCachePath())
 
-	err = os.Rename(cacheFilePath+".new", cacheFilePath)
+	err = os.Rename(config.GetM3UCachePath()+".new", config.GetM3UCachePath())
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,8 @@ package store
 import (
 	"encoding/hex"
 	"fmt"
+	"m3u-stream-merger/config"
+	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
 	"os"
 	"path/filepath"
@@ -23,11 +25,10 @@ func GetStreamBySlug(slug string) (StreamInfo, error) {
 	return *streamInfo, nil
 }
 
-func GetStreams() []StreamInfo {
+func scanSources() []StreamInfo {
 	var (
-		debug   = os.Getenv("DEBUG") == "true"
 		result  = make([]StreamInfo, 0) // Slice to store final results
-		streams sync.Map
+		streams sync.Map                // map[string]*StreamInfo
 	)
 
 	sessionIdHash := sha3.Sum224([]byte(time.Now().String()))
@@ -39,17 +40,17 @@ func GetStreams() []StreamInfo {
 		go func(m3uIndex string) {
 			defer wg.Done()
 
-			err := M3UScanner(m3uIndex, sessionId, func(streamInfo StreamInfo) {
+			err := M3UScanner(m3uIndex, sessionId, func(streamInfo *StreamInfo) {
 				// Check uniqueness and update if necessary
 				if existingStream, exists := streams.Load(streamInfo.Title); exists {
 					for idx, innerMap := range streamInfo.URLs {
-						if _, ok := existingStream.(StreamInfo).URLs[idx]; !ok {
-							existingStream.(StreamInfo).URLs[idx] = innerMap
+						if _, ok := existingStream.(*StreamInfo).URLs[idx]; !ok {
+							existingStream.(*StreamInfo).URLs[idx] = innerMap
 							continue
 						}
 
 						for subIdx, url := range innerMap {
-							existingStream.(StreamInfo).URLs[idx][subIdx] = url
+							existingStream.(*StreamInfo).URLs[idx][subIdx] = url
 						}
 					}
 					streams.Store(streamInfo.Title, existingStream)
@@ -57,27 +58,27 @@ func GetStreams() []StreamInfo {
 					streams.Store(streamInfo.Title, streamInfo)
 				}
 			})
-			if err != nil && debug {
-				utils.SafeLogf("error getting streams: %v\n", err)
+			if err != nil {
+				logger.Default.Debugf("error getting streams: %v", err)
 			}
 		}(m3uIndex)
 	}
 	wg.Wait()
 
-	entries, err := os.ReadDir(streamsDirPath)
+	entries, err := os.ReadDir(config.GetStreamsDirPath())
 	if err == nil {
 		for _, e := range entries {
 			if e.Name() == sessionId {
 				continue
 			}
 
-			_ = os.RemoveAll(filepath.Join(streamsDirPath, e.Name()))
+			_ = os.RemoveAll(filepath.Join(config.GetStreamsDirPath(), e.Name()))
 		}
 	}
 
 	streams.Range(func(key, value any) bool {
-		stream := value.(StreamInfo)
-		result = append(result, stream)
+		stream := value.(*StreamInfo)
+		result = append(result, *stream)
 		return true
 	})
 

@@ -2,44 +2,82 @@ package handlers
 
 import (
 	"context"
+	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
 	"net/http"
-	"os"
 	"path"
 	"strings"
 )
 
-func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.ConcurrencyManager) {
-	debug := os.Getenv("DEBUG") == "true"
+type StreamHandler struct {
+	manager StreamManager
+	logger  logger.Logger
+}
 
-	ctx := r.Context()
+func NewStreamHandler(manager StreamManager, logger logger.Logger) *StreamHandler {
+	return &StreamHandler{
+		manager: manager,
+		logger:  logger,
+	}
+}
 
-	utils.SafeLogf("Received request from %s for URL: %s\n", r.RemoteAddr, r.URL.Path)
+func (h *StreamHandler) handleExitCode(code int, resp *http.Response, r *http.Request, session *store.Session, selectedIndex, selectedSubIndex string) bool {
+	switch code {
+	case proxy.StatusEOF:
+		if utils.EOFIsExpected(resp) {
+			h.logger.Logf("Successfully proxied playlist: %s", r.RemoteAddr)
+			return true
+		}
+		fallthrough
+	case proxy.StatusServerError:
+		indexes := append(session.GetTestedIndexes(), selectedIndex+"|"+selectedSubIndex)
+		session.SetTestedIndexes(indexes)
+		h.logger.Logf("Retrying other servers...")
+		return false
+	case proxy.StatusM3U8Parsed:
+		h.logger.Logf("Finished handling M3U8 %s request: %s", r.Method, r.RemoteAddr)
+		return true
+	case proxy.StatusM3U8ParseError:
+		h.logger.Errorf("Finished handling M3U8 %s request but failed to parse contents.", r.Method, r.RemoteAddr)
+		return false
+	default:
+		h.logger.Logf("Unable to write to client. Assuming stream has been closed: %s", r.RemoteAddr)
+		return true
+	}
+}
 
-	streamUrl := strings.Split(path.Base(r.URL.Path), ".")[0]
-	if streamUrl == "" {
-		utils.SafeLogf("Invalid m3uID for request from %s: %s\n", r.RemoteAddr, r.URL.Path)
+func (h *StreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.logger.Logf("Received request from %s for URL: %s", r.RemoteAddr, r.URL.Path)
+
+	streamURL := h.extractStreamURL(r.URL.Path)
+	if streamURL == "" {
+		h.logger.Logf("Invalid m3uID for request from %s: %s", r.RemoteAddr, r.URL.Path)
 		http.NotFound(w, r)
 		return
 	}
 
-	stream, err := proxy.NewStreamInstance(strings.TrimPrefix(streamUrl, "/"), cm)
-	if err != nil {
-		utils.SafeLogf("Error retrieving stream for slug %s: %v\n", streamUrl, err)
-		http.NotFound(w, r)
-		return
+	if err := h.handleStream(r.Context(), w, r); err != nil {
+		h.logger.Logf("Error handling stream %s: %v", streamURL, err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
+}
 
-	var selectedIndex string
-	var selectedSubIndex string
-	var selectedUrl string
+func (h *StreamHandler) extractStreamURL(urlPath string) string {
+	base := path.Base(urlPath)
+	parts := strings.Split(base, ".")
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.TrimPrefix(parts[0], "/")
+}
 
+func (h *StreamHandler) handleStream(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 	session := store.GetOrCreateSession(r)
 	firstWrite := true
-
 	var resp *http.Response
+
 	defer func() {
 		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
@@ -47,62 +85,60 @@ func StreamHandler(w http.ResponseWriter, r *http.Request, cm *store.Concurrency
 	}()
 
 	for {
-		resp, selectedUrl, selectedIndex, selectedSubIndex, err = stream.LoadBalancer(ctx, &session, r.Method)
+		var err error
+		var selectedURL, selectedIndex, selectedSubIndex string
+
+		resp, selectedURL, selectedIndex, selectedSubIndex, err = h.manager.LoadBalancer(ctx, r, session)
 		if err != nil {
-			utils.SafeLogf("Error reloading stream for %s: %v\n", streamUrl, err)
-			return
+			return err
 		}
-
-		// HTTP header initialization
-		if firstWrite {
-			for k, v := range resp.Header {
-				if strings.ToLower(k) == "content-length" {
-					continue
-				}
-
-				for _, val := range v {
-					w.Header().Set(k, val)
-				}
-			}
-			w.WriteHeader(resp.StatusCode)
-
-			if debug {
-				utils.SafeLogf("[DEBUG] Headers set for response: %v\n", w.Header())
-			}
-			firstWrite = false
+		if err := h.writeHeaders(w, resp, firstWrite); err != nil {
+			return err
 		}
+		firstWrite = false
 
 		exitStatus := make(chan int)
+		h.logger.Logf("Proxying %s to %s", r.RemoteAddr, selectedURL)
 
-		utils.SafeLogf("Proxying %s to %s\n", r.RemoteAddr, selectedUrl)
-		proxyCtx, proxyCtxCancel := context.WithCancel(ctx)
-		defer proxyCtxCancel()
+		proxyCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
 
-		go stream.ProxyStream(proxyCtx, selectedIndex, selectedSubIndex, resp, r, w, exitStatus)
+		h.manager.GetConcurrencyManager().UpdateConcurrency(selectedIndex, true)
+		go h.manager.ProxyStream(proxyCtx, resp, r, w, exitStatus)
 
 		select {
 		case <-ctx.Done():
-			utils.SafeLogf("Client has closed the stream: %s\n", r.RemoteAddr)
-			return
-		case streamExitCode := <-exitStatus:
-			utils.SafeLogf("Exit code %d received from %s\n", streamExitCode, selectedUrl)
+			h.manager.GetConcurrencyManager().UpdateConcurrency(selectedIndex, false)
+			h.logger.Logf("Client has closed the stream: %s", r.RemoteAddr)
 
-			if streamExitCode == 2 && utils.EOFIsExpected(resp) {
-				utils.SafeLogf("Successfully proxied playlist: %s\n", r.RemoteAddr)
-				return
-			} else if streamExitCode == 1 || streamExitCode == 2 {
-				// Retry on server-side connection errors
-				session.SetTestedIndexes(append(session.TestedIndexes, selectedIndex+"|"+selectedSubIndex))
-				utils.SafeLogf("Retrying other servers...\n")
-				proxyCtxCancel()
-			} else if streamExitCode == 4 {
-				utils.SafeLogf("Finished handling %s request: %s\n", r.Method, r.RemoteAddr)
-				return
-			} else {
-				// Consider client-side connection errors as complete closure
-				utils.SafeLogf("Unable to write to client. Assuming stream has been closed: %s\n", r.RemoteAddr)
-				return
+			return nil
+		case code := <-exitStatus:
+			h.manager.GetConcurrencyManager().UpdateConcurrency(selectedIndex, false)
+			if handled := h.handleExitCode(code, resp, r, session, selectedIndex, selectedSubIndex); handled {
+				return nil
 			}
+			// Continue to retry if not handled
 		}
 	}
+}
+
+func (h *StreamHandler) writeHeaders(w http.ResponseWriter, resp *http.Response, firstWrite bool) error {
+	if !firstWrite {
+		return nil
+	}
+
+	for k, v := range resp.Header {
+		if strings.ToLower(k) == "content-length" {
+			continue
+		}
+		for _, val := range v {
+			w.Header().Set(k, val)
+		}
+	}
+
+	w.WriteHeader(resp.StatusCode)
+
+	h.logger.Debugf("Headers set for response: %v", w.Header())
+
+	return nil
 }
