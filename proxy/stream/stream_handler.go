@@ -139,28 +139,33 @@ func (h *StreamHandler) handleBufferedStream(
 		return StreamResult{0, fmt.Errorf("coordinator is nil"), proxy.StatusServerError}
 	}
 
-	h.coordinator.writerCtxMu.Lock()
+	h.coordinator.mu.Lock()
 	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 0
 	if isFirstClient {
 		h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
 		go h.coordinator.StartWriter(h.coordinator.writerCtx, lbResult)
 	}
-	h.coordinator.writerCtxMu.Unlock()
+	h.coordinator.mu.Unlock()
 
 	h.coordinator.RegisterClient()
-	defer func() {
+	h.logger.Debugf("Client registered: %s, count: %d", remoteAddr, atomic.LoadInt32(&h.coordinator.clientCount))
+
+	cleanup := func() {
 		h.coordinator.UnregisterClient()
-		remainingClients := atomic.LoadInt32(&h.coordinator.clientCount)
-		if remainingClients == 0 {
-			// Cancel the writer context when the last client disconnects
-			h.coordinator.writerCtxMu.Lock()
+		currentCount := atomic.LoadInt32(&h.coordinator.clientCount)
+		h.logger.Debugf("Client unregistered: %s, remaining: %d", remoteAddr, currentCount)
+
+		if currentCount == 0 {
+			h.coordinator.mu.Lock()
 			if h.coordinator.writerCancel != nil {
+				h.logger.Debug("Stopping writer - no clients remaining")
 				h.coordinator.writerCancel()
 				h.coordinator.writerCancel = nil
 			}
-			h.coordinator.writerCtxMu.Unlock()
+			h.coordinator.mu.Unlock()
 		}
-	}()
+	}
+	defer cleanup()
 
 	var bytesWritten int64
 	lastPosition := h.coordinator.buffer.Prev() // Start from previous to get first new chunk
@@ -169,15 +174,15 @@ func (h *StreamHandler) handleBufferedStream(
 	done := make(chan struct{})
 	defer close(done)
 
-	// Create a context with cancel for the writer goroutine
-	writerCtx, cancel := context.WithCancel(ctx)
+	// Create a context for this client
+	readerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// Handle context cancellation in a separate goroutine
 	go func() {
 		select {
 		case <-ctx.Done():
-			h.logger.Debugf("Client disconnected: %s", remoteAddr)
+			h.logger.Debugf("Client context cancelled: %s", remoteAddr)
 			cancel()
 		case <-done:
 			return
@@ -186,9 +191,9 @@ func (h *StreamHandler) handleBufferedStream(
 
 	for {
 		select {
-		case <-writerCtx.Done():
-			h.logger.Debugf("Context cancelled for client: %s", remoteAddr)
-			return StreamResult{bytesWritten, writerCtx.Err(), proxy.StatusClientClosed}
+		case <-readerCtx.Done():
+			h.logger.Debugf("Reader context cancelled for client: %s", remoteAddr)
+			return StreamResult{bytesWritten, readerCtx.Err(), proxy.StatusClientClosed}
 
 		default:
 			chunks, errChunk, newPos := h.coordinator.ReadChunks(lastPosition)
@@ -197,14 +202,14 @@ func (h *StreamHandler) handleBufferedStream(
 			if len(chunks) > 0 {
 				for _, chunk := range chunks {
 					// Check context before each write
-					if writerCtx.Err() != nil {
+					if readerCtx.Err() != nil {
 						// Clean up remaining chunks
 						for _, c := range chunks {
 							if c != nil {
 								c.Reset()
 							}
 						}
-						return StreamResult{bytesWritten, writerCtx.Err(), proxy.StatusClientClosed}
+						return StreamResult{bytesWritten, readerCtx.Err(), proxy.StatusClientClosed}
 					}
 
 					if chunk != nil && chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
