@@ -135,6 +135,7 @@ func (c *StreamCoordinator) StartWriter(ctx context.Context, m3uIndex string, re
 			}
 
 			n, err := resp.Body.Read(buffer)
+			c.logger.Debugf("StartWriter has received %d bytes (error: %v)", n, err)
 
 			if err == io.EOF {
 				if n > 0 {

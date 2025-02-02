@@ -179,13 +179,11 @@ func (h *StreamHandler) handleBufferedStream(
 						}
 					}
 					currentPos = currentPos.Next()
-					h.logger.Debugf("Moving to next position: %p", currentPos)
 				}
 				return StreamResult{bytesWritten, errChunk.Error, errChunk.Status}
 			}
 
 			hasNewData := false
-			h.logger.Debugf("Processing new chunks from position: %p", lastPosition)
 			for lastPosition != h.coordinator.buffer {
 				if chunk, ok := lastPosition.Value.(*ChunkData); ok {
 					h.logger.Debugf("Processing chunk: len(Data)=%d, Error=%v, Status=%d", len(chunk.Data), chunk.Error, chunk.Status)
@@ -210,8 +208,7 @@ func (h *StreamHandler) handleBufferedStream(
 
 			h.coordinator.mu.RUnlock()
 			if !hasNewData {
-				h.logger.Debugf("No new data found, sleeping")
-				time.Sleep(10 * time.Millisecond)
+				time.Sleep(100 * time.Millisecond)
 			}
 		}
 	}
