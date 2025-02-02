@@ -1,12 +1,13 @@
 package handlers
 
 import (
-	"m3u-stream-merger/logger"
-	"m3u-stream-merger/store"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"m3u-stream-merger/logger"
+	"m3u-stream-merger/store"
 )
 
 type M3UHandler struct {
@@ -23,58 +24,56 @@ func NewM3UHandler(logger logger.Logger) *M3UHandler {
 
 func (h *M3UHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-
-	credentials := os.Getenv("CREDENTIALS")
-	var credentialsArr [][]string
-	authRequired := false // Add this flag
-
-	if credentials != "" && strings.ToLower(credentials) != "none" {
-		authRequired = true // Set flag if credentials are configured
-		arr := strings.Split(credentials, "|")
-		for _, arrItem := range arr {
-			cred := strings.Split(arrItem, ":")
-			if len(cred) == 3 {
-				d, err := time.Parse(time.DateOnly, cred[2])
-				if err != nil {
-					h.logger.Warnf("invalid credential format: %s\n", arrItem)
-					continue
-				}
-				if time.Now().After(d) {
-					h.logger.Debugf("Credential expired")
-					continue
-				}
-				credentialsArr = append(credentialsArr, cred[:2])
-				continue
-			}
-			credentialsArr = append(credentialsArr, cred)
-		}
-	}
-
-	if authRequired { // Check auth if credentials were configured
-		user := r.URL.Query().Get("username")
-		pass := r.URL.Query().Get("password")
-		if len(user) == 0 || len(pass) == 0 {
-			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
-			return
-		}
-		authCorrect := false
-		for _, cred := range credentialsArr {
-			if strings.EqualFold(user, cred[0]) && strings.EqualFold(pass, cred[1]) {
-				authCorrect = true
-				break
-			}
-		}
-		if !authCorrect {
-			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
-			return
-		}
+	content := h.handleAuth(r)
+	if content == "" {
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
-
-	content := store.RevalidatingGetM3U(r, false)
-
+	content = store.RevalidatingGetM3U(r, false)
 	if _, err := w.Write([]byte(content)); err != nil {
-		h.logger.Debugf("Error writing http response: %v\n", err)
+		h.logger.Debugf("Error writing http response: %v", err)
 	}
+}
+
+func (h *M3UHandler) handleAuth(r *http.Request) string {
+	credentials := os.Getenv("CREDENTIALS")
+	if credentials == "" || strings.ToLower(credentials) == "none" {
+		// No authentication required.
+		return "ok"
+	}
+
+	creds := parseCredentials(credentials, h.logger)
+	user, pass := r.URL.Query().Get("username"), r.URL.Query().Get("password")
+	if user == "" || pass == "" {
+		return ""
+	}
+
+	for _, cred := range creds {
+		if strings.EqualFold(user, cred[0]) && strings.EqualFold(pass, cred[1]) {
+			return "ok"
+		}
+	}
+	return ""
+}
+
+func parseCredentials(raw string, log logger.Logger) [][]string {
+	var result [][]string
+	for _, item := range strings.Split(raw, "|") {
+		cred := strings.Split(item, ":")
+		if len(cred) == 3 {
+			if d, err := time.Parse(time.DateOnly, cred[2]); err != nil {
+				log.Warnf("invalid credential format: %s", item)
+				continue
+			} else if time.Now().After(d) {
+				log.Debugf("Credential expired: %s", item)
+				continue
+			}
+			result = append(result, cred[:2])
+		} else {
+			result = append(result, cred)
+		}
+	}
+	return result
 }
