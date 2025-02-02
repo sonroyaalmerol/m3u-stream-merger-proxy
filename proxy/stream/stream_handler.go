@@ -153,12 +153,12 @@ func (h *StreamHandler) handleBufferedStream(
 		remainingClients := atomic.LoadInt32(&h.coordinator.clientCount)
 		if remainingClients == 0 {
 			// Cancel the writer context when the last client disconnects
-			h.coordinator.mu.Lock()
+			h.coordinator.writerCtxMu.Lock()
 			if h.coordinator.writerCancel != nil {
 				h.coordinator.writerCancel()
 				h.coordinator.writerCancel = nil
 			}
-			h.coordinator.mu.Unlock()
+			h.coordinator.writerCtxMu.Unlock()
 		}
 	}()
 
