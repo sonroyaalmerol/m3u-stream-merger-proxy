@@ -202,7 +202,7 @@ func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, method 
 				continue
 			}
 
-			result, err := instance.tryStreamUrls(ctx, method, session, index, innerMap)
+			result, err := instance.tryStreamUrls(method, session, index, innerMap)
 			if err == nil {
 				return result, nil
 			}
@@ -219,7 +219,6 @@ func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, method 
 }
 
 func (instance *LoadBalancerInstance) tryStreamUrls(
-	ctx context.Context,
 	method string,
 	session *store.Session,
 	index string,
@@ -245,7 +244,7 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 			continue
 		}
 
-		req, err := http.NewRequestWithContext(ctx, method, url, nil)
+		req, err := http.NewRequest(method, url, nil)
 		if err != nil {
 			instance.logger.Errorf("Error creating request: %s", err.Error())
 			session.Mutex.Lock()

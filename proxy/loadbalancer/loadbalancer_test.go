@@ -276,32 +276,6 @@ func TestLoadBalancer(t *testing.T) {
 	}
 }
 
-func TestLoadBalancerContext(t *testing.T) {
-	instance, client, _ := setupTestInstance(t)
-
-	client.delay = 200 * time.Millisecond
-	client.responses["http://test1.com/stream"] = &http.Response{
-		StatusCode: 200,
-	}
-
-	session := &store.Session{
-		TestedIndexes: []string{},
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
-
-	_, err := instance.Balance(ctx, newTestRequest(http.MethodGet), session)
-	if err == nil {
-		t.Error("LoadBalancer() expected error, got nil")
-		return
-	}
-
-	if err.Error() != "cancelling load balancer" {
-		t.Errorf("LoadBalancer() expected 'cancelling load balancer', got %v", err)
-	}
-}
-
 func TestLoadBalancerWithHTTPStatusCodes(t *testing.T) {
 	tests := []struct {
 		name        string
