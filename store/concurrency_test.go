@@ -37,14 +37,27 @@ func TestConcurrencyManagerPriority(t *testing.T) {
 	t.Setenv("M3U_MAX_CONCURRENCY_PRIO", "3")
 	cm := NewConcurrencyManager()
 
-	// Initial priority should be max concurrency (3 - 0 = 3)
-	if prio := cm.ConcurrencyPriorityValue("PRIO"); prio != 3 {
-		t.Errorf("Expected priority 3, got %d", prio)
+	// Initial priority (count = 0) should be 0
+	if prio := cm.ConcurrencyPriorityValue("PRIO"); prio != 0 {
+		t.Errorf("Expected priority 0 for count=0, got %d", prio)
 	}
 
+	// Add one connection (count = 1) should give highest priority (2)
 	cm.UpdateConcurrency("PRIO", true)
 	if prio := cm.ConcurrencyPriorityValue("PRIO"); prio != 2 {
-		t.Errorf("Expected priority 2, got %d", prio)
+		t.Errorf("Expected priority 2 for count=1, got %d", prio)
+	}
+
+	// Add another connection (count > 1) should give medium priority (1)
+	cm.UpdateConcurrency("PRIO", true)
+	if prio := cm.ConcurrencyPriorityValue("PRIO"); prio != 1 {
+		t.Errorf("Expected priority 1 for count>1, got %d", prio)
+	}
+
+	// Back to one connection should restore highest priority (2)
+	cm.UpdateConcurrency("PRIO", false)
+	if prio := cm.ConcurrencyPriorityValue("PRIO"); prio != 2 {
+		t.Errorf("Expected priority 2 for count=1, got %d", prio)
 	}
 }
 
