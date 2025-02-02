@@ -194,6 +194,15 @@ func (c *StreamCoordinator) StartWriter(ctx context.Context, lbResult *loadbalan
 			n, err := lbResult.Response.Body.Read(buffer)
 			c.logger.Debugf("StartWriter: Read %d bytes, err: %v", n, err)
 
+			if n == 0 {
+				if zeroReads++; zeroReads > 10 {
+					c.writeError(io.EOF, proxy.StatusEOF)
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+
 			if err == io.EOF {
 				if n > 0 {
 					tempChunk.Reset()
@@ -213,15 +222,6 @@ func (c *StreamCoordinator) StartWriter(ctx context.Context, lbResult *loadbalan
 				}
 				c.writeError(err, proxy.StatusServerError)
 				return
-			}
-
-			if n == 0 {
-				if zeroReads++; zeroReads > 10 {
-					c.writeError(io.EOF, proxy.StatusEOF)
-					return
-				}
-				time.Sleep(10 * time.Millisecond)
-				continue
 			}
 
 			zeroReads = 0
