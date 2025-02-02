@@ -139,13 +139,13 @@ func (h *StreamHandler) handleBufferedStream(
 		return StreamResult{0, fmt.Errorf("coordinator is nil"), proxy.StatusServerError}
 	}
 
-	h.coordinator.mu.Lock()
+	h.coordinator.writerCtxMu.Lock()
 	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 0
 	if isFirstClient {
 		h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
 		go h.coordinator.StartWriter(h.coordinator.writerCtx, lbResult)
 	}
-	h.coordinator.mu.Unlock()
+	h.coordinator.writerCtxMu.Unlock()
 
 	h.coordinator.RegisterClient()
 	h.logger.Debugf("Client registered: %s, count: %d", remoteAddr, atomic.LoadInt32(&h.coordinator.clientCount))
@@ -156,13 +156,13 @@ func (h *StreamHandler) handleBufferedStream(
 		h.logger.Debugf("Client unregistered: %s, remaining: %d", remoteAddr, currentCount)
 
 		if currentCount == 0 {
-			h.coordinator.mu.Lock()
+			h.coordinator.writerCtxMu.Lock()
 			if h.coordinator.writerCancel != nil {
 				h.logger.Debug("Stopping writer - no clients remaining")
 				h.coordinator.writerCancel()
 				h.coordinator.writerCancel = nil
 			}
-			h.coordinator.mu.Unlock()
+			h.coordinator.writerCtxMu.Unlock()
 		}
 	}
 	defer cleanup()
