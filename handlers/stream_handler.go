@@ -4,6 +4,7 @@ import (
 	"context"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
+	"m3u-stream-merger/proxy/stream"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
 	"net/http"
@@ -12,8 +13,9 @@ import (
 )
 
 type StreamHandler struct {
-	manager StreamManager
-	logger  logger.Logger
+	manager     StreamManager
+	logger      logger.Logger
+	coordinator *stream.StreamCoordinator
 }
 
 func NewStreamHandler(manager StreamManager, logger logger.Logger) *StreamHandler {
@@ -57,6 +59,8 @@ func (h *StreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+
+	h.coordinator = h.manager.GetStreamRegistry().GetOrCreateCoordinator(streamURL)
 
 	if err := h.handleStream(r.Context(), w, r); err != nil {
 		h.logger.Logf("Error handling stream %s: %v", streamURL, err)
@@ -103,17 +107,14 @@ func (h *StreamHandler) handleStream(ctx context.Context, w http.ResponseWriter,
 		proxyCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
-		h.manager.GetConcurrencyManager().UpdateConcurrency(selectedIndex, true)
-		go h.manager.ProxyStream(proxyCtx, resp, r, w, exitStatus)
+		go h.manager.ProxyStream(proxyCtx, h.coordinator, selectedIndex, resp, r, w, exitStatus)
 
 		select {
 		case <-ctx.Done():
-			h.manager.GetConcurrencyManager().UpdateConcurrency(selectedIndex, false)
 			h.logger.Logf("Client has closed the stream: %s", r.RemoteAddr)
 
 			return nil
 		case code := <-exitStatus:
-			h.manager.GetConcurrencyManager().UpdateConcurrency(selectedIndex, false)
 			if handled := h.handleExitCode(code, resp, r, session, selectedIndex, selectedSubIndex); handled {
 				return nil
 			}

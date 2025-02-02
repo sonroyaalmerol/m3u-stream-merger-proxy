@@ -8,12 +8,14 @@ import (
 	"m3u-stream-merger/proxy/stream"
 	"m3u-stream-merger/store"
 	"net/http"
+	"time"
 )
 
 type DefaultStreamManager struct {
 	StreamManager
 	lbConfig     *loadbalancer.LBConfig
 	streamConfig *stream.StreamConfig
+	registry     *stream.StreamRegistry
 	cm           *store.ConcurrencyManager
 	logger       logger.Logger
 }
@@ -25,6 +27,7 @@ func NewDefaultStreamManager() *DefaultStreamManager {
 	sm.streamConfig = stream.NewDefaultStreamConfig()
 	sm.cm = store.NewConcurrencyManager()
 	sm.logger = logger.Default
+	sm.registry = stream.NewStreamRegistry(sm.streamConfig, sm.cm, sm.logger, time.Second*30)
 
 	return sm
 }
@@ -39,7 +42,7 @@ func (sm *DefaultStreamManager) LoadBalancer(ctx context.Context, req *http.Requ
 	return result.Response, result.URL, result.Index, result.SubIndex, nil
 }
 
-func (sm *DefaultStreamManager) ProxyStream(ctx context.Context, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+func (sm *DefaultStreamManager) ProxyStream(ctx context.Context, coordinator *stream.StreamCoordinator, m3uIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
 	instance, err := stream.NewStreamInstance(
 		sm.cm,
 		sm.streamConfig,
@@ -51,9 +54,13 @@ func (sm *DefaultStreamManager) ProxyStream(ctx context.Context, resp *http.Resp
 		return
 	}
 
-	instance.ProxyStream(ctx, resp, r, w, exitStatus)
+	instance.ProxyStream(ctx, coordinator, m3uIndex, resp, r, w, exitStatus)
 }
 
 func (sm *DefaultStreamManager) GetConcurrencyManager() *store.ConcurrencyManager {
 	return sm.cm
+}
+
+func (sm *DefaultStreamManager) GetStreamRegistry() *stream.StreamRegistry {
+	return sm.registry
 }

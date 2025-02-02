@@ -54,6 +54,8 @@ func NewStreamInstance(
 
 func (instance *StreamInstance) ProxyStream(
 	ctx context.Context,
+	coordinator *StreamCoordinator,
+	m3uIndex string,
 	resp *http.Response,
 	r *http.Request,
 	w http.ResponseWriter,
@@ -64,7 +66,7 @@ func (instance *StreamInstance) ProxyStream(
 		return
 	}
 
-	instance.handleMediaStream(ctx, resp, r, w, statusChan)
+	instance.handleMediaStream(ctx, coordinator, m3uIndex, resp, r, w, statusChan)
 }
 
 func (instance *StreamInstance) handleM3U8Stream(
@@ -92,13 +94,15 @@ func (instance *StreamInstance) handleM3U8Stream(
 
 func (instance *StreamInstance) handleMediaStream(
 	ctx context.Context,
+	coordinator *StreamCoordinator,
+	m3uIndex string,
 	resp *http.Response,
 	r *http.Request,
 	w http.ResponseWriter,
 	statusChan chan<- int,
 ) {
-	handler := NewStreamHandler(instance.config, instance.logger)
-	result := handler.HandleStream(ctx, resp, w, r.RemoteAddr)
+	handler := NewStreamHandler(instance.config, coordinator, instance.logger)
+	result := handler.HandleStream(ctx, m3uIndex, resp, w, r.RemoteAddr)
 
 	if result.Error != nil {
 		instance.logger.Logf("Stream handler status: %v", result.Error)

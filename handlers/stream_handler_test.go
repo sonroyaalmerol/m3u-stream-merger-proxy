@@ -7,6 +7,7 @@ import (
 	"io"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
+	"m3u-stream-merger/proxy/stream"
 	"m3u-stream-merger/store"
 	"net/http"
 	"net/http/httptest"
@@ -21,8 +22,9 @@ import (
 
 type mockStreamManager struct {
 	loadBalancerFunc func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error)
-	proxyStreamFunc  func(ctx context.Context, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int)
+	proxyStreamFunc  func(ctx context.Context, coordinator *stream.StreamCoordinator, m3uIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int)
 	getCmFunc        func() *store.ConcurrencyManager
+	getRegistryFunc  func() *stream.StreamRegistry
 }
 
 func (m *mockStreamManager) LoadBalancer(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
@@ -32,15 +34,23 @@ func (m *mockStreamManager) LoadBalancer(ctx context.Context, req *http.Request,
 	return nil, "", "", "", errors.New("loadBalancerFunc not implemented")
 }
 
-func (m *mockStreamManager) ProxyStream(ctx context.Context, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+func (m *mockStreamManager) ProxyStream(ctx context.Context, coordinator *stream.StreamCoordinator, m3uIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
 	if m.proxyStreamFunc != nil {
-		m.proxyStreamFunc(ctx, resp, r, w, exitStatus)
+		m.proxyStreamFunc(ctx, coordinator, m3uIndex, resp, r, w, exitStatus)
 	}
 }
 
 func (m *mockStreamManager) GetConcurrencyManager() *store.ConcurrencyManager {
 	if m.getCmFunc != nil {
 		return m.getCmFunc()
+	}
+
+	return nil
+}
+
+func (m *mockStreamManager) GetStreamRegistry() *stream.StreamRegistry {
+	if m.getRegistryFunc != nil {
+		return m.getRegistryFunc()
 	}
 
 	return nil
@@ -68,18 +78,25 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 			path: "/test.m3u8",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
+
 				cm := store.NewConcurrencyManager()
+				config := stream.NewDefaultStreamConfig()
+				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
 					return mockResponse(http.StatusOK, "test content"), "http://example.com", "1", "1", nil
 				}
 
-				manager.proxyStreamFunc = func(ctx context.Context, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+				manager.proxyStreamFunc = func(ctx context.Context, coordinator *stream.StreamCoordinator, m3uIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
 					exitStatus <- proxy.StatusM3U8Parsed // Normal completion
 				}
 
 				manager.getCmFunc = func() *store.ConcurrencyManager {
 					return cm
+				}
+
+				manager.getRegistryFunc = func() *stream.StreamRegistry {
+					return coordinator
 				}
 
 				return manager
@@ -92,7 +109,10 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 			path: "/test.m3u8",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
+
 				cm := store.NewConcurrencyManager()
+				config := stream.NewDefaultStreamConfig()
+				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				callCount := 0
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
@@ -104,7 +124,7 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 				}
 
 				firstCall := true
-				manager.proxyStreamFunc = func(ctx context.Context, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+				manager.proxyStreamFunc = func(ctx context.Context, coordinator *stream.StreamCoordinator, m3uIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
 					if firstCall {
 						firstCall = false
 						exitStatus <- proxy.StatusM3U8ParseError // Trigger retry
@@ -117,6 +137,10 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 					return cm
 				}
 
+				manager.getRegistryFunc = func() *stream.StreamRegistry {
+					return coordinator
+				}
+
 				return manager
 			},
 			expectedStatus: http.StatusOK,
@@ -127,13 +151,16 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 			path: "/test.m3u8",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
+
 				cm := store.NewConcurrencyManager()
+				config := stream.NewDefaultStreamConfig()
+				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
 					return mockResponse(http.StatusOK, "timeout content"), "http://timeout.com", "1", "1", nil
 				}
 
-				manager.proxyStreamFunc = func(ctx context.Context, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+				manager.proxyStreamFunc = func(ctx context.Context, coordinator *stream.StreamCoordinator, m3uIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
 					// Simulate a long operation that gets cancelled
 					select {
 					case <-ctx.Done():
@@ -147,6 +174,10 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 					return cm
 				}
 
+				manager.getRegistryFunc = func() *stream.StreamRegistry {
+					return coordinator
+				}
+
 				return manager
 			},
 			expectedStatus: http.StatusOK, // The response headers are still sent
@@ -157,7 +188,10 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 			path: "/test.m3u8",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
+
 				cm := store.NewConcurrencyManager()
+				config := stream.NewDefaultStreamConfig()
+				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
 					resp := mockResponse(http.StatusOK, "EOF content")
@@ -165,12 +199,16 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 					return resp, "http://eof.com", "1", "1", nil
 				}
 
-				manager.proxyStreamFunc = func(ctx context.Context, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+				manager.proxyStreamFunc = func(ctx context.Context, coordinator *stream.StreamCoordinator, m3uIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
 					exitStatus <- proxy.StatusEOF
 				}
 
 				manager.getCmFunc = func() *store.ConcurrencyManager {
 					return cm
+				}
+
+				manager.getRegistryFunc = func() *stream.StreamRegistry {
+					return coordinator
 				}
 
 				return manager
@@ -182,7 +220,17 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 			name: "invalid stream URL with special characters",
 			path: "/test@#$.m3u8",
 			setupMocks: func() *mockStreamManager {
-				return &mockStreamManager{}
+				manager := &mockStreamManager{}
+
+				cm := store.NewConcurrencyManager()
+				config := stream.NewDefaultStreamConfig()
+				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
+
+				manager.getRegistryFunc = func() *stream.StreamRegistry {
+					return coordinator
+				}
+
+				return manager
 			},
 			expectedStatus: http.StatusInternalServerError,
 			expectedError:  false,
@@ -192,7 +240,10 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 			path: "/test.m3u8",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
+
 				cm := store.NewConcurrencyManager()
+				config := stream.NewDefaultStreamConfig()
+				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
 					return nil, "", "", "", errors.New("network connection error")
@@ -200,6 +251,10 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 
 				manager.getCmFunc = func() *store.ConcurrencyManager {
 					return cm
+				}
+
+				manager.getRegistryFunc = func() *stream.StreamRegistry {
+					return coordinator
 				}
 
 				return manager
@@ -212,7 +267,10 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 			path: "/test.m3u8",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
+
 				cm := store.NewConcurrencyManager()
+				config := stream.NewDefaultStreamConfig()
+				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
 					return mockResponse(http.StatusInternalServerError, "server error"), "http://error.com", "1", "1", nil
@@ -220,6 +278,10 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 
 				manager.getCmFunc = func() *store.ConcurrencyManager {
 					return cm
+				}
+
+				manager.getRegistryFunc = func() *stream.StreamRegistry {
+					return coordinator
 				}
 
 				return manager
@@ -232,7 +294,10 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 			path: "/test.m3u8",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
+
 				cm := store.NewConcurrencyManager()
+				config := stream.NewDefaultStreamConfig()
+				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
 					resp := mockResponse(http.StatusOK, "content with headers")
@@ -241,12 +306,16 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 					return resp, "http://headers.com", "1", "1", nil
 				}
 
-				manager.proxyStreamFunc = func(ctx context.Context, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+				manager.proxyStreamFunc = func(ctx context.Context, coordinator *stream.StreamCoordinator, m3uIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
 					exitStatus <- proxy.StatusM3U8Parsed
 				}
 
 				manager.getCmFunc = func() *store.ConcurrencyManager {
 					return cm
+				}
+
+				manager.getRegistryFunc = func() *stream.StreamRegistry {
+					return coordinator
 				}
 
 				return manager
@@ -302,13 +371,16 @@ func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
 			name: "random client disconnections",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
+
 				cm := store.NewConcurrencyManager()
+				config := stream.NewDefaultStreamConfig()
+				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
 					return mockResponse(http.StatusOK, "test content"), "http://example.com", "1", "m3u_1", nil
 				}
 
-				manager.proxyStreamFunc = func(ctx context.Context, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+				manager.proxyStreamFunc = func(ctx context.Context, coordinator *stream.StreamCoordinator, m3uIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
 					// Randomly decide between normal completion, client disconnect, or EOF
 					time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond)
 					outcomes := []int{
@@ -321,6 +393,10 @@ func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
 
 				manager.getCmFunc = func() *store.ConcurrencyManager {
 					return cm
+				}
+
+				manager.getRegistryFunc = func() *stream.StreamRegistry {
+					return coordinator
 				}
 
 				return manager
@@ -339,7 +415,10 @@ func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
 			name: "simultaneous disconnections",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
+
 				cm := store.NewConcurrencyManager()
+				config := stream.NewDefaultStreamConfig()
+				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				var streamWG sync.WaitGroup
 				streamWG.Add(5) // Wait for 5 streams to be active
@@ -348,7 +427,7 @@ func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
 					return mockResponse(http.StatusOK, "test content"), "http://example.com", "1", "m3u_2", nil
 				}
 
-				manager.proxyStreamFunc = func(ctx context.Context, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+				manager.proxyStreamFunc = func(ctx context.Context, coordinator *stream.StreamCoordinator, m3uIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
 					streamWG.Done()
 					streamWG.Wait()                        // Wait for all streams to be ready
 					exitStatus <- proxy.StatusClientClosed // All disconnect at once
@@ -356,6 +435,10 @@ func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
 
 				manager.getCmFunc = func() *store.ConcurrencyManager {
 					return cm
+				}
+
+				manager.getRegistryFunc = func() *stream.StreamRegistry {
+					return coordinator
 				}
 
 				return manager
@@ -373,7 +456,10 @@ func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
 			name: "mixed completion statuses with retries",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
+
 				cm := store.NewConcurrencyManager()
+				config := stream.NewDefaultStreamConfig()
+				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				completionCount := int32(0)
 
@@ -384,7 +470,7 @@ func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
 					return mockResponse(http.StatusOK, "test content"), "http://example.com", "1", m3uIndex, nil
 				}
 
-				manager.proxyStreamFunc = func(ctx context.Context, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+				manager.proxyStreamFunc = func(ctx context.Context, coordinator *stream.StreamCoordinator, m3uIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
 					time.Sleep(time.Duration(rand.Intn(50)) * time.Millisecond)
 
 					// Mix of different completion statuses including retry scenarios
@@ -409,6 +495,10 @@ func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
 					return cm
 				}
 
+				manager.getRegistryFunc = func() *stream.StreamRegistry {
+					return coordinator
+				}
+
 				return manager
 			},
 			numRequests: 8,
@@ -429,13 +519,16 @@ func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
 			name: "rapid connect/disconnect cycles",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
+
 				cm := store.NewConcurrencyManager()
+				config := stream.NewDefaultStreamConfig()
+				coordinator := stream.NewStreamRegistry(config, cm, logger.Default, time.Second)
 
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*http.Response, string, string, string, error) {
 					return mockResponse(http.StatusOK, "test content"), "http://example.com", "1", "m3u_5", nil
 				}
 
-				manager.proxyStreamFunc = func(ctx context.Context, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+				manager.proxyStreamFunc = func(ctx context.Context, coordinator *stream.StreamCoordinator, m3uIndex string, resp *http.Response, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
 					// Very short-lived connections
 					time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
 					exitStatus <- proxy.StatusClientClosed
@@ -443,6 +536,10 @@ func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
 
 				manager.getCmFunc = func() *store.ConcurrencyManager {
 					return cm
+				}
+
+				manager.getRegistryFunc = func() *stream.StreamRegistry {
+					return coordinator
 				}
 
 				return manager
