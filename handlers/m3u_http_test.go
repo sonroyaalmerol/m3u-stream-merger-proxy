@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-func setupTest(t *testing.T) (*M3UHandler, *httptest.ResponseRecorder, *http.Request) {
-	handler := NewM3UHandler(&logger.DefaultLogger{})
+func setupTest(t *testing.T) (*M3UHTTPHandler, *httptest.ResponseRecorder, *http.Request) {
+	handler := NewM3UHTTPHandler(&logger.DefaultLogger{})
 	config.SetConfig(&config.Config{
 		DataPath: "/",
 	})
@@ -50,7 +50,7 @@ func setupTest(t *testing.T) (*M3UHandler, *httptest.ResponseRecorder, *http.Req
 	return handler, recorder, request
 }
 
-func TestM3UHandler_NoAuth(t *testing.T) {
+func TestM3UHTTPHandler_NoAuth(t *testing.T) {
 	// Setup
 	os.Setenv("CREDENTIALS", "")
 	handler, recorder, request := setupTest(t)
@@ -64,7 +64,7 @@ func TestM3UHandler_NoAuth(t *testing.T) {
 	}
 }
 
-func TestM3UHandler_BasicAuth(t *testing.T) {
+func TestM3UHTTPHandler_BasicAuth(t *testing.T) {
 	tests := []struct {
 		name        string
 		credentials string
@@ -132,7 +132,7 @@ func TestM3UHandler_BasicAuth(t *testing.T) {
 	}
 }
 
-func TestM3UHandler_ExpirationDate(t *testing.T) {
+func TestM3UHTTPHandler_ExpirationDate(t *testing.T) {
 	tomorrow := time.Now().Add(24 * time.Hour).Format(time.DateOnly)
 	yesterday := time.Now().Add(-24 * time.Hour).Format(time.DateOnly)
 
@@ -189,7 +189,7 @@ func TestM3UHandler_ExpirationDate(t *testing.T) {
 	}
 }
 
-func TestM3UHandler_Headers(t *testing.T) {
+func TestM3UHTTPHandler_Headers(t *testing.T) {
 	// Setup
 	handler, recorder, request := setupTest(t)
 

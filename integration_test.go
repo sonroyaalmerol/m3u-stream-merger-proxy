@@ -17,7 +17,7 @@ import (
 	"m3u-stream-merger/utils"
 )
 
-func TestStreamHandler(t *testing.T) {
+func TestStreamHTTPHandler(t *testing.T) {
 	// Create temp directory for test data
 	tempDir, err := os.MkdirTemp("", "m3u-test-*")
 	if err != nil {
@@ -50,11 +50,11 @@ func TestStreamHandler(t *testing.T) {
 
 	// Initialize handlers with test configuration
 	t.Log("Initializing handlers with test configuration")
-	m3uHandler := handlers.NewM3UHandler(logger.Default)
+	m3uHandler := handlers.NewM3UHTTPHandler(logger.Default)
 	cachePath := config.GetM3UCachePath()
 
-	streamHandler := handlers.NewStreamHandler(
-		handlers.NewDefaultStreamManager(),
+	streamHandler := handlers.NewStreamHTTPHandler(
+		handlers.NewDefaultProxyInstance(),
 		logger.Default,
 	)
 

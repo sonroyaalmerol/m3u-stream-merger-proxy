@@ -66,7 +66,7 @@ func mockResponse(status int, body string) *http.Response {
 	}
 }
 
-func TestStreamHandler_ServeHTTP(t *testing.T) {
+func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 	cm := store.NewConcurrencyManager()
 	config := stream.NewDefaultStreamConfig()
 	config.ChunkSize = 1024 * 1024
@@ -302,7 +302,7 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			manager := tt.setupMocks()
-			handler := NewStreamHandler(manager, logger.Default)
+			handler := NewStreamHTTPHandler(manager, logger.Default)
 
 			// Create a cancellable context for timeout tests
 			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
@@ -334,7 +334,7 @@ func TestStreamHandler_ServeHTTP(t *testing.T) {
 	}
 }
 
-func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
+func TestStreamHTTPHandler_DisconnectionConcurrency(t *testing.T) {
 	cm := store.NewConcurrencyManager()
 	config := stream.NewDefaultStreamConfig()
 	config.ChunkSize = 1024 * 1024
@@ -530,7 +530,7 @@ func TestStreamHandler_DisconnectionConcurrency(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			manager := tt.setupMocks()
-			handler := NewStreamHandler(manager, logger.Default)
+			handler := NewStreamHTTPHandler(manager, logger.Default)
 
 			var wg sync.WaitGroup
 			wg.Add(tt.numRequests)

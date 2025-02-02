@@ -14,20 +14,20 @@ import (
 	"m3u-stream-merger/utils"
 )
 
-type StreamHandler struct {
-	manager     StreamManager
+type StreamHTTPHandler struct {
+	manager     ProxyInstance
 	logger      logger.Logger
 	coordinator *stream.StreamCoordinator
 }
 
-func NewStreamHandler(manager StreamManager, logger logger.Logger) *StreamHandler {
-	return &StreamHandler{
+func NewStreamHTTPHandler(manager ProxyInstance, logger logger.Logger) *StreamHTTPHandler {
+	return &StreamHTTPHandler{
 		manager: manager,
 		logger:  logger,
 	}
 }
 
-func (h *StreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *StreamHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.logger.Logf("Received request from %s for URL: %s", r.RemoteAddr, r.URL.Path)
 	streamURL := h.extractStreamURL(r.URL.Path)
 	if streamURL == "" {
@@ -44,7 +44,7 @@ func (h *StreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *StreamHandler) extractStreamURL(urlPath string) string {
+func (h *StreamHTTPHandler) extractStreamURL(urlPath string) string {
 	base := path.Base(urlPath)
 	parts := strings.Split(base, ".")
 	if len(parts) == 0 {
@@ -53,7 +53,7 @@ func (h *StreamHandler) extractStreamURL(urlPath string) string {
 	return strings.TrimPrefix(parts[0], "/")
 }
 
-func (h *StreamHandler) handleStream(ctx context.Context, w http.ResponseWriter,
+func (h *StreamHTTPHandler) handleStream(ctx context.Context, w http.ResponseWriter,
 	r *http.Request) error {
 	session := store.GetOrCreateSession(r)
 	firstWrite := true
@@ -97,7 +97,7 @@ func (h *StreamHandler) handleStream(ctx context.Context, w http.ResponseWriter,
 	}
 }
 
-func (h *StreamHandler) writeHeaders(w http.ResponseWriter, resp *http.Response,
+func (h *StreamHTTPHandler) writeHeaders(w http.ResponseWriter, resp *http.Response,
 	firstWrite bool) error {
 	if !firstWrite {
 		return nil
@@ -117,7 +117,7 @@ func (h *StreamHandler) writeHeaders(w http.ResponseWriter, resp *http.Response,
 	return nil
 }
 
-func (h *StreamHandler) handleExitCode(code int,
+func (h *StreamHTTPHandler) handleExitCode(code int,
 	lbResult *loadbalancer.LoadBalancerResult, r *http.Request,
 	session *store.Session) bool {
 	switch code {

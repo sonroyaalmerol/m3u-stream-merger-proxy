@@ -12,7 +12,7 @@ import (
 	"m3u-stream-merger/store"
 )
 
-type StreamManager interface {
+type ProxyInstance interface {
 	GetConcurrencyManager() *store.ConcurrencyManager
 	GetStreamRegistry() *stream.StreamRegistry
 	LoadBalancer(ctx context.Context, req *http.Request, session *store.Session) (*loadbalancer.LoadBalancerResult, error)
@@ -21,7 +21,7 @@ type StreamManager interface {
 		exitStatus chan<- int)
 }
 
-type DefaultStreamManager struct {
+type DefaultProxyInstance struct {
 	lbConfig     *loadbalancer.LBConfig
 	streamConfig *stream.StreamConfig
 	registry     *stream.StreamRegistry
@@ -29,10 +29,10 @@ type DefaultStreamManager struct {
 	logger       logger.Logger
 }
 
-func NewDefaultStreamManager() *DefaultStreamManager {
+func NewDefaultProxyInstance() *DefaultProxyInstance {
 	cm := store.NewConcurrencyManager()
 	streamConfig := stream.NewDefaultStreamConfig()
-	return &DefaultStreamManager{
+	return &DefaultProxyInstance{
 		lbConfig:     loadbalancer.NewDefaultLBConfig(),
 		streamConfig: streamConfig,
 		cm:           cm,
@@ -41,14 +41,14 @@ func NewDefaultStreamManager() *DefaultStreamManager {
 	}
 }
 
-func (sm *DefaultStreamManager) LoadBalancer(ctx context.Context, req *http.Request,
+func (sm *DefaultProxyInstance) LoadBalancer(ctx context.Context, req *http.Request,
 	session *store.Session) (*loadbalancer.LoadBalancerResult, error) {
 	instance := loadbalancer.NewLoadBalancerInstance(sm.cm, sm.lbConfig,
 		loadbalancer.WithLogger(sm.logger))
 	return instance.Balance(ctx, req, session)
 }
 
-func (sm *DefaultStreamManager) ProxyStream(ctx context.Context, coordinator *stream.StreamCoordinator,
+func (sm *DefaultProxyInstance) ProxyStream(ctx context.Context, coordinator *stream.StreamCoordinator,
 	lbResult *loadbalancer.LoadBalancerResult, r *http.Request, w http.ResponseWriter,
 	exitStatus chan<- int) {
 	instance, err := stream.NewStreamInstance(sm.cm, sm.streamConfig,
@@ -61,10 +61,10 @@ func (sm *DefaultStreamManager) ProxyStream(ctx context.Context, coordinator *st
 	instance.ProxyStream(ctx, coordinator, lbResult, r, w, exitStatus)
 }
 
-func (sm *DefaultStreamManager) GetConcurrencyManager() *store.ConcurrencyManager {
+func (sm *DefaultProxyInstance) GetConcurrencyManager() *store.ConcurrencyManager {
 	return sm.cm
 }
 
-func (sm *DefaultStreamManager) GetStreamRegistry() *stream.StreamRegistry {
+func (sm *DefaultProxyInstance) GetStreamRegistry() *stream.StreamRegistry {
 	return sm.registry
 }

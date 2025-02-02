@@ -72,7 +72,7 @@ func (h *StreamHandler) HandleStream(
 	var bytesWritten int64
 	lastPosition := h.coordinator.buffer.Prev() // Start from previous to get first new chunk
 
-	// Create a channel to signal writer goroutine to stop
+	// Create a channel to signal client helper goroutine to stop
 	done := make(chan struct{})
 	defer close(done)
 
