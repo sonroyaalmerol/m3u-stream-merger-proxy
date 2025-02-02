@@ -229,7 +229,7 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 	}
 
 	for subIndex, url := range urls {
-		// Thread-safe check of tested indexes
+		id := index + "|" + subIndex
 		session.Mutex.RLock()
 		alreadyTested := slices.Contains(session.TestedIndexes, index+"|"+subIndex)
 		session.Mutex.RUnlock()
@@ -247,34 +247,26 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 		req, err := http.NewRequest(method, url, nil)
 		if err != nil {
 			instance.logger.Errorf("Error creating request: %s", err.Error())
-			session.Mutex.Lock()
-			session.TestedIndexes = append(session.TestedIndexes, index+"|"+subIndex)
-			session.Mutex.Unlock()
+			markTested(session, id)
 			continue
 		}
 
 		resp, err := instance.httpClient.Do(req)
 		if err != nil {
 			instance.logger.Errorf("Error fetching stream: %s", err.Error())
-			session.Mutex.Lock()
-			session.TestedIndexes = append(session.TestedIndexes, index+"|"+subIndex)
-			session.Mutex.Unlock()
+			markTested(session, id)
 			continue
 		}
 
 		if resp == nil {
 			instance.logger.Errorf("Received nil response from HTTP client")
-			session.Mutex.Lock()
-			session.TestedIndexes = append(session.TestedIndexes, index+"|"+subIndex)
-			session.Mutex.Unlock()
+			markTested(session, id)
 			continue
 		}
 
 		if resp.StatusCode != http.StatusOK {
 			instance.logger.Errorf("Non-200 status code received: %d for %s %s", resp.StatusCode, method, url)
-			session.Mutex.Lock()
-			session.TestedIndexes = append(session.TestedIndexes, index+"|"+subIndex)
-			session.Mutex.Unlock()
+			markTested(session, id)
 			continue
 		}
 
@@ -289,4 +281,10 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 	}
 
 	return nil, fmt.Errorf("all urls failed")
+}
+
+func markTested(session *store.Session, id string) {
+	session.Mutex.Lock()
+	session.TestedIndexes = append(session.TestedIndexes, id)
+	session.Mutex.Unlock()
 }
