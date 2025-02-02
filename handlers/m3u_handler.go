@@ -22,7 +22,6 @@ func NewM3UHandler(logger logger.Logger) *M3UHandler {
 }
 
 func (h *M3UHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	credentials := os.Getenv("CREDENTIALS")
@@ -38,7 +37,7 @@ func (h *M3UHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				// date is also provided, check if we are before the provided date (expiration date)
 				d, err := time.Parse(time.DateOnly, cred[3])
 				if err != nil {
-					utils.SafeLogf("[WARNING] invalid credential format: %s\n", arrItem)
+					h.logger.Warnf("invalid credential format: %s\n", arrItem)
 					continue
 				}
 				if time.Now().After(d) {
@@ -71,9 +70,11 @@ func (h *M3UHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	w.Header().Set("Content-Type", "text/plain")
+
 	content := store.RevalidatingGetM3U(r, false)
 
 	if _, err := w.Write([]byte(content)); err != nil {
-    h.logger.Debugf("Error writing http response: %v\n", err)
+		h.logger.Debugf("Error writing http response: %v\n", err)
 	}
 }
