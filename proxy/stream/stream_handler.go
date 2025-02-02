@@ -3,7 +3,6 @@ package stream
 import (
 	"container/ring"
 	"context"
-	"errors"
 	"io"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
@@ -166,8 +165,8 @@ func (h *StreamHandler) handleBufferedStream(
 					chunk.Reset() // Return buffers to pool immediately
 				}
 
-				if batchBuffer == nil || writer == nil {
-					return StreamResult{bytesWritten, errors.New("batchBuffer or writer is nil"), 0}
+				if ctx.Err() != nil {
+					return StreamResult{bytesWritten, ctx.Err(), proxy.StatusClientClosed}
 				}
 
 				if written, err := writer.Write(batchBuffer.B); err != nil {
