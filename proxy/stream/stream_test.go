@@ -56,7 +56,6 @@ type mockHLSServer struct {
 	mediaPlaylist string
 	segments      map[string][]byte
 	logger        logger.Logger
-	mu            sync.Mutex
 }
 
 func newMockHLSServer() *mockHLSServer {
