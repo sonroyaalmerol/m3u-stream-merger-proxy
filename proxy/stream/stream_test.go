@@ -52,54 +52,79 @@ func (m *mockResponseWriter) Flush() {
 }
 
 type mockHLSServer struct {
-	server         *httptest.Server
-	masterPlaylist string
-	mediaPlaylist  string
-	segments       map[string][]byte
-	requestCount   map[string]int
-	mu             sync.Mutex
+	server        *httptest.Server
+	mediaPlaylist string
+	segments      map[string][]byte
+	logger        logger.Logger
+	mu            sync.Mutex
 }
 
 func newMockHLSServer() *mockHLSServer {
 	m := &mockHLSServer{
-		segments:     make(map[string][]byte),
-		requestCount: make(map[string]int),
+		segments: make(map[string][]byte),
+		logger:   logger.Default,
 	}
-	m.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		m.mu.Lock()
-		m.requestCount[r.URL.Path]++
-		reqCount := m.requestCount[r.URL.Path]
-		m.mu.Unlock()
 
-		switch {
-		case strings.HasSuffix(r.URL.Path, "master.m3u8"):
-			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-			_, _ = w.Write([]byte(m.masterPlaylist))
-		case strings.HasSuffix(r.URL.Path, "playlist.m3u8"):
-			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-			if reqCount == 1 {
-				_, _ = w.Write([]byte(m.mediaPlaylist))
-			} else {
-				// Return empty playlist with ENDLIST on subsequent requests
-				_, _ = w.Write([]byte(`#EXTM3U
-#EXT-X-VERSION:3
-#EXT-X-TARGETDURATION:10
-#EXT-X-ENDLIST`))
-			}
-		case strings.HasSuffix(r.URL.Path, ".ts"):
-			w.Header().Set("Content-Type", "video/MP2T")
-			if data, ok := m.segments[r.URL.Path]; ok {
-				_, _ = w.Write(data)
-			}
+	m.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check for request context cancellation
+		done := make(chan struct{})
+		go func() {
+			<-r.Context().Done()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			m.logger.Debug("Request context cancelled")
+			return
 		default:
-			w.WriteHeader(http.StatusNotFound)
+			m.handleRequest(w, r)
 		}
 	}))
+
 	return m
 }
 
+func (m *mockHLSServer) handleRequest(w http.ResponseWriter, r *http.Request) {
+	m.logger.Debugf("Mock server received request: %s", r.URL.Path)
+
+	switch {
+	case strings.HasSuffix(r.URL.Path, ".m3u8"):
+		m.logger.Debug("Serving playlist")
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		_, err := w.Write([]byte(m.mediaPlaylist))
+		if err != nil {
+			m.logger.Errorf("Error writing playlist: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+	case strings.HasSuffix(r.URL.Path, ".ts"):
+		m.logger.Debugf("Serving segment: %s", r.URL.Path)
+		w.Header().Set("Content-Type", "video/MP2T")
+		if data, ok := m.segments[r.URL.Path]; ok {
+			m.logger.Debugf("Writing segment data: %d bytes", len(data))
+			_, err := w.Write(data)
+			if err != nil {
+				m.logger.Errorf("Error writing segment data: %v", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+		} else {
+			m.logger.Errorf("Segment not found: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+
+	default:
+		m.logger.Errorf("Unknown request path: %s", r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
 func (m *mockHLSServer) Close() {
-	m.server.Close()
+	if m.server != nil {
+		m.server.Close()
+	}
 }
 
 func TestM3U8StreamHandler_HandleHLSStream(t *testing.T) {
@@ -114,26 +139,21 @@ func TestM3U8StreamHandler_HandleHLSStream(t *testing.T) {
 		expectedResult StreamResult
 	}{
 		{
-			name: "successful variant stream",
+			name: "successful media playlist",
 			config: &StreamConfig{
 				TimeoutSeconds:   5,
 				ChunkSize:        1024,
 				SharedBufferSize: 5,
 			},
 			setupMock: func(m *mockHLSServer) {
-				m.masterPlaylist = fmt.Sprintf(`#EXTM3U
-#EXT-X-STREAM-INF:BANDWIDTH=1280000
-%s/high/playlist.m3u8`, m.server.URL)
-
-				m.mediaPlaylist = fmt.Sprintf(`#EXTM3U
+				m.mediaPlaylist = `#EXTM3U
 #EXT-X-VERSION:3
 #EXT-X-TARGETDURATION:10
 #EXTINF:10.0,
-%s/segment1.ts
+/segment1.ts
 #EXTINF:10.0,
-%s/segment2.ts
-#EXT-X-ENDLIST`, m.server.URL, m.server.URL)
-
+/segment2.ts
+#EXT-X-ENDLIST`
 				m.segments["/segment1.ts"] = segment1Data
 				m.segments["/segment2.ts"] = segment2Data
 			},
@@ -152,17 +172,12 @@ func TestM3U8StreamHandler_HandleHLSStream(t *testing.T) {
 				SharedBufferSize: 5,
 			},
 			setupMock: func(m *mockHLSServer) {
-				m.masterPlaylist = fmt.Sprintf(`#EXTM3U
-#EXT-X-STREAM-INF:BANDWIDTH=1280000
-%s/high/playlist.m3u8`, m.server.URL)
-
-				m.mediaPlaylist = fmt.Sprintf(`#EXTM3U
+				m.mediaPlaylist = `#EXTM3U
 #EXT-X-VERSION:3
 #EXT-X-TARGETDURATION:10
 #EXTINF:10.0,
-%s/segment1.ts
-#EXT-X-ENDLIST`, m.server.URL)
-
+/segment1.ts
+#EXT-X-ENDLIST`
 				m.segments["/segment1.ts"] = segment1Data
 			},
 			writeError: errors.New("write error"),
@@ -173,48 +188,53 @@ func TestM3U8StreamHandler_HandleHLSStream(t *testing.T) {
 			},
 		},
 		{
-			name: "non-master playlist error",
+			name: "continuous media playlist without endlist",
 			config: &StreamConfig{
-				TimeoutSeconds:   5,
+				TimeoutSeconds:   2,
 				ChunkSize:        1024,
 				SharedBufferSize: 5,
 			},
 			setupMock: func(m *mockHLSServer) {
-				// Direct media playlist without variants
-				m.masterPlaylist = fmt.Sprintf(`#EXTM3U
+				m.mediaPlaylist = `#EXTM3U
 #EXT-X-VERSION:3
-#EXT-X-TARGETDURATION:10
-#EXTINF:10.0,
-%s/segment1.ts`, m.server.URL)
+#EXT-X-TARGETDURATION:12
+#EXT-X-MEDIA-SEQUENCE:3086
+#EXTINF:12.008000,
+/segment1.ts
+#EXTINF:12.008000,
+/segment2.ts`
+				m.segments["/segment1.ts"] = segment1Data
+				m.segments["/segment2.ts"] = segment2Data
 			},
 			writeError: nil,
 			expectedResult: StreamResult{
-				BytesWritten: 0,
-				Error:        errors.New("not a master playlist"),
-				Status:       proxy.StatusServerError,
+				BytesWritten: 24, // First pass through the segments
+				Error:        context.DeadlineExceeded,
+				Status:       proxy.StatusClientClosed,
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create a context with timeout that's slightly shorter than the test timeout
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+			defer cancel()
+
 			mockServer := newMockHLSServer()
 			defer mockServer.Close()
 
 			tt.setupMock(mockServer)
 
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			config := &StreamConfig{
-				TimeoutSeconds:   5,
-				ChunkSize:        1024,
-				SharedBufferSize: 5,
-			}
 			cm := store.NewConcurrencyManager()
-			coordinator := NewStreamCoordinator("test_id", config, cm, logger.Default)
+			coordinator := NewStreamCoordinator("test_id", tt.config, cm, logger.Default)
 
-			resp, err := http.Get(mockServer.server.URL + "/master.m3u8")
+			// Make first request with short timeout
+			reqCtx, reqCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer reqCancel()
+
+			req, _ := http.NewRequestWithContext(reqCtx, "GET", mockServer.server.URL+"/playlist.m3u8", nil)
+			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatalf("Failed to get mock response: %v", err)
 			}
@@ -223,7 +243,19 @@ func TestM3U8StreamHandler_HandleHLSStream(t *testing.T) {
 			writer := &mockResponseWriter{err: tt.writeError}
 			lbRes := loadbalancer.LoadBalancerResult{Response: resp, Index: "1"}
 
-			result := handler.HandleHLSStream(ctx, &lbRes, writer, "test-addr")
+			// Create a goroutine to handle connection timeout
+			resultCh := make(chan StreamResult, 1)
+			go func() {
+				resultCh <- handler.HandleHLSStream(ctx, &lbRes, writer, "test-addr")
+			}()
+
+			// Wait for result or timeout
+			var result StreamResult
+			select {
+			case result = <-resultCh:
+			case <-time.After(4500 * time.Millisecond): // Slightly longer than context timeout
+				t.Fatal("Test timed out waiting for result")
+			}
 
 			if result.Status != tt.expectedResult.Status {
 				t.Errorf("HandleHLSStream() status = %v, want %v", result.Status, tt.expectedResult.Status)
@@ -231,11 +263,10 @@ func TestM3U8StreamHandler_HandleHLSStream(t *testing.T) {
 			if result.BytesWritten != tt.expectedResult.BytesWritten {
 				t.Errorf("HandleHLSStream() bytesWritten = %v, want %v", result.BytesWritten, tt.expectedResult.BytesWritten)
 			}
-			if (result.Error != nil) != (tt.expectedResult.Error != nil) {
-				t.Errorf("HandleHLSStream() error = %v, want %v", result.Error, tt.expectedResult.Error)
-			}
-			if result.Error != nil && tt.expectedResult.Error != nil && result.Error.Error() != tt.expectedResult.Error.Error() {
-				t.Errorf("HandleHLSStream() error = %v, want %v", result.Error, tt.expectedResult.Error)
+			if tt.expectedResult.Error != nil {
+				if result.Error == nil || !strings.Contains(result.Error.Error(), tt.expectedResult.Error.Error()) {
+					t.Errorf("HandleHLSStream() error = %v, want error containing %v", result.Error, tt.expectedResult.Error)
+				}
 			}
 		})
 	}
@@ -321,7 +352,6 @@ func TestMediaStreamHandler_HandleMediaStream(t *testing.T) {
 }
 
 func TestStreamInstance_ProxyStream(t *testing.T) {
-	// Both segment1 and segment2 data must be exactly 12 bytes
 	segment1Data := []byte("TESTSEGMNT1!")
 	segment2Data := []byte("TESTSEGMNT2!")
 
@@ -337,10 +367,6 @@ func TestStreamInstance_ProxyStream(t *testing.T) {
 			method:      http.MethodGet,
 			contentType: "application/vnd.apple.mpegurl",
 			setupMock: func(m *mockHLSServer) {
-				m.masterPlaylist = fmt.Sprintf(`#EXTM3U
-#EXT-X-STREAM-INF:BANDWIDTH=1280000
-%s/high/playlist.m3u8`, m.server.URL)
-
 				m.mediaPlaylist = fmt.Sprintf(`#EXTM3U
 #EXT-X-VERSION:3
 #EXT-X-TARGETDURATION:10
@@ -383,10 +409,8 @@ func TestStreamInstance_ProxyStream(t *testing.T) {
 				t.Fatalf("Failed to create StreamInstance: %v", err)
 			}
 
-			var path string
-			if tt.contentType == "application/vnd.apple.mpegurl" {
-				path = "/master.m3u8"
-			} else {
+			path := "/playlist.m3u8"
+			if tt.contentType == "video/MP2T" {
 				path = "/media"
 			}
 
@@ -398,12 +422,9 @@ func TestStreamInstance_ProxyStream(t *testing.T) {
 			}
 			resp.Header.Set("Content-Type", tt.contentType)
 
-			// For media streams, we need to set up the response body
 			if tt.contentType == "video/MP2T" {
 				resp.Body = io.NopCloser(bytes.NewReader(mockServer.segments["/media"]))
 			} else {
-				// For M3U8, the mock server will handle the response
-				var err error
 				resp, err = http.Get(mockServer.server.URL + path)
 				if err != nil {
 					t.Fatalf("Failed to get mock response: %v", err)

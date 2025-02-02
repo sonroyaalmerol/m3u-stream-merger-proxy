@@ -9,7 +9,6 @@ import (
 	"m3u-stream-merger/proxy/loadbalancer"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -50,11 +49,21 @@ func (h *M3U8StreamHandler) HandleHLSStream(
 		return StreamResult{0, fmt.Errorf("coordinator is nil"), proxy.StatusServerError}
 	}
 
+	var bytesWritten int64
+	var resultErr error
+	var status int
+
+	// Create a new context that will be cancelled when either the original context
+	// is cancelled or when we're cleaning up
+	writerCtx, writerCancel := context.WithCancel(ctx)
+	defer writerCancel()
+
 	h.coordinator.writerCtxMu.Lock()
 	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 0
 	if isFirstClient {
-		h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
-		go h.startHLSWriter(h.coordinator.writerCtx, lbResult)
+		h.coordinator.writerCtx = writerCtx
+		h.coordinator.writerCancel = writerCancel
+		go h.startHLSWriter(writerCtx, lbResult)
 	}
 	h.coordinator.writerCtxMu.Unlock()
 
@@ -78,51 +87,71 @@ func (h *M3U8StreamHandler) HandleHLSStream(
 	}
 	defer cleanup()
 
-	var bytesWritten int64
 	lastPosition := h.coordinator.buffer.Prev()
 
-	for {
-		select {
-		case <-ctx.Done():
-			h.logger.Debugf("Client context cancelled: %s", remoteAddr)
-			return StreamResult{bytesWritten, ctx.Err(), proxy.StatusClientClosed}
-		default:
-			chunks, errChunk, newPos := h.coordinator.ReadChunks(lastPosition)
+	// Create a done channel to signal when we're finished
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
 
-			if len(chunks) > 0 {
-				for _, chunk := range chunks {
-					if chunk != nil && chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
-						n, err := writer.Write(chunk.Buffer.Bytes())
-						if err != nil {
-							// Clean up chunks
-							for _, c := range chunks {
-								if c != nil {
-									c.Reset()
+		for {
+			select {
+			case <-ctx.Done():
+				resultErr = ctx.Err()
+				status = proxy.StatusClientClosed
+				return
+			default:
+				chunks, errChunk, newPos := h.coordinator.ReadChunks(lastPosition)
+
+				if len(chunks) > 0 {
+					for _, chunk := range chunks {
+						if chunk != nil && chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
+							n, err := writer.Write(chunk.Buffer.Bytes())
+							if err != nil {
+								// Clean up chunks
+								for _, c := range chunks {
+									if c != nil {
+										c.Reset()
+									}
 								}
+								resultErr = err
+								status = proxy.StatusClientClosed
+								return
 							}
-							return StreamResult{bytesWritten, err, proxy.StatusClientClosed}
+							bytesWritten += int64(n)
+							if flusher, ok := writer.(http.Flusher); ok {
+								flusher.Flush()
+							}
 						}
-						bytesWritten += int64(n)
-						if flusher, ok := writer.(http.Flusher); ok {
-							flusher.Flush()
+						if chunk != nil {
+							chunk.Reset()
 						}
-					}
-					if chunk != nil {
-						chunk.Reset()
 					}
 				}
-			}
 
-			if errChunk != nil {
-				return StreamResult{bytesWritten, errChunk.Error, errChunk.Status}
-			}
+				if errChunk != nil {
+					resultErr = errChunk.Error
+					status = errChunk.Status
+					return
+				}
 
-			if newPos != nil {
-				lastPosition = newPos
-			}
+				if newPos != nil {
+					lastPosition = newPos
+				}
 
-			time.Sleep(10 * time.Millisecond)
+				// Add a small sleep to prevent tight looping
+				time.Sleep(10 * time.Millisecond)
+			}
 		}
+	}()
+
+	// Wait for either the context to be cancelled or the streaming to complete
+	select {
+	case <-ctx.Done():
+		h.logger.Debugf("Client context cancelled: %s", remoteAddr)
+		return StreamResult{bytesWritten, ctx.Err(), proxy.StatusClientClosed}
+	case <-done:
+		return StreamResult{bytesWritten, resultErr, status}
 	}
 }
 
@@ -134,42 +163,34 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 		}
 	}()
 
-	// Read master playlist
-	body, err := io.ReadAll(lbResult.Response.Body)
-	if err != nil {
-		h.coordinator.writeError(fmt.Errorf("failed to read playlist: %w", err), proxy.StatusServerError)
-		return
-	}
-	defer lbResult.Response.Body.Close()
-
-	content := string(body)
-
-	// Verify this is a master playlist
-	if !strings.Contains(content, "#EXT-X-STREAM-INF:") {
-		h.coordinator.writeError(fmt.Errorf("not a master playlist"), proxy.StatusServerError)
-		return
-	}
-
-	// Get best variant URL
-	bestVariant, err := h.getBestVariant(strings.Split(content, "\n"), lbResult.Response.Request.URL)
-	if err != nil {
-		h.coordinator.writeError(err, proxy.StatusServerError)
-		return
-	}
-
 	client := &http.Client{}
 	isEndlist := false
+	mediaURL := lbResult.Response.Request.URL.String()
+	processedSegments := make(map[string]bool)
+
+	// Create a ticker for polling
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 
 	for !isEndlist {
 		select {
 		case <-ctx.Done():
+			h.logger.Debug("Context cancelled, stopping HLS writer")
 			h.coordinator.writeError(ctx.Err(), proxy.StatusClientClosed)
 			return
-		default:
-			segments, endlist, err := h.fetchMediaPlaylist(bestVariant.URL, client)
+		case <-ticker.C:
+			reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			segments, endlist, err := h.fetchMediaPlaylist(reqCtx, mediaURL, client)
+			cancel()
+
 			if err != nil {
+				if ctx.Err() != nil {
+					h.logger.Debug("Context cancelled during playlist fetch")
+					h.coordinator.writeError(ctx.Err(), proxy.StatusClientClosed)
+					return
+				}
+
 				if h.coordinator.shouldRetry(h.coordinator.getTimeoutDuration()) {
-					time.Sleep(time.Second)
 					continue
 				}
 				h.coordinator.writeError(err, proxy.StatusServerError)
@@ -177,22 +198,36 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 			}
 
 			isEndlist = endlist
+			newSegments := make([]string, 0)
 
-			if err := h.streamSegments(ctx, segments); err != nil {
-				if h.coordinator.shouldRetry(h.coordinator.getTimeoutDuration()) {
-					time.Sleep(time.Second)
-					continue
+			for _, segment := range segments {
+				if !processedSegments[segment] {
+					newSegments = append(newSegments, segment)
+					processedSegments[segment] = true
 				}
-				h.coordinator.writeError(err, proxy.StatusServerError)
-				return
+			}
+
+			if len(newSegments) > 0 {
+				if err := h.streamSegments(ctx, newSegments); err != nil {
+					if ctx.Err() != nil {
+						h.logger.Debug("Context cancelled during segment streaming")
+						h.coordinator.writeError(ctx.Err(), proxy.StatusClientClosed)
+						return
+					}
+
+					if h.coordinator.shouldRetry(h.coordinator.getTimeoutDuration()) {
+						continue
+					}
+					h.coordinator.writeError(err, proxy.StatusServerError)
+					return
+				}
 			}
 
 			if isEndlist {
+				h.logger.Debug("Playlist ended, stopping HLS writer")
 				h.coordinator.writeError(io.EOF, proxy.StatusEOF)
 				return
 			}
-
-			time.Sleep(time.Second)
 		}
 	}
 }
@@ -207,7 +242,7 @@ func (h *M3U8StreamHandler) streamSegments(ctx context.Context, segments []strin
 		default:
 			h.logger.Debugf("Fetching segment: %s", segmentURL)
 
-			req, err := http.NewRequest("GET", segmentURL, nil)
+			req, err := http.NewRequestWithContext(ctx, "GET", segmentURL, nil)
 			if err != nil {
 				h.logger.Errorf("Error creating segment request: %v", err)
 				continue
@@ -224,10 +259,12 @@ func (h *M3U8StreamHandler) streamSegments(ctx context.Context, segments []strin
 			segResp.Body.Close()
 
 			if err != nil {
+				h.logger.Errorf("Error copying segment data: %v", err)
 				chunk.Reset()
 				continue
 			}
 
+			h.logger.Debugf("Writing segment of size: %d bytes", chunk.Buffer.Len())
 			chunk.Timestamp = time.Now()
 			if !h.coordinator.Write(chunk) {
 				chunk.Reset()
@@ -238,17 +275,26 @@ func (h *M3U8StreamHandler) streamSegments(ctx context.Context, segments []strin
 	return nil
 }
 
-func (h *M3U8StreamHandler) fetchMediaPlaylist(mediaURL string, client *http.Client) ([]string, bool, error) {
-	resp, err := client.Get(mediaURL)
+func (h *M3U8StreamHandler) fetchMediaPlaylist(ctx context.Context, mediaURL string, client *http.Client) ([]string, bool, error) {
+	h.logger.Debugf("Fetching media playlist from: %s", mediaURL)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", mediaURL, nil)
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to fetch playlist: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("failed to read playlist body: %w", err)
 	}
+
+	h.logger.Debugf("Playlist content:\n%s", string(body))
 
 	lines := strings.Split(string(body), "\n")
 	base, _ := url.Parse(mediaURL)
@@ -258,6 +304,10 @@ func (h *M3U8StreamHandler) fetchMediaPlaylist(mediaURL string, client *http.Cli
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
+
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
+		}
 
 		if line == "#EXT-X-ENDLIST" {
 			isEndlist = true
@@ -277,77 +327,11 @@ func (h *M3U8StreamHandler) fetchMediaPlaylist(mediaURL string, client *http.Cli
 		if !segURL.IsAbs() {
 			segURL = base.ResolveReference(segURL)
 		}
+
+		h.logger.Debugf("Found segment: %s", segURL.String())
 		segments = append(segments, segURL.String())
 	}
 
+	h.logger.Debugf("Found %d segments, endlist: %v", len(segments), isEndlist)
 	return segments, isEndlist, nil
-}
-
-func (h *M3U8StreamHandler) getBestVariant(lines []string, baseURL *url.URL) (VariantStream, error) {
-	var variants []VariantStream
-
-	for i, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "#EXT-X-STREAM-INF:") {
-			if i+1 >= len(lines) {
-				continue
-			}
-
-			variant, err := h.parseVariantStream(line, lines[i+1], baseURL)
-			if err != nil {
-				h.logger.Errorf("Error parsing variant: %v", err)
-				continue
-			}
-			variants = append(variants, variant)
-		}
-	}
-
-	if len(variants) == 0 {
-		return VariantStream{}, fmt.Errorf("no variants found")
-	}
-
-	// Choose the variant with the highest bandwidth
-	best := variants[0]
-	for _, v := range variants {
-		if v.Bandwidth > best.Bandwidth {
-			best = v
-		}
-	}
-
-	return best, nil
-}
-
-func (h *M3U8StreamHandler) parseVariantStream(
-	streamInf string,
-	uri string,
-	baseURL *url.URL,
-) (VariantStream, error) {
-	var variant VariantStream
-
-	attrStr := strings.TrimPrefix(streamInf, "#EXT-X-STREAM-INF:")
-	attrs := strings.Split(attrStr, ",")
-
-	for _, attr := range attrs {
-		attr = strings.TrimSpace(attr)
-		if strings.HasPrefix(attr, "BANDWIDTH=") {
-			bwStr := strings.TrimPrefix(attr, "BANDWIDTH=")
-			bw, err := strconv.Atoi(bwStr)
-			if err == nil {
-				variant.Bandwidth = bw
-			}
-		}
-	}
-
-	uri = strings.TrimSpace(uri)
-	u, err := url.Parse(uri)
-	if err != nil {
-		return variant, fmt.Errorf("invalid variant URL: %w", err)
-	}
-
-	if !u.IsAbs() {
-		u = baseURL.ResolveReference(u)
-	}
-	variant.URL = u.String()
-
-	return variant, nil
 }
