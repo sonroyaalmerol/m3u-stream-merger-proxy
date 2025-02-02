@@ -74,14 +74,14 @@ func newMockHLSServer() *mockHLSServer {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "master.m3u8"):
 			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-			w.Write([]byte(m.masterPlaylist))
+			_, _ = w.Write([]byte(m.masterPlaylist))
 		case strings.HasSuffix(r.URL.Path, "playlist.m3u8"):
 			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 			if reqCount == 1 {
-				w.Write([]byte(m.mediaPlaylist))
+				_, _ = w.Write([]byte(m.mediaPlaylist))
 			} else {
 				// Return empty playlist with ENDLIST on subsequent requests
-				w.Write([]byte(`#EXTM3U
+				_, _ = w.Write([]byte(`#EXTM3U
 #EXT-X-VERSION:3
 #EXT-X-TARGETDURATION:10
 #EXT-X-ENDLIST`))
@@ -89,7 +89,7 @@ func newMockHLSServer() *mockHLSServer {
 		case strings.HasSuffix(r.URL.Path, ".ts"):
 			w.Header().Set("Content-Type", "video/MP2T")
 			if data, ok := m.segments[r.URL.Path]; ok {
-				w.Write(data)
+				_, _ = w.Write(data)
 			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
