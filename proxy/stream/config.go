@@ -14,10 +14,10 @@ type StreamConfig struct {
 }
 
 func NewDefaultStreamConfig() *StreamConfig {
-	finalBufferSize := 5
+	finalBufferSize := 4
 	finalTimeoutSeconds := 3
 
-	bufferSize, ok := os.LookupEnv("BUFFER_SIZE")
+	bufferSize, ok := os.LookupEnv("BUFFER_CHUNK_NUM")
 	if ok {
 		intBufferSize, err := strconv.Atoi(bufferSize)
 		if err == nil && intBufferSize >= 0 {
