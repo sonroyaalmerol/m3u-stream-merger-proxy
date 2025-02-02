@@ -58,8 +58,8 @@ func (instance *StreamInstance) ProxyStream(
 	w http.ResponseWriter,
 	statusChan chan<- int,
 ) {
-	if r.Method != http.MethodGet || utils.IsAnM3U8Media(lbResult.Response) {
-		instance.handleM3U8Stream(lbResult.Response, w, statusChan)
+	if utils.IsAnM3U8Media(lbResult.Response) {
+		instance.handleM3U8Stream(ctx, coordinator, lbResult, r, w, statusChan)
 		return
 	}
 
@@ -67,17 +67,15 @@ func (instance *StreamInstance) ProxyStream(
 }
 
 func (instance *StreamInstance) handleM3U8Stream(
-	resp *http.Response,
+	ctx context.Context,
+	coordinator *StreamCoordinator,
+	lbResult *loadbalancer.LoadBalancerResult,
+	r *http.Request,
 	w http.ResponseWriter,
 	statusChan chan<- int,
 ) {
-	// Initialize stream handler
-	handler := NewM3U8StreamHandler(instance.config, instance.logger)
-
-	// Get the base URL from the response
-	baseURL := resp.Request.URL
-
-	result := handler.HandleHLSStream(resp, w, baseURL)
+	handler := NewM3U8StreamHandler(instance.config, coordinator, instance.logger)
+	result := handler.HandleHLSStream(ctx, lbResult, w, r.RemoteAddr)
 
 	if result.Error != nil {
 		instance.logger.Errorf("Stream handler error: %v", result.Error)
@@ -94,8 +92,8 @@ func (instance *StreamInstance) handleMediaStream(
 	w http.ResponseWriter,
 	statusChan chan<- int,
 ) {
-	handler := NewStreamHandler(instance.config, coordinator, instance.logger)
-	result := handler.HandleStream(ctx, lbResult, w, r.RemoteAddr)
+	handler := NewMediaStreamHandler(instance.config, coordinator, instance.logger)
+	result := handler.HandleMediaStream(ctx, lbResult, w, r.RemoteAddr)
 
 	if result.Error != nil {
 		instance.logger.Logf("Stream handler status: %v", result.Error)

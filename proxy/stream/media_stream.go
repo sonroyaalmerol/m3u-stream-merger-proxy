@@ -10,14 +10,14 @@ import (
 	"time"
 )
 
-type StreamHandler struct {
+type MediaStreamHandler struct {
 	config      *StreamConfig
 	logger      logger.Logger
 	coordinator *StreamCoordinator
 }
 
-func NewStreamHandler(config *StreamConfig, coordinator *StreamCoordinator, logger logger.Logger) *StreamHandler {
-	return &StreamHandler{
+func NewMediaStreamHandler(config *StreamConfig, coordinator *StreamCoordinator, logger logger.Logger) *MediaStreamHandler {
+	return &MediaStreamHandler{
 		config:      config,
 		logger:      logger,
 		coordinator: coordinator,
@@ -30,7 +30,7 @@ type StreamResult struct {
 	Status       int
 }
 
-func (h *StreamHandler) HandleStream(
+func (h *MediaStreamHandler) HandleMediaStream(
 	ctx context.Context,
 	lbResult *loadbalancer.LoadBalancerResult,
 	writer ResponseWriter,
@@ -169,7 +169,7 @@ func (h *StreamHandler) HandleStream(
 }
 
 // safeWrite attempts to write to the writer and recovers from panics
-func (h *StreamHandler) safeWrite(writer ResponseWriter, data []byte) (n int, err error) {
+func (h *MediaStreamHandler) safeWrite(writer ResponseWriter, data []byte) (n int, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			h.logger.Errorf("Panic in write: %v", r)
@@ -181,7 +181,7 @@ func (h *StreamHandler) safeWrite(writer ResponseWriter, data []byte) (n int, er
 }
 
 // safeFlush attempts to flush the writer and recovers from panics
-func (h *StreamHandler) safeFlush(flusher StreamFlusher) error {
+func (h *MediaStreamHandler) safeFlush(flusher StreamFlusher) error {
 	defer func() {
 		if r := recover(); r != nil {
 			h.logger.Errorf("Panic in flush: %v", r)

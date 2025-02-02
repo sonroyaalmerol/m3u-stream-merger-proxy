@@ -104,12 +104,16 @@ func (h *StreamHTTPHandler) writeHeaders(w http.ResponseWriter, resp *http.Respo
 	}
 
 	for k, v := range resp.Header {
-		if strings.ToLower(k) == "content-length" {
+		if strings.ToLower(k) == "content-length" || strings.ToLower(k) == "content-type" {
 			continue
 		}
 		for _, val := range v {
 			w.Header().Set(k, val)
 		}
+	}
+
+	if utils.IsAnM3U8Media(resp) {
+		w.Header().Set("Content-Type", "video/mp2t")
 	}
 
 	w.WriteHeader(resp.StatusCode)
@@ -122,10 +126,6 @@ func (h *StreamHTTPHandler) handleExitCode(code int,
 	session *store.Session) bool {
 	switch code {
 	case proxy.StatusEOF:
-		if utils.EOFIsExpected(lbResult.Response) {
-			h.logger.Logf("Successfully proxied playlist: %s", r.RemoteAddr)
-			return true
-		}
 		fallthrough
 	case proxy.StatusServerError:
 		index := lbResult.Index + "|" + lbResult.SubIndex

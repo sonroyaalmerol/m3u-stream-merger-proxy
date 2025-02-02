@@ -178,35 +178,6 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 			expectedError:  false,
 		},
 		{
-			name: "stream with EOF condition",
-			path: "/test.m3u8",
-			setupMocks: func() *mockStreamManager {
-				manager := &mockStreamManager{}
-
-				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*loadbalancer.LoadBalancerResult, error) {
-					resp := mockResponse(http.StatusOK, "EOF content")
-					resp.Header.Set("Content-Type", "application/vnd.apple.mpegurl")
-					return &loadbalancer.LoadBalancerResult{Response: resp, URL: "http://eof.com", Index: "1", SubIndex: "1"}, nil
-				}
-
-				manager.proxyStreamFunc = func(ctx context.Context, coordinator *stream.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
-					exitStatus <- proxy.StatusEOF
-				}
-
-				manager.getCmFunc = func() *store.ConcurrencyManager {
-					return cm
-				}
-
-				manager.getRegistryFunc = func() *stream.StreamRegistry {
-					return coordinator
-				}
-
-				return manager
-			},
-			expectedStatus: http.StatusOK,
-			expectedError:  false,
-		},
-		{
 			name: "invalid stream URL with special characters",
 			path: "/test@#$.m3u8",
 			setupMocks: func() *mockStreamManager {
