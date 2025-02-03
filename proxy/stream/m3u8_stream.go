@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 type VariantStream struct {
@@ -155,18 +157,30 @@ func (h *M3U8StreamHandler) HandleHLSStream(
 	}
 }
 
-func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadbalancer.LoadBalancerResult) {
+func (h *M3U8StreamHandler) startHLSWriter(
+	ctx context.Context,
+	lbResult *loadbalancer.LoadBalancerResult,
+) {
 	defer func() {
 		if r := recover(); r != nil {
 			h.logger.Errorf("Panic in startHLSWriter: %v", r)
-			h.coordinator.writeError(fmt.Errorf("internal server error"), proxy.StatusServerError)
+			h.coordinator.writeError(fmt.Errorf("internal server error"),
+				proxy.StatusServerError)
 		}
 	}()
 
 	client := &http.Client{}
 	isEndlist := false
 	mediaURL := lbResult.Response.Request.URL.String()
-	processedSegments := make(map[string]bool)
+
+	// Create an LRU cache with a capacity of 1000 for processed segments.
+	// This ensures that the cache never grows indefinitely.
+	processedSegmentsCache, err := lru.New[string, struct{}](200)
+	if err != nil {
+		h.logger.Errorf("failed to create LRU cache: %v", err)
+		h.coordinator.writeError(err, proxy.StatusServerError)
+		return
+	}
 
 	// Create a ticker for polling
 	ticker := time.NewTicker(time.Second)
@@ -182,31 +196,27 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 			reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			segments, endlist, err := h.fetchMediaPlaylist(reqCtx, mediaURL, client)
 			cancel()
-
 			if err != nil {
 				if ctx.Err() != nil {
 					h.logger.Debug("Context cancelled during playlist fetch")
 					h.coordinator.writeError(ctx.Err(), proxy.StatusClientClosed)
 					return
 				}
-
 				if h.coordinator.shouldRetry(h.coordinator.getTimeoutDuration()) {
 					continue
 				}
 				h.coordinator.writeError(err, proxy.StatusServerError)
 				return
 			}
-
 			isEndlist = endlist
 			newSegments := make([]string, 0)
-
 			for _, segment := range segments {
-				if !processedSegments[segment] {
+				// Check if the segment is in the LRU cache.
+				if !processedSegmentsCache.Contains(segment) {
 					newSegments = append(newSegments, segment)
-					processedSegments[segment] = true
+					processedSegmentsCache.Add(segment, struct{}{})
 				}
 			}
-
 			if len(newSegments) > 0 {
 				if err := h.streamSegments(ctx, newSegments); err != nil {
 					if ctx.Err() != nil {
@@ -214,7 +224,6 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 						h.coordinator.writeError(ctx.Err(), proxy.StatusClientClosed)
 						return
 					}
-
 					if h.coordinator.shouldRetry(h.coordinator.getTimeoutDuration()) {
 						continue
 					}
@@ -222,7 +231,6 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 					return
 				}
 			}
-
 			if isEndlist {
 				h.logger.Debug("Playlist ended, stopping HLS writer")
 				h.coordinator.writeError(io.EOF, proxy.StatusEOF)
