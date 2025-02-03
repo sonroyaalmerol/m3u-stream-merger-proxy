@@ -7,6 +7,7 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/loadbalancer"
+	"m3u-stream-merger/utils"
 	"net/http"
 	"net/url"
 	"strings"
@@ -55,17 +56,11 @@ func (h *M3U8StreamHandler) HandleHLSStream(
 	var resultErr error
 	var status int
 
-	// Create a new context that will be cancelled when either the original context
-	// is cancelled or when we're cleaning up
-	writerCtx, writerCancel := context.WithCancel(ctx)
-	defer writerCancel()
-
 	h.coordinator.writerCtxMu.Lock()
 	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 0
 	if isFirstClient {
-		h.coordinator.writerCtx = writerCtx
-		h.coordinator.writerCancel = writerCancel
-		go h.startHLSWriter(writerCtx, lbResult)
+		h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
+		go h.startHLSWriter(h.coordinator.writerCtx, lbResult)
 	}
 	h.coordinator.writerCtxMu.Unlock()
 
@@ -166,7 +161,7 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 		}
 	}()
 
-	client := &http.Client{}
+	client := utils.HTTPClient
 	isEndlist := false
 	mediaURL := lbResult.Response.Request.URL.String()
 
@@ -185,7 +180,7 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 			h.coordinator.writeError(ctx.Err(), proxy.StatusClientClosed)
 			return
 		case <-ticker.C:
-			reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			reqCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			segments, endlist, err := h.fetchMediaPlaylist(reqCtx, mediaURL, client)
 			cancel()
 			if err != nil {
@@ -242,7 +237,7 @@ func (h *M3U8StreamHandler) streamSegments(ctx context.Context, segments []strin
 		default:
 			h.logger.Debugf("Fetching segment: %s", segmentURL)
 
-			req, err := http.NewRequestWithContext(ctx, "GET", segmentURL, nil)
+			req, err := http.NewRequest("GET", segmentURL, nil)
 			if err != nil {
 				h.logger.Errorf("Error creating segment request: %v", err)
 				continue
@@ -278,7 +273,7 @@ func (h *M3U8StreamHandler) streamSegments(ctx context.Context, segments []strin
 func (h *M3U8StreamHandler) fetchMediaPlaylist(ctx context.Context, mediaURL string, client *http.Client) ([]string, bool, error) {
 	h.logger.Debugf("Fetching media playlist from: %s", mediaURL)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", mediaURL, nil)
+	req, err := http.NewRequest("GET", mediaURL, nil)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to create request: %w", err)
 	}
