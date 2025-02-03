@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/patrickmn/go-cache"
 )
 
 type VariantStream struct {
@@ -157,10 +157,7 @@ func (h *M3U8StreamHandler) HandleHLSStream(
 	}
 }
 
-func (h *M3U8StreamHandler) startHLSWriter(
-	ctx context.Context,
-	lbResult *loadbalancer.LoadBalancerResult,
-) {
+func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadbalancer.LoadBalancerResult) {
 	defer func() {
 		if r := recover(); r != nil {
 			h.logger.Errorf("Panic in startHLSWriter: %v", r)
@@ -173,14 +170,9 @@ func (h *M3U8StreamHandler) startHLSWriter(
 	isEndlist := false
 	mediaURL := lbResult.Response.Request.URL.String()
 
-	// Create an LRU cache with a capacity of 1000 for processed segments.
-	// This ensures that the cache never grows indefinitely.
-	processedSegmentsCache, err := lru.New[string, struct{}](200)
-	if err != nil {
-		h.logger.Errorf("failed to create LRU cache: %v", err)
-		h.coordinator.writeError(err, proxy.StatusServerError)
-		return
-	}
+	// Create a TTL cache for processed segments.
+	// Each entry expires in 60 seconds and cleanup occurs every 10 seconds.
+	processedSegmentsCache := cache.New(60*time.Second, 10*time.Second)
 
 	// Create a ticker for polling
 	ticker := time.NewTicker(time.Second)
@@ -211,10 +203,10 @@ func (h *M3U8StreamHandler) startHLSWriter(
 			isEndlist = endlist
 			newSegments := make([]string, 0)
 			for _, segment := range segments {
-				// Check if the segment is in the LRU cache.
-				if !processedSegmentsCache.Contains(segment) {
+				// Check if the segment has already been processed.
+				if _, found := processedSegmentsCache.Get(segment); !found {
 					newSegments = append(newSegments, segment)
-					processedSegmentsCache.Add(segment, struct{}{})
+					processedSegmentsCache.Set(segment, true, cache.DefaultExpiration)
 				}
 			}
 			if len(newSegments) > 0 {
