@@ -2,23 +2,25 @@ package stream
 
 import (
 	"context"
-	"io"
+	"fmt"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
-	"m3u-stream-merger/utils"
-	"net/http"
+	"m3u-stream-merger/proxy/loadbalancer"
+	"sync/atomic"
 	"time"
 )
 
 type StreamHandler struct {
-	config *StreamConfig
-	logger logger.Logger
+	config      *StreamConfig
+	logger      logger.Logger
+	coordinator *StreamCoordinator
 }
 
-func NewStreamHandler(config *StreamConfig, logger logger.Logger) *StreamHandler {
+func NewStreamHandler(config *StreamConfig, coordinator *StreamCoordinator, logger logger.Logger) *StreamHandler {
 	return &StreamHandler{
-		config: config,
-		logger: logger,
+		config:      config,
+		logger:      logger,
+		coordinator: coordinator,
 	}
 }
 
@@ -30,159 +32,164 @@ type StreamResult struct {
 
 func (h *StreamHandler) HandleStream(
 	ctx context.Context,
-	resp *http.Response,
+	lbResult *loadbalancer.LoadBalancerResult,
 	writer ResponseWriter,
 	remoteAddr string,
 ) StreamResult {
-	buffer := h.createBuffer()
-	defer func() {
-		buffer = nil
-		resp.Body.Close() // Ensure we always close the response body
-	}()
+	if h.coordinator == nil {
+		h.logger.Error("handleBufferedStream: coordinator is nil")
+		return StreamResult{0, fmt.Errorf("coordinator is nil"), proxy.StatusServerError}
+	}
 
-	timeoutDuration := h.getTimeoutDuration()
-	backoff := proxy.NewBackoffStrategy(h.config.InitialBackoff, time.Duration(h.config.TimeoutSeconds-1)*time.Second)
+	h.coordinator.writerCtxMu.Lock()
+	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 0
+	if isFirstClient {
+		h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
+		go h.coordinator.StartWriter(h.coordinator.writerCtx, lbResult)
+	}
+	h.coordinator.writerCtxMu.Unlock()
 
-	timeStarted := time.Now()
-	lastErr := timeStarted
+	if err := h.coordinator.RegisterClient(); err != nil {
+		return StreamResult{0, err, proxy.StatusServerError}
+	}
+	h.logger.Debugf("Client registered: %s, count: %d", remoteAddr, atomic.LoadInt32(&h.coordinator.clientCount))
+
+	cleanup := func() {
+		h.coordinator.UnregisterClient()
+		currentCount := atomic.LoadInt32(&h.coordinator.clientCount)
+		h.logger.Debugf("Client unregistered: %s, remaining: %d", remoteAddr, currentCount)
+
+		if currentCount == 0 {
+			h.coordinator.writerCtxMu.Lock()
+			if h.coordinator.writerCancel != nil {
+				h.logger.Debug("Stopping writer - no clients remaining")
+				h.coordinator.writerCancel()
+				h.coordinator.writerCancel = nil
+			}
+			h.coordinator.writerCtxMu.Unlock()
+		}
+	}
+	defer cleanup()
+
 	var bytesWritten int64
+	lastPosition := h.coordinator.buffer.Prev() // Start from previous to get first new chunk
+
+	// Create a channel to signal client helper goroutine to stop
+	done := make(chan struct{})
+	defer close(done)
+
+	// Create a context for this client
+	readerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Handle context cancellation in a separate goroutine
+	go func() {
+		select {
+		case <-ctx.Done():
+			h.logger.Debugf("Client context cancelled: %s", remoteAddr)
+			cancel()
+		case <-done:
+			return
+		}
+	}()
 
 	for {
 		select {
-		case <-ctx.Done():
-			// Client disconnected, clean up and return
-			h.logger.Debugf("Client disconnected from stream: %s", remoteAddr)
-			return StreamResult{bytesWritten, ctx.Err(), proxy.StatusClientClosed}
+		case <-readerCtx.Done():
+			h.logger.Debugf("Reader context cancelled for client: %s", remoteAddr)
+			return StreamResult{bytesWritten, readerCtx.Err(), proxy.StatusClientClosed}
 
 		default:
-			result := h.readChunk(ctx, resp, buffer)
+			chunks, errChunk, newPos := h.coordinator.ReadChunks(lastPosition)
 
-			if h.shouldTimeout(timeStarted, timeoutDuration) {
-				h.logger.Errorf("Timeout reached while trying to stream: %s", remoteAddr)
-				return StreamResult{bytesWritten, nil, proxy.StatusServerError}
+			// Process any available chunks first
+			if len(chunks) > 0 {
+				for _, chunk := range chunks {
+					// Check context before each write
+					if readerCtx.Err() != nil {
+						// Clean up remaining chunks
+						for _, c := range chunks {
+							if c != nil {
+								c.Reset()
+							}
+						}
+						return StreamResult{bytesWritten, readerCtx.Err(), proxy.StatusClientClosed}
+					}
+
+					if chunk != nil && chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
+						// Protect against nil writer
+						if writer == nil {
+							h.logger.Error("Writer is nil")
+							return StreamResult{bytesWritten, fmt.Errorf("writer is nil"), proxy.StatusServerError}
+						}
+
+						// Use a separate function for writing to handle panics
+						n, err := h.safeWrite(writer, chunk.Buffer.Bytes())
+						if err != nil {
+							// Clean up remaining chunks
+							for _, c := range chunks {
+								if c != nil {
+									c.Reset()
+								}
+							}
+							return StreamResult{bytesWritten, err, proxy.StatusClientClosed}
+						}
+						bytesWritten += int64(n)
+
+						if flusher, ok := writer.(StreamFlusher); ok {
+							// Protect against panic in flush
+							if err := h.safeFlush(flusher); err != nil {
+								return StreamResult{bytesWritten, err, proxy.StatusClientClosed}
+							}
+						}
+					}
+					if chunk != nil {
+						chunk.Reset()
+					}
+				}
 			}
 
-			switch {
-			case result.Error == context.Canceled:
-				// Handle context cancellation from readChunk
-				h.logger.Debugf("Client disconnected while reading chunk: %s", remoteAddr)
-				return StreamResult{bytesWritten, result.Error, proxy.StatusClientClosed}
-
-			case result.Error == io.EOF:
-				if result.N > 0 {
-					written, err := writer.Write(buffer[:result.N])
-					if err != nil {
-						h.logger.Errorf("Error writing final buffer: %s", err.Error())
-						return StreamResult{bytesWritten, err, 0}
-					}
-					bytesWritten += int64(written)
-					if flusher, ok := writer.(StreamFlusher); ok {
-						flusher.Flush()
-					}
-				}
-				return h.handleEOF(resp, remoteAddr, bytesWritten)
-
-			case result.Error != nil:
-				if h.shouldRetry(timeoutDuration) {
-					h.logger.Errorf("Error reading stream: %s", result.Error.Error())
-					backoff.Sleep(ctx)
-					lastErr = time.Now()
-					continue
-				}
-				return StreamResult{bytesWritten, result.Error, proxy.StatusServerError}
-
-			default:
-				n := result.N
-				totalWritten := 0
-				for totalWritten < n {
-					written, err := writer.Write(buffer[totalWritten:n])
-					if err != nil {
-						h.logger.Errorf("Error writing to response: %s", err.Error())
-						return StreamResult{bytesWritten, err, 0}
-					}
-					totalWritten += written
-				}
-				bytesWritten += int64(n)
+			// Handle any error chunk
+			if errChunk != nil {
 				if flusher, ok := writer.(StreamFlusher); ok {
-					flusher.Flush()
+					h.safeFlush(flusher)
 				}
+				return StreamResult{bytesWritten, errChunk.Error, errChunk.Status}
+			}
 
-				if h.shouldResetTimer(lastErr, timeStarted) {
-					timeStarted = time.Now()
-					backoff.Reset()
-				}
+			// Update position if we have a valid new position
+			if newPos != nil {
+				lastPosition = newPos
+			}
+
+			// Small sleep to prevent tight loop when no data
+			if len(chunks) == 0 {
+				time.Sleep(10 * time.Millisecond)
 			}
 		}
 	}
 }
 
-func (h *StreamHandler) createBuffer() []byte {
-	if h.config.BufferSizeMB > 0 {
-		return make([]byte, h.config.BufferSizeMB*1024*1024)
-	}
-	return make([]byte, 1024)
-}
-
-func (h *StreamHandler) getTimeoutDuration() time.Duration {
-	if h.config.TimeoutSeconds == 0 {
-		return time.Minute
-	}
-	return time.Duration(h.config.TimeoutSeconds) * time.Second
-}
-
-type ReadResult struct {
-	N     int
-	Error error
-}
-
-func (h *StreamHandler) readChunk(
-	ctx context.Context,
-	resp *http.Response,
-	buffer []byte,
-) ReadResult {
-	readChan := make(chan ReadResult, 1)
-	reader := resp.Body
-
-	go func() {
-		n, err := reader.Read(buffer)
-		readChan <- ReadResult{n, err}
+// safeWrite attempts to write to the writer and recovers from panics
+func (h *StreamHandler) safeWrite(writer ResponseWriter, data []byte) (n int, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			h.logger.Errorf("Panic in write: %v", r)
+			err = fmt.Errorf("write failed: %v", r)
+		}
 	}()
 
-	select {
-	case <-ctx.Done():
-		h.logger.Error("Context canceled for stream")
-		reader.Close()
-		return ReadResult{0, ctx.Err()}
-	case result := <-readChan:
-		return result
-	}
+	return writer.Write(data)
 }
 
-func (h *StreamHandler) shouldTimeout(
-	timeStarted time.Time,
-	timeout time.Duration,
-) bool {
-	return h.config.TimeoutSeconds > 0 && time.Since(timeStarted) >= timeout
-}
+// safeFlush attempts to flush the writer and recovers from panics
+func (h *StreamHandler) safeFlush(flusher StreamFlusher) error {
+	defer func() {
+		if r := recover(); r != nil {
+			h.logger.Errorf("Panic in flush: %v", r)
+		}
+	}()
 
-func (h *StreamHandler) shouldRetry(timeout time.Duration) bool {
-	return h.config.TimeoutSeconds == 0 || timeout > 0
-}
-
-func (h *StreamHandler) shouldResetTimer(lastErr, timeStarted time.Time) bool {
-	return lastErr.Equal(timeStarted) || time.Since(lastErr) >= time.Second
-}
-
-func (h *StreamHandler) handleEOF(
-	resp *http.Response,
-	remoteAddr string,
-	bytesWritten int64,
-) StreamResult {
-	if utils.EOFIsExpected(resp) || h.config.TimeoutSeconds == 0 {
-		h.logger.Debugf("Stream ended (expected EOF reached): %s", remoteAddr)
-		return StreamResult{bytesWritten, nil, proxy.StatusEOF}
-	}
-
-	h.logger.Errorf("Stream ended (unexpected EOF reached): %s", remoteAddr)
-	return StreamResult{bytesWritten, io.EOF, proxy.StatusEOF}
+	flusher.Flush()
+	return nil
 }

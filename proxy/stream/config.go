@@ -7,16 +7,17 @@ import (
 )
 
 type StreamConfig struct {
-	BufferSizeMB   int
-	TimeoutSeconds int
-	InitialBackoff time.Duration
+	SharedBufferSize int
+	ChunkSize        int
+	TimeoutSeconds   int
+	InitialBackoff   time.Duration
 }
 
 func NewDefaultStreamConfig() *StreamConfig {
-	finalBufferSize := 0
+	finalBufferSize := 4
 	finalTimeoutSeconds := 3
 
-	bufferSize, ok := os.LookupEnv("BUFFER_MB")
+	bufferSize, ok := os.LookupEnv("BUFFER_CHUNK_NUM")
 	if ok {
 		intBufferSize, err := strconv.Atoi(bufferSize)
 		if err == nil && intBufferSize >= 0 {
@@ -33,8 +34,9 @@ func NewDefaultStreamConfig() *StreamConfig {
 	}
 
 	return &StreamConfig{
-		BufferSizeMB:   finalBufferSize,
-		TimeoutSeconds: finalTimeoutSeconds,
-		InitialBackoff: 200 * time.Millisecond,
+		SharedBufferSize: finalBufferSize,
+		ChunkSize:        1024 * 1024,
+		TimeoutSeconds:   finalTimeoutSeconds,
+		InitialBackoff:   200 * time.Millisecond,
 	}
 }

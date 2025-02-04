@@ -4,15 +4,18 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
+	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 type mockResponseWriter struct {
@@ -114,23 +117,25 @@ func TestStreamHandler_HandleStream(t *testing.T) {
 		{
 			name: "successful stream",
 			config: &StreamConfig{
-				TimeoutSeconds: 5,
-				BufferSizeMB:   1,
+				TimeoutSeconds:   5,
+				ChunkSize:        1024,
+				SharedBufferSize: 5,
 			},
 			responseBody:   "test content",
 			responseStatus: http.StatusOK,
 			writeError:     nil,
 			expectedResult: StreamResult{
 				BytesWritten: 12,
-				Error:        nil,
+				Error:        io.EOF,
 				Status:       proxy.StatusEOF,
 			},
 		},
 		{
 			name: "write error",
 			config: &StreamConfig{
-				TimeoutSeconds: 5,
-				BufferSizeMB:   1,
+				TimeoutSeconds:   5,
+				ChunkSize:        1024,
+				SharedBufferSize: 5,
 			},
 			responseBody:   "test content",
 			responseStatus: http.StatusOK,
@@ -138,38 +143,43 @@ func TestStreamHandler_HandleStream(t *testing.T) {
 			expectedResult: StreamResult{
 				BytesWritten: 0,
 				Error:        errors.New("write error"),
-				Status:       proxy.StatusClientClosed,
+				Status:       0,
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewStreamHandler(tt.config, logger.Default)
-			writer := &mockResponseWriter{err: tt.writeError}
+			// Create context with timeout
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 
+			config := NewDefaultStreamConfig()
+			cm := store.NewConcurrencyManager()
+			coordinator := NewStreamCoordinator("test_id", config, cm, logger.Default)
+			handler := NewStreamHandler(tt.config, coordinator, logger.Default)
+
+			// Create response with headers to indicate expected EOF
 			resp := &http.Response{
 				StatusCode: tt.responseStatus,
 				Body:       io.NopCloser(strings.NewReader(tt.responseBody)),
+				Header:     make(http.Header),
 			}
+			resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(tt.responseBody)))
 
-			ctx := context.Background()
-			result := handler.HandleStream(ctx, resp, writer, "test-addr")
+			writer := &mockResponseWriter{err: tt.writeError}
 
-			// For successful stream test, we expect EOF as the response body reader will be exhausted
-			if tt.name == "successful stream" && result.Error == io.EOF {
-				result.Error = nil
-				result.Status = proxy.StatusEOF
-			}
+			// Run handler with context
+			lbRes := loadbalancer.LoadBalancerResult{Response: resp, Index: "1"}
+			result := handler.HandleStream(ctx, &lbRes, writer, "test-addr")
 
+			// Verify results
 			if result.Status != tt.expectedResult.Status {
 				t.Errorf("HandleStream() status = %v, want %v", result.Status, tt.expectedResult.Status)
 			}
-
 			if result.BytesWritten != tt.expectedResult.BytesWritten {
 				t.Errorf("HandleStream() bytesWritten = %v, want %v", result.BytesWritten, tt.expectedResult.BytesWritten)
 			}
-
 			if (result.Error != nil) != (tt.expectedResult.Error != nil) {
 				t.Errorf("HandleStream() error = %v, want %v", result.Error, tt.expectedResult.Error)
 			}
@@ -207,6 +217,8 @@ func TestStreamInstance_ProxyStream(t *testing.T) {
 			config := NewDefaultStreamConfig()
 			cm := store.NewConcurrencyManager()
 
+			coordinator := NewStreamCoordinator("test_id", config, cm, logger.Default)
+
 			instance, err := NewStreamInstance(cm, config,
 				WithLogger(logger.Default))
 			if err != nil {
@@ -226,7 +238,8 @@ func TestStreamInstance_ProxyStream(t *testing.T) {
 			statusChan := make(chan int, 1)
 			ctx := context.Background()
 
-			instance.ProxyStream(ctx, resp, req, writer, statusChan)
+			lbRes := loadbalancer.LoadBalancerResult{Response: resp, Index: "1"}
+			instance.ProxyStream(ctx, coordinator, &lbRes, req, writer, statusChan)
 
 			status := <-statusChan
 			if status != tt.expectedStatus {

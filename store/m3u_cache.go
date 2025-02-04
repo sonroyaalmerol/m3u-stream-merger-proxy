@@ -12,12 +12,12 @@ import (
 	"sync"
 )
 
-type Cache struct {
+type M3UCache struct {
 	sync.RWMutex
 	currentStreams []StreamInfo
 }
 
-var M3uCache = &Cache{}
+var M3uCache = &M3UCache{}
 
 func RevalidatingGetM3U(r *http.Request, force bool) string {
 	logger.Default.Debug("Revalidating M3U cache")

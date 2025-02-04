@@ -49,6 +49,9 @@ Uses the channel title or `tvg-name` (as fallback) to merge multiple identical c
 6. **Customization:**
    - Modify M3U URLs, update intervals, and other configurations in the `.env` file.
 
+7. **Shared buffer without ffmpeg:**
+   - Apps like xTeVe/Threadfin commonly uses third-party projects such as ffmpeg to consolidate connections for each channel. It does work well, but it adds up a lot of weight considering the size and complexity of ffmpeg. This proxy uses common patterns used by other stream proxies such as Nginx to distribute single input stream of data to multiple clients without any video encoding/decoding. See [here](#how-does-the-shared-buffer-work) for more information.
+
 ## Prerequisites
 
 - [Docker](https://www.docker.com/) installed on your system.
@@ -119,7 +122,7 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | MAX_RETRIES | Set max number of retries (loop) across all M3Us while streaming. 0 to never stop retrying (beware of throttling from provider). | 5 | Any integer greater than or equal 0 |
 | RETRY_WAIT | Set a wait time before retrying (looping) across all M3Us on stream initialization error. | 0 | Any integer greater than or equal 0 |
 | STREAM_TIMEOUT | Set timeout duration in seconds of retrying on error before a stream is considered down. | 3 | Any positive integer greater than 0 |
-| BUFFER_MB | Set buffer size in mb. **This is not a shared buffer (for now).** | 0 (no buffer) | Any positive integer |
+| BUFFER_CHUNK_NUM | Set number of chunk "containers" for the **shared buffer** that rotates across all clients and the source of the stream. See [here](#how-does-the-shared-buffer-work) for more information. You can change this value by increments of 2. Higher quantity means more capacity for contents but more memory usage for the proxy. | 4 | Any positive integer |
 
 ### Playlist Output (`/playlist.m3u`) Configs
 > [!NOTE]
@@ -144,6 +147,37 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 |-----------------------------|----------------------------------------------------------|---------------|------------------------------------------------|
 | DEBUG                | Set if verbose logging is enabled | false    | true/false   |
 | SAFE_LOGS | Set if sensitive info are removed from logs. Always enable this if submitting a log publicly. | false    | true/false   |
+
+## How does the shared buffer work?
+
+The stream buffer system is essentially an implementation of a [Circular Buffer data structure](https://en.wikipedia.org/wiki/Circular_buffer).
+
+Imagine a circular [sushi conveyor belt](https://en.wikipedia.org/wiki/Conveyor_belt_sushi) with a fixed number of plates (`BUFFER_CHUNK_NUM`). Each plate can hold a piece of sushi (chunk of data).
+
+### The Chef (Writer)
+At the preparation station, there's a chef who:
+- Takes raw fish (stream data) and cuts it into bite-sized pieces (fixed to `1 MB`)
+- Places each piece on an empty plate
+- Puts the plate on the conveyor belt and moves to the next empty plate
+- If something goes wrong with the fish (error), marks the plate with a warning flag
+
+The chef works continuously unless:
+- The restaurant closes (context cancelled)
+- There are no more customers (client count drops to 0)
+- They run out of fish (EOF)
+- Something goes wrong in the kitchen (error)
+
+### You, the Customers (Readers)
+Customers sitting at different points around the belt:
+- Remember which plate they last looked at
+- Can look at all plates that have passed by since they last checked
+- Make their own copy of each piece of sushi they want (copying the data)
+- If they catch up to where the chef is currently placing plates, they wait
+- If they see a plate with a warning flag (error), they know to stop eating
+
+If a customer is too slow and takes too long to check a plate, the data might get replaced by the time they look again (buffer overwrite)
+
+This system ensures that streaming data (sushi) flows smoothly from the source (kitchen) to multiple consumers (customers) while efficiently managing memory (plates) and handling errors (food safety warnings).
 
 ## Sponsors ✨
 Huge thanks to those who donated for the development of this project!

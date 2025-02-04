@@ -31,8 +31,8 @@ func main() {
 		}
 	}
 
-	m3uHandler := handlers.NewM3UHandler(logger.Default)
-	streamHandler := handlers.NewStreamHandler(handlers.NewDefaultStreamManager(), logger.Default)
+	m3uHandler := handlers.NewM3UHTTPHandler(logger.Default)
+	streamHandler := handlers.NewStreamHTTPHandler(handlers.NewDefaultProxyInstance(), logger.Default)
 
 	logger.Default.Log("Setting up HTTP handlers...")
 	// HTTP handlers

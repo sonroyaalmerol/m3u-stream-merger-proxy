@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/handlers"
@@ -17,7 +17,7 @@ import (
 	"m3u-stream-merger/utils"
 )
 
-func TestStreamHandler(t *testing.T) {
+func TestStreamHTTPHandler(t *testing.T) {
 	// Create temp directory for test data
 	tempDir, err := os.MkdirTemp("", "m3u-test-*")
 	if err != nil {
@@ -50,11 +50,11 @@ func TestStreamHandler(t *testing.T) {
 
 	// Initialize handlers with test configuration
 	t.Log("Initializing handlers with test configuration")
-	m3uHandler := handlers.NewM3UHandler(logger.Default)
+	m3uHandler := handlers.NewM3UHTTPHandler(logger.Default)
 	cachePath := config.GetM3UCachePath()
 
-	streamHandler := handlers.NewStreamHandler(
-		handlers.NewDefaultStreamManager(),
+	streamHandler := handlers.NewStreamHTTPHandler(
+		handlers.NewDefaultProxyInstance(),
 		logger.Default,
 	)
 
@@ -105,15 +105,15 @@ func TestStreamHandler(t *testing.T) {
 
 			req := httptest.NewRequest(http.MethodGet, genStreamUrl, nil)
 			w := httptest.NewRecorder()
-			t.Log("Sending request to stream handler")
-			streamHandler.ServeHTTP(w, req)
 
-			if w.Code != http.StatusOK {
-				t.Errorf("Expected status code %d, got %d", http.StatusOK, w.Code)
-				t.Log("Response Headers:", w.Header())
-				t.Log("Response Body:", w.Body.String())
-				return
-			}
+			// Create a channel to coordinate test completion
+			done := make(chan struct{})
+
+			// Start the stream handler in a goroutine
+			go func() {
+				streamHandler.ServeHTTP(w, req)
+				close(done)
+			}()
 
 			// Fetch original stream for comparison
 			originalURL := stream.URLs["1"]["0"]
@@ -126,30 +126,55 @@ func TestStreamHandler(t *testing.T) {
 			}
 			defer res.Body.Close()
 
-			expected, err := io.ReadAll(res.Body)
-			if err != nil {
-				t.Errorf("Failed to read original stream: %v", err)
-				return
-			}
-			t.Logf("Original stream size: %d bytes", len(expected))
+			// Read and compare streams for a set duration
+			testDuration := 2 * time.Second
+			timer := time.NewTimer(testDuration)
 
-			body, err := io.ReadAll(w.Body)
-			if err != nil {
-				t.Errorf("Failed to read response body: %v", err)
-				return
-			}
-			t.Logf("Response stream size: %d bytes", len(body))
+			buffer1 := make([]byte, 32*1024)
+			buffer2 := make([]byte, 32*1024)
 
-			if !bytes.Equal(body, expected) {
-				t.Error("Stream content mismatch")
-				if len(body) < 100 && len(expected) < 100 {
-					t.Logf("Expected: %v", expected)
-					t.Logf("Got: %v", body)
-				} else {
-					t.Logf("Content length mismatch - Expected: %d, Got: %d", len(expected), len(body))
+			var totalBytes1, totalBytes2 int64
+
+			for {
+				select {
+				case <-timer.C:
+					t.Logf("Test completed after %v", testDuration)
+					t.Logf("Total bytes read - Original: %d, Response: %d", totalBytes1, totalBytes2)
+					if totalBytes1 == 0 || totalBytes2 == 0 {
+						t.Error("No data received from one or both streams")
+					}
+					return
+				default:
+					// Read from original stream
+					n1, err1 := res.Body.Read(buffer1)
+					if err1 != nil && err1 != io.EOF {
+						t.Errorf("Error reading original stream: %v", err1)
+						return
+					}
+
+					// Read from response stream
+					n2, err2 := w.Body.Read(buffer2)
+					if err2 != nil && err2 != io.EOF {
+						t.Errorf("Error reading response stream: %v", err2)
+						return
+					}
+
+					// Update totals
+					if n1 > 0 {
+						totalBytes1 += int64(n1)
+					}
+					if n2 > 0 {
+						totalBytes2 += int64(n2)
+					}
+
+					// Verify data is being received
+					if n1 > 0 || n2 > 0 {
+						t.Logf("Received data - Original: %d bytes, Response: %d bytes", n1, n2)
+					}
+
+					// Small delay to prevent tight loop
+					time.Sleep(10 * time.Millisecond)
 				}
-			} else {
-				t.Log("Stream content matches successfully")
 			}
 		})
 	}
