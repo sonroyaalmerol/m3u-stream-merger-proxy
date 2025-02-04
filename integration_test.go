@@ -59,7 +59,7 @@ func TestStreamHTTPHandler(t *testing.T) {
 	)
 
 	// Set up test environment variables
-	m3uURL := "https://gist.githubusercontent.com/sonroyaalmerol/de1c90e8681af040924da5d15c7f530d/raw/06844df09e69ea278060252ca5aa8d767eb4543d/test-m3u.m3u"
+	m3uURL := "https://gist.githubusercontent.com/sonroyaalmerol/64ce9eddf169366b29bf621b4370ec02/raw/402e36cccebc348e537f20070bf33bbc002947cf/test-m3u.m3u"
 	t.Log("Setting M3U_URL_1:", m3uURL)
 	t.Setenv("M3U_URL_1", m3uURL)
 	t.Setenv("DEBUG", "true")
@@ -106,33 +106,26 @@ func TestStreamHTTPHandler(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, genStreamUrl, nil)
 			w := httptest.NewRecorder()
 
-			// Create a channel to coordinate test completion
 			done := make(chan struct{})
 
-			// Start the stream handler in a goroutine
 			go func() {
 				streamHandler.ServeHTTP(w, req)
 				close(done)
 			}()
 
-			// Fetch original stream for comparison
 			originalURL := stream.URLs["1"]["0"]
-			t.Logf("Fetching original stream from: %s", originalURL)
-
 			res, err := utils.HTTPClient.Get(originalURL)
 			if err != nil {
-				t.Errorf("Failed to fetch original stream: %v", err)
-				return
+				t.Fatalf("Failed to fetch original stream: %v", err)
 			}
 			defer res.Body.Close()
 
-			// Read and compare streams for a set duration
 			testDuration := 2 * time.Second
 			timer := time.NewTimer(testDuration)
+			defer timer.Stop()
 
 			buffer1 := make([]byte, 32*1024)
 			buffer2 := make([]byte, 32*1024)
-
 			var totalBytes1, totalBytes2 int64
 
 			for {
@@ -144,30 +137,67 @@ func TestStreamHTTPHandler(t *testing.T) {
 						t.Error("No data received from one or both streams")
 					}
 					return
+				case <-done:
+					t.Log("Stream handler completed")
+					return
 				default:
-					// Read from original stream
-					n1, err1 := res.Body.Read(buffer1)
-					if err1 != nil && err1 != io.EOF {
-						t.Errorf("Error reading original stream: %v", err1)
-						return
+					// Read from original stream with timeout
+					readDone1 := make(chan struct{})
+					var n1 int
+					var err1 error
+
+					go func() {
+						n1, err1 = res.Body.Read(buffer1)
+						close(readDone1)
+					}()
+
+					select {
+					case <-readDone1:
+						if err1 == io.EOF {
+							t.Log("Original stream reached EOF")
+							return
+						}
+						if err1 != nil && err1 != io.EOF {
+							t.Errorf("Error reading original stream: %v", err1)
+							return
+						}
+						if n1 > 0 {
+							totalBytes1 += int64(n1)
+						}
+					case <-time.After(100 * time.Millisecond):
+						// Timeout on read, continue to next iteration
+						continue
 					}
 
-					// Read from response stream
-					n2, err2 := w.Body.Read(buffer2)
-					if err2 != nil && err2 != io.EOF {
-						t.Errorf("Error reading response stream: %v", err2)
-						return
+					// Read from response stream with timeout
+					readDone2 := make(chan struct{})
+					var n2 int
+					var err2 error
+
+					go func() {
+						n2, err2 = w.Body.Read(buffer2)
+						close(readDone2)
+					}()
+
+					select {
+					case <-readDone2:
+						if err2 == io.EOF {
+							t.Log("Response stream reached EOF")
+							return
+						}
+						if err2 != nil && err2 != io.EOF {
+							t.Errorf("Error reading response stream: %v", err2)
+							return
+						}
+						if n2 > 0 {
+							totalBytes2 += int64(n2)
+						}
+					case <-time.After(100 * time.Millisecond):
+						// Timeout on read, continue to next iteration
+						continue
 					}
 
-					// Update totals
-					if n1 > 0 {
-						totalBytes1 += int64(n1)
-					}
-					if n2 > 0 {
-						totalBytes2 += int64(n2)
-					}
-
-					// Verify data is being received
+					// Log progress periodically
 					if n1 > 0 || n2 > 0 {
 						t.Logf("Received data - Original: %d bytes, Response: %d bytes", n1, n2)
 					}

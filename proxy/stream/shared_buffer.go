@@ -55,6 +55,11 @@ const (
 	stateClosed
 )
 
+var (
+	ErrStreamClosed   = errors.New("stream is closed")
+	ErrStreamDraining = errors.New("stream is draining")
+)
+
 type StreamCoordinator struct {
 	buffer       *ring.Ring
 	mu           sync.RWMutex
@@ -64,6 +69,7 @@ type StreamCoordinator struct {
 	writerCancel context.CancelFunc
 	writerChan   chan struct{}
 	writerCtxMu  sync.Mutex
+	writerActive atomic.Bool
 
 	lastError atomic.Value
 	logger    logger.Logger
@@ -126,32 +132,48 @@ func NewStreamCoordinator(streamID string, config *StreamConfig, cm *store.Concu
 }
 
 func (c *StreamCoordinator) RegisterClient() error {
-	if atomic.LoadInt32(&c.state) != stateActive {
-		c.logger.Warn("Attempt to register a client on a non-active stream")
-		return errors.New("stream is closed")
+	state := atomic.LoadInt32(&c.state)
+	if state != stateActive {
+		c.logger.Warn("Attempt to register client on non-active stream")
+		switch state {
+		case stateDraining:
+			return ErrStreamDraining
+		default:
+			return ErrStreamClosed
+		}
 	}
+
 	count := atomic.AddInt32(&c.clientCount, 1)
-	c.logger.Logf("Client registered (%s). Total clients: %d", c.streamID, count)
+	c.logger.Debugf("Client registered. Total clients: %d", count)
 	return nil
 }
 
 func (c *StreamCoordinator) UnregisterClient() {
 	count := atomic.AddInt32(&c.clientCount, -1)
-	c.logger.Logf("Client unregistered (%s). Remaining clients: %d", c.streamID, count)
+	c.logger.Debugf("Client unregistered. Remaining clients: %d", count)
 
-	if count == 0 {
-		c.logger.Log("Last client unregistered, cleaning up resources")
-		atomic.StoreInt32(&c.state, stateDraining)
-		// Signal the writer to shut down.
-		select {
-		case c.writerChan <- struct{}{}:
-			c.logger.Debug("Sent shutdown signal to writer")
-		default:
-			c.logger.Debug("Writer channel already has shutdown signal")
-		}
-		c.clearBuffer()
-		c.notifySubscribers()
+	if count <= 0 {
+		c.logger.Debug("Last client unregistered, initiating stream shutdown")
+		c.initiateShutdown()
 	}
+}
+
+func (c *StreamCoordinator) initiateShutdown() {
+	if !atomic.CompareAndSwapInt32(&c.state, stateActive, stateDraining) {
+		return // Already draining or closed
+	}
+
+	c.writerCtxMu.Lock()
+	if c.writerCancel != nil {
+		c.writerCancel()
+		c.writerCancel = nil
+	}
+	c.writerCtxMu.Unlock()
+
+	c.writerActive.Store(false)
+	c.clearBuffer()
+	atomic.StoreInt32(&c.state, stateClosed)
+	c.notifySubscribers()
 }
 
 func (c *StreamCoordinator) HasClient() bool {
@@ -187,8 +209,13 @@ func (c *StreamCoordinator) StartWriter(ctx context.Context, lbResult *loadbalan
 	}()
 	defer lbResult.Response.Body.Close()
 
-	c.lbResultOnWrite.Store(lbResult)
+	if !c.writerActive.CompareAndSwap(false, true) {
+		c.logger.Warn("Writer already active, aborting start")
+		return
+	}
+	defer c.writerActive.Store(false)
 
+	c.lbResultOnWrite.Store(lbResult)
 	c.logger.Debug("StartWriter: Beginning read loop")
 
 	buffer := make([]byte, c.config.ChunkSize)
@@ -203,30 +230,11 @@ func (c *StreamCoordinator) StartWriter(ctx context.Context, lbResult *loadbalan
 	lastErr := time.Now()
 	zeroReads := 0
 
-	done := make(chan struct{}, 1)
-	defer close(done)
-
-	go func() {
-		select {
-		case <-ctx.Done():
-			atomic.StoreInt32(&c.state, stateClosed)
-			c.notifySubscribers()
-		case <-done:
-		}
-	}()
-
-	tempChunk := newChunkData()
-	defer tempChunk.Reset()
-
 	for atomic.LoadInt32(&c.state) == stateActive {
 		select {
 		case <-ctx.Done():
 			c.logger.Debug("StartWriter: Context cancelled")
 			c.writeError(ctx.Err(), proxy.StatusClientClosed)
-			return
-		case <-c.writerChan:
-			c.logger.Debug("StartWriter: Received shutdown signal")
-			c.writeError(io.EOF, proxy.StatusEOF)
 			return
 		default:
 			if c.shouldTimeout(lastSuccess, timeout) {
@@ -252,10 +260,12 @@ func (c *StreamCoordinator) StartWriter(ctx context.Context, lbResult *loadbalan
 
 			if err == io.EOF {
 				if n > 0 {
-					tempChunk.Reset()
-					_, _ = tempChunk.Buffer.Write(buffer[:n])
-					tempChunk.Timestamp = time.Now()
-					c.Write(tempChunk)
+					chunk := newChunkData()
+					_, _ = chunk.Buffer.Write(buffer[:n])
+					chunk.Timestamp = time.Now()
+					if !c.Write(chunk) {
+						chunk.Reset()
+					}
 				}
 				c.writeError(io.EOF, proxy.StatusEOF)
 				return
@@ -271,10 +281,12 @@ func (c *StreamCoordinator) StartWriter(ctx context.Context, lbResult *loadbalan
 				return
 			}
 
-			tempChunk.Reset()
-			_, _ = tempChunk.Buffer.Write(buffer[:n])
-			tempChunk.Timestamp = time.Now()
-			c.Write(tempChunk)
+			chunk := newChunkData()
+			_, _ = chunk.Buffer.Write(buffer[:n])
+			chunk.Timestamp = time.Now()
+			if !c.Write(chunk) {
+				chunk.Reset()
+			}
 
 			// Only reset the backoff if at least one second has passed
 			if time.Since(lastErr) >= time.Second {
