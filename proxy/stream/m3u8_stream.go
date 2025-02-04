@@ -2,6 +2,7 @@ package stream
 
 import (
 	"bufio"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -333,13 +334,28 @@ func (h *M3U8StreamHandler) fetchPlaylistMetadata(ctx context.Context, mediaURL 
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	// Add Accept-Encoding header to handle gzip
+	req.Header.Set("Accept-Encoding", "gzip")
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch playlist: %w", err)
 	}
 	defer resp.Body.Close()
 
-	limitedReader := io.LimitReader(resp.Body, 1024*1024) // 1MB limit for playlist
+	// Handle gzipped response
+	var reader io.Reader = resp.Body
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		gzReader, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create gzip reader: %w", err)
+		}
+		defer gzReader.Close()
+		reader = gzReader
+	}
+
+	// Use limited reader to prevent memory exhaustion
+	limitedReader := io.LimitReader(reader, 1024*1024)
 	scanner := bufio.NewScanner(limitedReader)
 
 	metadata := &PlaylistMetadata{
