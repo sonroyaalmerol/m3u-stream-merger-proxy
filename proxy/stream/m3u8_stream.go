@@ -64,7 +64,9 @@ func (h *M3U8StreamHandler) HandleHLSStream(
 	}
 	h.coordinator.writerCtxMu.Unlock()
 
-	h.coordinator.RegisterClient()
+	if err := h.coordinator.RegisterClient(); err != nil {
+		return StreamResult{0, err, proxy.StatusServerError}
+	}
 	h.logger.Debugf("Client registered: %s, count: %d", remoteAddr, atomic.LoadInt32(&h.coordinator.clientCount))
 
 	cleanup := func() {
