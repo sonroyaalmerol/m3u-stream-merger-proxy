@@ -59,7 +59,7 @@ func TestStreamHTTPHandler(t *testing.T) {
 	)
 
 	// Set up test environment variables
-	m3uURL := "https://gist.githubusercontent.com/sonroyaalmerol/64ce9eddf169366b29bf621b4370ec02/raw/402e36cccebc348e537f20070bf33bbc002947cf/test-m3u.m3u"
+	m3uURL := "https://gist.githubusercontent.com/sonroyaalmerol/64ce9eddf169366b29bf621b4370ec02/raw/d23e3c43f1961d946c6851a714af2809e21dc3b9/test-m3u.m3u"
 	t.Log("Setting M3U_URL_1:", m3uURL)
 	t.Setenv("M3U_URL_1", m3uURL)
 	t.Setenv("DEBUG", "true")

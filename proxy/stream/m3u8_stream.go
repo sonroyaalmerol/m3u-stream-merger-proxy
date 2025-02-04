@@ -16,24 +16,6 @@ import (
 	"time"
 )
 
-var httpClient = &http.Client{
-	Timeout: 10 * time.Second,
-	Transport: &http.Transport{
-		MaxIdleConns:       100,
-		IdleConnTimeout:    90 * time.Second,
-		DisableCompression: true,
-		MaxConnsPerHost:    100,
-		DisableKeepAlives:  false,
-	},
-	CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		userAgent := utils.GetEnv("USER_AGENT")
-
-		// Follow redirects while preserving the custom User-Agent header
-		req.Header.Set("User-Agent", userAgent)
-		return nil
-	},
-}
-
 type VariantStream struct {
 	Bandwidth int
 	URL       string
@@ -43,6 +25,7 @@ type M3U8StreamHandler struct {
 	config      *StreamConfig
 	logger      logger.Logger
 	coordinator *StreamCoordinator
+	client      *http.Client
 }
 
 func NewM3U8StreamHandler(config *StreamConfig, coordinator *StreamCoordinator, logger logger.Logger) *M3U8StreamHandler {
@@ -50,6 +33,18 @@ func NewM3U8StreamHandler(config *StreamConfig, coordinator *StreamCoordinator, 
 		config:      config,
 		coordinator: coordinator,
 		logger:      logger,
+		client: &http.Client{
+			Timeout: time.Duration(config.TimeoutSeconds) * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:       100,
+				IdleConnTimeout:    90 * time.Second,
+				DisableCompression: false, // Enable compression
+				MaxConnsPerHost:    100,
+				DisableKeepAlives:  false,
+				ForceAttemptHTTP2:  true, // Enable HTTP/2 support
+			},
+			CheckRedirect: utils.HTTPClient.CheckRedirect,
+		},
 	}
 }
 
@@ -248,7 +243,7 @@ func (h *M3U8StreamHandler) streamSegment(ctx context.Context, segmentURL string
 		return fmt.Errorf("error creating segment request: %w", err)
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := h.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("error fetching segment: %w", err)
 	}
@@ -275,7 +270,7 @@ func (h *M3U8StreamHandler) fetchPlaylistMetadata(ctx context.Context, mediaURL 
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := h.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch playlist: %w", err)
 	}
