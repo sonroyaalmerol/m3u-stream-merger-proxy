@@ -3,6 +3,7 @@ package stream
 import (
 	"container/ring"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"m3u-stream-merger/logger"
@@ -32,6 +33,8 @@ func newChunkData() *ChunkData {
 	}
 }
 
+// NOTE: Clients must call Reset() on each ChunkData once done with it.
+// Failure to do so may cause the underlying bytebufferpool to deplete.
 func (c *ChunkData) Reset() {
 	if c.Buffer != nil {
 		c.Buffer.Reset()
@@ -55,7 +58,7 @@ const (
 type StreamCoordinator struct {
 	buffer       *ring.Ring
 	mu           sync.RWMutex
-	subscribers  []chan struct{}
+	broadcast    chan struct{}
 	clientCount  int32
 	writerCtx    context.Context
 	writerCancel context.CancelFunc
@@ -77,28 +80,23 @@ type StreamCoordinator struct {
 	writeSeq int64
 }
 
-// subscribe returns a one‐time notification channel. Readers use this
-// when waiting for new data.
-func (c *StreamCoordinator) subscribe() chan struct{} {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	ch := make(chan struct{}, 1)
-	c.subscribers = append(c.subscribers, ch)
+// subscribe returns the current broadcast channel.
+func (c *StreamCoordinator) subscribe() <-chan struct{} {
+	c.mu.RLock()
+	ch := c.broadcast
+	c.mu.RUnlock()
 	return ch
 }
 
-// notifySubscribers will signal all waiting readers and then clear the list.
+// notifySubscribers atomically closes the current broadcast channel
+// and creates a new one so that waiting clients are woken.
 func (c *StreamCoordinator) notifySubscribers() {
 	c.mu.Lock()
-	subs := c.subscribers
-	c.subscribers = nil
+	// Close the current broadcast channel.
+	close(c.broadcast)
+	// Create a new broadcast channel for subsequent subscribers.
+	c.broadcast = make(chan struct{})
 	c.mu.Unlock()
-	for _, ch := range subs {
-		select {
-		case ch <- struct{}{}:
-		default:
-		}
-	}
 }
 
 func NewStreamCoordinator(streamID string, config *StreamConfig, cm *store.ConcurrencyManager, logger logger.Logger) *StreamCoordinator {
@@ -111,13 +109,13 @@ func NewStreamCoordinator(streamID string, config *StreamConfig, cm *store.Concu
 	}
 
 	coord := &StreamCoordinator{
-		buffer:      r,
-		writerChan:  make(chan struct{}, 1),
-		logger:      logger,
-		config:      config,
-		cm:          cm,
-		streamID:    streamID,
-		subscribers: make([]chan struct{}, 0),
+		buffer:     r,
+		writerChan: make(chan struct{}, 1),
+		logger:     logger,
+		config:     config,
+		cm:         cm,
+		streamID:   streamID,
+		broadcast:  make(chan struct{}),
 	}
 	atomic.StoreInt32(&coord.state, stateActive)
 	coord.lastError.Store((*ChunkData)(nil))
@@ -127,9 +125,14 @@ func NewStreamCoordinator(streamID string, config *StreamConfig, cm *store.Concu
 	return coord
 }
 
-func (c *StreamCoordinator) RegisterClient() {
+func (c *StreamCoordinator) RegisterClient() error {
+	if atomic.LoadInt32(&c.state) != stateActive {
+		c.logger.Warn("Attempt to register a client on a non-active stream")
+		return errors.New("stream is closed")
+	}
 	count := atomic.AddInt32(&c.clientCount, 1)
 	c.logger.Logf("Client registered (%s). Total clients: %d", c.streamID, count)
+	return nil
 }
 
 func (c *StreamCoordinator) UnregisterClient() {
@@ -345,14 +348,16 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) ([]*ChunkData, *
 		currentWriteSeq := atomic.LoadInt64(&c.writeSeq)
 		minSeq := currentWriteSeq - int64(c.config.SharedBufferSize)
 		if cd.seq < minSeq {
-			c.logger.Debug("ReadChunks: Client pointer is stale, data lost due to slow consumption")
+			c.logger.Warn("ReadChunks: Client pointer is stale; " +
+				"resetting to the latest chunk and returning a stale error")
 			errorChunk := &ChunkData{
 				Buffer:    nil,
-				Error:     fmt.Errorf("data lost due to slow consumer"),
+				Error:     fmt.Errorf("data lost due to slow consumer; read pointer reset"),
 				Status:    proxy.StatusServerError,
 				Timestamp: time.Now(),
 			}
 			c.mu.RUnlock()
+			// Return the latest pointer so the caller may resubscribe.
 			return nil, errorChunk, c.buffer
 		}
 	}
@@ -361,7 +366,7 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) ([]*ChunkData, *
 	for fromPosition == c.buffer && atomic.LoadInt32(&c.state) == stateActive {
 		c.mu.RUnlock()
 		ch := c.subscribe()
-		<-ch
+		<-ch // Wait until the broadcast channel is closed.
 		c.mu.RLock()
 	}
 
