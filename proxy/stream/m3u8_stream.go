@@ -2,7 +2,6 @@ package stream
 
 import (
 	"bufio"
-	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -69,18 +68,18 @@ func (h *M3U8StreamHandler) HandleHLSStream(
 	var resultErr error
 	var status int
 
+	if err := h.coordinator.RegisterClient(); err != nil {
+		return StreamResult{0, err, proxy.StatusServerError}
+	}
+	h.logger.Debugf("Client registered: %s, count: %d", remoteAddr, atomic.LoadInt32(&h.coordinator.clientCount))
+
 	h.coordinator.writerCtxMu.Lock()
-	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 0
+	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 1
 	if isFirstClient {
 		h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
 		go h.startHLSWriter(h.coordinator.writerCtx, lbResult)
 	}
 	h.coordinator.writerCtxMu.Unlock()
-
-	if err := h.coordinator.RegisterClient(); err != nil {
-		return StreamResult{0, err, proxy.StatusServerError}
-	}
-	h.logger.Debugf("Client registered: %s, count: %d", remoteAddr, atomic.LoadInt32(&h.coordinator.clientCount))
 
 	cleanup := func() {
 		h.coordinator.UnregisterClient()
@@ -334,28 +333,13 @@ func (h *M3U8StreamHandler) fetchPlaylistMetadata(ctx context.Context, mediaURL 
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Add Accept-Encoding header to handle gzip
-	req.Header.Set("Accept-Encoding", "gzip")
-
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch playlist: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// Handle gzipped response
-	var reader io.Reader = resp.Body
-	if resp.Header.Get("Content-Encoding") == "gzip" {
-		gzReader, err := gzip.NewReader(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create gzip reader: %w", err)
-		}
-		defer gzReader.Close()
-		reader = gzReader
-	}
-
-	// Use limited reader to prevent memory exhaustion
-	limitedReader := io.LimitReader(reader, 1024*1024)
+	limitedReader := io.LimitReader(resp.Body, 1024*1024) // 1MB limit for playlist
 	scanner := bufio.NewScanner(limitedReader)
 
 	metadata := &PlaylistMetadata{

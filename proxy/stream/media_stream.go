@@ -41,18 +41,18 @@ func (h *MediaStreamHandler) HandleMediaStream(
 		return StreamResult{0, fmt.Errorf("coordinator is nil"), proxy.StatusServerError}
 	}
 
+	if err := h.coordinator.RegisterClient(); err != nil {
+		return StreamResult{0, err, proxy.StatusServerError}
+	}
+	h.logger.Debugf("Client registered: %s, count: %d", remoteAddr, atomic.LoadInt32(&h.coordinator.clientCount))
+
 	h.coordinator.writerCtxMu.Lock()
-	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 0
+	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 1
 	if isFirstClient {
 		h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
 		go h.coordinator.StartWriter(h.coordinator.writerCtx, lbResult)
 	}
 	h.coordinator.writerCtxMu.Unlock()
-
-	if err := h.coordinator.RegisterClient(); err != nil {
-		return StreamResult{0, err, proxy.StatusServerError}
-	}
-	h.logger.Debugf("Client registered: %s, count: %d", remoteAddr, atomic.LoadInt32(&h.coordinator.clientCount))
 
 	cleanup := func() {
 		h.coordinator.UnregisterClient()
