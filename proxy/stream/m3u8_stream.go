@@ -8,14 +8,12 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/loadbalancer"
+	"m3u-stream-merger/utils"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/patrickmn/go-cache"
 )
 
 var httpClient = &http.Client{
@@ -26,6 +24,13 @@ var httpClient = &http.Client{
 		DisableCompression: true,
 		MaxConnsPerHost:    100,
 		DisableKeepAlives:  false,
+	},
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		userAgent := utils.GetEnv("USER_AGENT")
+
+		// Follow redirects while preserving the custom User-Agent header
+		req.Header.Set("User-Agent", userAgent)
+		return nil
 	},
 }
 
@@ -182,77 +187,50 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 		}
 	}()
 
-	client := httpClient // Use the optimized client we created earlier
 	mediaURL := lbResult.Response.Request.URL.String()
-
-	// Create a TTL cache for processed segments
-	processedSegmentsCache := cache.New(60*time.Second, 10*time.Second)
-
-	// Start with a default polling interval
-	pollInterval := time.Second
-	ticker := time.NewTicker(pollInterval)
+	lastSequence := int64(-1)             // Track the last sequence we processed
+	ticker := time.NewTicker(time.Second) // Start with default interval
 	defer ticker.Stop()
 
-	var lastMediaSequence int64 = -1
-
-	for {
+	for atomic.LoadInt32(&h.coordinator.state) == stateActive {
 		select {
 		case <-ctx.Done():
 			h.logger.Debug("Context cancelled, stopping HLS writer")
 			h.coordinator.writeError(ctx.Err(), proxy.StatusClientClosed)
 			return
 		case <-ticker.C:
-			reqCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			metadata, err := h.fetchPlaylistMetadata(reqCtx, mediaURL, client)
-			cancel()
-
+			metadata, err := h.fetchPlaylistMetadata(ctx, mediaURL)
 			if err != nil {
 				if ctx.Err() != nil {
-					h.logger.Debug("Context cancelled during playlist fetch")
-					h.coordinator.writeError(ctx.Err(), proxy.StatusClientClosed)
 					return
 				}
-				if h.coordinator.shouldRetry(h.coordinator.getTimeoutDuration()) {
-					continue
-				}
-				h.coordinator.writeError(err, proxy.StatusServerError)
-				return
+				continue
 			}
 
 			// Update polling interval based on target duration
 			if metadata.TargetDuration > 0 {
 				newInterval := time.Duration(metadata.TargetDuration * float64(time.Second) / 2)
-				if newInterval != pollInterval {
-					h.logger.Debugf("Updating polling interval from %v to %v", pollInterval, newInterval)
-					pollInterval = newInterval
-					ticker.Reset(pollInterval)
-				}
+				ticker.Reset(newInterval)
 			}
 
-			// Process new segments
-			if metadata.MediaSequence > lastMediaSequence || lastMediaSequence == -1 {
-				newSegments := make([]string, 0)
-				for _, segment := range metadata.Segments {
-					if _, found := processedSegmentsCache.Get(segment); !found {
-						newSegments = append(newSegments, segment)
-						processedSegmentsCache.Set(segment, true, cache.DefaultExpiration)
+			// Only process new segments if the sequence is newer
+			if metadata.MediaSequence > lastSequence {
+				// Process segments in order
+				for i, segment := range metadata.Segments {
+					segmentSeq := metadata.MediaSequence + int64(i)
+					if segmentSeq <= lastSequence {
+						continue // Skip segments we've already processed
 					}
-				}
 
-				if len(newSegments) > 0 {
-					if err := h.streamSegments(ctx, newSegments); err != nil {
+					if err := h.streamSegment(ctx, segment); err != nil {
 						if ctx.Err() != nil {
-							h.coordinator.writeError(ctx.Err(), proxy.StatusClientClosed)
 							return
 						}
-						if h.coordinator.shouldRetry(h.coordinator.getTimeoutDuration()) {
-							continue
-						}
-						h.coordinator.writeError(err, proxy.StatusServerError)
-						return
+						h.logger.Errorf("Error streaming segment: %v", err)
+						continue
 					}
+					lastSequence = segmentSeq
 				}
-				lastMediaSequence = metadata.MediaSequence
 			}
 
 			if metadata.IsEndlist {
@@ -264,76 +242,40 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 	}
 }
 
-func (h *M3U8StreamHandler) streamSegments(ctx context.Context, segments []string) error {
-	// Use semaphore to limit concurrent downloads
-	sem := make(chan struct{}, 3) // Limit to 3 concurrent downloads
-	var wg sync.WaitGroup
-	var errOnce sync.Once
-	var streamErr error
-
-	for _, segmentURL := range segments {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			wg.Add(1)
-			sem <- struct{}{} // Acquire semaphore
-
-			go func(url string) {
-				defer func() {
-					<-sem // Release semaphore
-					wg.Done()
-				}()
-
-				chunk := newChunkData()
-				defer chunk.Reset() // Ensure chunk is always reset
-
-				req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-				if err != nil {
-					errOnce.Do(func() {
-						streamErr = fmt.Errorf("error creating request: %w", err)
-					})
-					return
-				}
-
-				resp, err := httpClient.Do(req)
-				if err != nil {
-					h.logger.Errorf("Error fetching segment %s: %v", url, err)
-					return
-				}
-				defer resp.Body.Close()
-
-				// Use limited reader to prevent memory exhaustion
-				limitedReader := io.LimitReader(resp.Body, int64(h.config.ChunkSize))
-
-				_, err = io.Copy(chunk.Buffer, limitedReader)
-				if err != nil {
-					h.logger.Errorf("Error copying segment data: %v", err)
-					return
-				}
-
-				chunk.Timestamp = time.Now()
-				if !h.coordinator.Write(chunk) {
-					errOnce.Do(func() {
-						streamErr = fmt.Errorf("failed to write chunk")
-					})
-					return
-				}
-			}(segmentURL)
-		}
+func (h *M3U8StreamHandler) streamSegment(ctx context.Context, segmentURL string) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", segmentURL, nil)
+	if err != nil {
+		return fmt.Errorf("error creating segment request: %w", err)
 	}
 
-	wg.Wait() // Wait for all segments to complete
-	return streamErr
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("error fetching segment: %w", err)
+	}
+	defer resp.Body.Close()
+
+	chunk := newChunkData()
+	defer chunk.Reset()
+
+	if _, err := io.Copy(chunk.Buffer, resp.Body); err != nil {
+		return fmt.Errorf("error copying segment data: %w", err)
+	}
+
+	chunk.Timestamp = time.Now()
+	if !h.coordinator.Write(chunk) {
+		return fmt.Errorf("failed to write chunk")
+	}
+
+	return nil
 }
 
-func (h *M3U8StreamHandler) fetchPlaylistMetadata(ctx context.Context, mediaURL string, client *http.Client) (*PlaylistMetadata, error) {
+func (h *M3U8StreamHandler) fetchPlaylistMetadata(ctx context.Context, mediaURL string) (*PlaylistMetadata, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", mediaURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch playlist: %w", err)
 	}
