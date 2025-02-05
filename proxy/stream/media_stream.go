@@ -49,7 +49,9 @@ func (h *MediaStreamHandler) HandleMediaStream(
 	h.coordinator.writerCtxMu.Lock()
 	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 1
 	if isFirstClient {
-		h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
+		if h.coordinator.writerCtx == nil {
+			h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
+		}
 		go h.coordinator.StartWriter(h.coordinator.writerCtx, lbResult)
 	}
 	h.coordinator.writerCtxMu.Unlock()
@@ -65,6 +67,7 @@ func (h *MediaStreamHandler) HandleMediaStream(
 				h.logger.Debug("Stopping writer - no clients remaining")
 				h.coordinator.writerCancel()
 				h.coordinator.writerCancel = nil
+				h.coordinator.writerCtx = nil
 			}
 			h.coordinator.writerCtxMu.Unlock()
 		}

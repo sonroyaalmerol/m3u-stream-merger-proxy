@@ -64,19 +64,17 @@ func (h *M3U8StreamHandler) HandleHLSStream(
 		return StreamResult{0, fmt.Errorf("coordinator is nil"), proxy.StatusServerError}
 	}
 
-	if err := h.coordinator.RegisterClient(); err != nil {
-		return StreamResult{0, err, proxy.StatusServerError}
-	}
-	h.logger.Debugf("Client registered: %s, count: %d", remoteAddr, atomic.LoadInt32(&h.coordinator.clientCount))
-
+	// Only initialize the HLS writer if needed
 	h.coordinator.writerCtxMu.Lock()
-	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 1
-	if isFirstClient {
-		h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
+	if !h.coordinator.writerActive.Load() {
+		if h.coordinator.writerCtx == nil {
+			h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
+		}
 		go h.startHLSWriter(h.coordinator.writerCtx, lbResult)
 	}
 	h.coordinator.writerCtxMu.Unlock()
 
+	// Let MediaStreamHandler handle all client registration and streaming
 	mediaHandler := NewMediaStreamHandler(h.config, h.coordinator, h.logger)
 	return mediaHandler.HandleMediaStream(ctx, lbResult, writer, remoteAddr)
 }
