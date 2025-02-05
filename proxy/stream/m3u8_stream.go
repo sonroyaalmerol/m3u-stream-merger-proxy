@@ -17,6 +17,13 @@ import (
 	"time"
 )
 
+var safeConcatTypes = map[string]bool{
+	"video/mp2t": true,
+	"video/mpeg": true,
+	"audio/aac":  true, // AAC in ADTS format can be concatenated
+	"audio/mpeg": true, // MP3 can be concatenated
+}
+
 type VariantStream struct {
 	Bandwidth int
 	URL       string
@@ -233,6 +240,11 @@ func (h *M3U8StreamHandler) streamSegment(ctx context.Context, segmentURL string
 			if n > 0 {
 				contentType = http.DetectContentType(buffer[:n])
 			}
+
+			if !safeConcatTypes[strings.ToLower(contentType)] {
+				return fmt.Errorf("content type %s cannot be safely concatenated", contentType)
+			}
+
 			if contentType == "" {
 				contentType = "video/MP2T" // Default to MPEG-TS if we can't detect
 			}
