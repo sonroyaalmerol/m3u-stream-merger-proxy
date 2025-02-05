@@ -64,10 +64,6 @@ func (h *M3U8StreamHandler) HandleHLSStream(
 		return StreamResult{0, fmt.Errorf("coordinator is nil"), proxy.StatusServerError}
 	}
 
-	var bytesWritten int64
-	var resultErr error
-	var status int
-
 	if err := h.coordinator.RegisterClient(); err != nil {
 		return StreamResult{0, err, proxy.StatusServerError}
 	}
@@ -81,89 +77,8 @@ func (h *M3U8StreamHandler) HandleHLSStream(
 	}
 	h.coordinator.writerCtxMu.Unlock()
 
-	cleanup := func() {
-		h.coordinator.UnregisterClient()
-		currentCount := atomic.LoadInt32(&h.coordinator.clientCount)
-		h.logger.Debugf("Client unregistered: %s, remaining: %d", remoteAddr, currentCount)
-
-		if currentCount == 0 {
-			h.coordinator.writerCtxMu.Lock()
-			if h.coordinator.writerCancel != nil {
-				h.logger.Debug("Stopping writer - no clients remaining")
-				h.coordinator.writerCancel()
-				h.coordinator.writerCancel = nil
-			}
-			h.coordinator.writerCtxMu.Unlock()
-		}
-	}
-	defer cleanup()
-
-	lastPosition := h.coordinator.buffer.Prev()
-
-	// Create a done channel to signal when we're finished
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-
-		for {
-			select {
-			case <-ctx.Done():
-				resultErr = ctx.Err()
-				status = proxy.StatusClientClosed
-				return
-			default:
-				chunks, errChunk, newPos := h.coordinator.ReadChunks(lastPosition)
-
-				if len(chunks) > 0 {
-					for _, chunk := range chunks {
-						if chunk != nil && chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
-							n, err := writer.Write(chunk.Buffer.Bytes())
-							if err != nil {
-								// Clean up chunks
-								for _, c := range chunks {
-									if c != nil {
-										c.Reset()
-									}
-								}
-								resultErr = err
-								status = proxy.StatusClientClosed
-								return
-							}
-							bytesWritten += int64(n)
-							if flusher, ok := writer.(http.Flusher); ok {
-								flusher.Flush()
-							}
-						}
-						if chunk != nil {
-							chunk.Reset()
-						}
-					}
-				}
-
-				if errChunk != nil {
-					resultErr = errChunk.Error
-					status = errChunk.Status
-					return
-				}
-
-				if newPos != nil {
-					lastPosition = newPos
-				}
-
-				// Add a small sleep to prevent tight looping
-				time.Sleep(10 * time.Millisecond)
-			}
-		}
-	}()
-
-	// Wait for either the context to be cancelled or the streaming to complete
-	select {
-	case <-ctx.Done():
-		h.logger.Debugf("Client context cancelled: %s", remoteAddr)
-		return StreamResult{bytesWritten, ctx.Err(), proxy.StatusClientClosed}
-	case <-done:
-		return StreamResult{bytesWritten, resultErr, status}
-	}
+	mediaHandler := NewMediaStreamHandler(h.config, h.coordinator, h.logger)
+	return mediaHandler.HandleMediaStream(ctx, lbResult, writer, remoteAddr)
 }
 
 type PlaylistMetadata struct {
@@ -172,6 +87,7 @@ type PlaylistMetadata struct {
 	Version        int
 	IsEndlist      bool
 	Segments       []string
+	IsMaster       bool
 }
 
 func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadbalancer.LoadBalancerResult) {
@@ -183,8 +99,14 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 	}()
 
 	mediaURL := lbResult.Response.Request.URL.String()
-	lastSequence := int64(-1)             // Track the last sequence we processed
-	ticker := time.NewTicker(time.Second) // Start with default interval
+	lastSequence := int64(-1)
+	seenSegments := make(map[string]bool)
+	retryAttempts := 0
+	maxRetries := 5
+
+	// Start with a short interval and adjust based on target duration
+	interval := time.Second
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for atomic.LoadInt32(&h.coordinator.state) == stateActive {
@@ -199,22 +121,54 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 				if ctx.Err() != nil {
 					return
 				}
+
+				retryAttempts++
+				h.logger.Warnf("Failed to fetch playlist metadata (attempt %d/%d): %v",
+					retryAttempts, maxRetries, err)
+
+				if retryAttempts >= maxRetries {
+					h.logger.Error("Max retry attempts reached, stopping HLS writer")
+					h.coordinator.writeError(err, proxy.StatusServerError)
+					return
+				}
+
+				// Exponential backoff for retries
+				time.Sleep(time.Duration(retryAttempts*retryAttempts) * 100 * time.Millisecond)
 				continue
+			}
+			retryAttempts = 0 // Reset retry counter on successful fetch
+
+			// Handle master playlist
+			if metadata.IsMaster {
+				h.logger.Error("Master playlist not supported in this context")
+				h.coordinator.writeError(fmt.Errorf("master playlist not supported"), proxy.StatusServerError)
+				return
 			}
 
 			// Update polling interval based on target duration
 			if metadata.TargetDuration > 0 {
 				newInterval := time.Duration(metadata.TargetDuration * float64(time.Second) / 2)
-				ticker.Reset(newInterval)
+				if newInterval != interval {
+					interval = newInterval
+					ticker.Reset(interval)
+				}
 			}
 
-			// Only process new segments if the sequence is newer
-			if metadata.MediaSequence > lastSequence {
-				// Process segments in order
+			// Process new segments
+			if len(metadata.Segments) > 0 {
+				// For live streams, we need to handle the case where MediaSequence resets
+				if metadata.MediaSequence < lastSequence {
+					h.logger.Log("Media sequence reset detected, clearing segment history")
+					lastSequence = metadata.MediaSequence - 1
+					seenSegments = make(map[string]bool)
+				}
+
 				for i, segment := range metadata.Segments {
 					segmentSeq := metadata.MediaSequence + int64(i)
-					if segmentSeq <= lastSequence {
-						continue // Skip segments we've already processed
+
+					// Skip already processed segments
+					if segmentSeq <= lastSequence || seenSegments[segment] {
+						continue
 					}
 
 					if err := h.streamSegment(ctx, segment); err != nil {
@@ -224,14 +178,34 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 						h.logger.Errorf("Error streaming segment: %v", err)
 						continue
 					}
+
+					seenSegments[segment] = true
 					lastSequence = segmentSeq
+
+					// Cleanup old segments from map to prevent memory growth
+					if len(seenSegments) > 1000 {
+						newSeenSegments := make(map[string]bool)
+						for j := max(0, i-100); j <= i; j++ {
+							if j < len(metadata.Segments) {
+								newSeenSegments[metadata.Segments[j]] = true
+							}
+						}
+						seenSegments = newSeenSegments
+					}
 				}
 			}
 
+			// Only exit if we've seen the endlist marker
 			if metadata.IsEndlist {
-				h.logger.Debug("Playlist ended, stopping HLS writer")
+				h.logger.Debug("Playlist ended (EXT-X-ENDLIST found)")
 				h.coordinator.writeError(io.EOF, proxy.StatusEOF)
 				return
+			}
+
+			// For live streams with no new segments, keep polling
+			if len(metadata.Segments) == 0 {
+				h.logger.Debug("No new segments found, continuing to poll")
+				continue
 			}
 		}
 	}
@@ -249,15 +223,19 @@ func (h *M3U8StreamHandler) streamSegment(ctx context.Context, segmentURL string
 	}
 	defer resp.Body.Close()
 
-	chunk := newChunkData()
-	defer chunk.Reset()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("segment request failed with status: %d", resp.StatusCode)
+	}
 
+	chunk := newChunkData()
 	if _, err := io.Copy(chunk.Buffer, resp.Body); err != nil {
+		chunk.Reset()
 		return fmt.Errorf("error copying segment data: %w", err)
 	}
 
 	chunk.Timestamp = time.Now()
 	if !h.coordinator.Write(chunk) {
+		chunk.Reset()
 		return fmt.Errorf("failed to write chunk")
 	}
 
@@ -276,6 +254,10 @@ func (h *M3U8StreamHandler) fetchPlaylistMetadata(ctx context.Context, mediaURL 
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("playlist request failed with status: %d", resp.StatusCode)
+	}
+
 	limitedReader := io.LimitReader(resp.Body, 1024*1024) // 1MB limit for playlist
 	scanner := bufio.NewScanner(limitedReader)
 
@@ -292,6 +274,13 @@ func (h *M3U8StreamHandler) fetchPlaylistMetadata(ctx context.Context, mediaURL 
 		line := strings.TrimSpace(scanner.Text())
 
 		switch {
+		case strings.HasPrefix(line, "#EXTM3U"):
+			continue
+
+		case strings.HasPrefix(line, "#EXT-X-STREAM-INF"):
+			metadata.IsMaster = true
+			return metadata, nil
+
 		case strings.HasPrefix(line, "#EXT-X-VERSION:"):
 			if _, err := fmt.Sscanf(line, "#EXT-X-VERSION:%d", &metadata.Version); err != nil {
 				h.logger.Warnf("Failed to parse version: %v", err)
@@ -328,11 +317,17 @@ func (h *M3U8StreamHandler) fetchPlaylistMetadata(ctx context.Context, mediaURL 
 		return nil, fmt.Errorf("error scanning playlist: %w", err)
 	}
 
-	// Validate required fields
 	if metadata.TargetDuration == 0 {
 		h.logger.Warn("No EXT-X-TARGETDURATION found in playlist, using default")
-		metadata.TargetDuration = 2 // Default to 2 seconds if not specified
+		metadata.TargetDuration = 2
 	}
 
 	return metadata, nil
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

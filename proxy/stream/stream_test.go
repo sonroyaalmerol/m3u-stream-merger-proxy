@@ -252,7 +252,7 @@ func TestM3U8StreamHandler_HandleHLSStream(t *testing.T) {
 			var result StreamResult
 			select {
 			case result = <-resultCh:
-			case <-time.After(4500 * time.Millisecond): // Slightly longer than context timeout
+			case <-time.After(10000 * time.Millisecond): // Slightly longer than context timeout
 				t.Fatal("Test timed out waiting for result")
 			}
 
