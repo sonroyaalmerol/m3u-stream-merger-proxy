@@ -56,6 +56,10 @@ func (h *MediaStreamHandler) HandleMediaStream(
 	}
 	h.coordinator.writerCtxMu.Unlock()
 
+	if contentType, ok := h.coordinator.firstSegmentContentType.Load().(string); ok && contentType != "" {
+		writer.Header().Set("Content-Type", contentType)
+	}
+
 	cleanup := func() {
 		h.coordinator.UnregisterClient()
 		currentCount := atomic.LoadInt32(&h.coordinator.clientCount)

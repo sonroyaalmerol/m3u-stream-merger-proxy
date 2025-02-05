@@ -82,6 +82,8 @@ type StreamCoordinator struct {
 
 	lbResultOnWrite atomic.Pointer[loadbalancer.LoadBalancerResult]
 
+	firstSegmentContentType atomic.Value
+
 	// writeSeq is an atomic counter that is assigned to each chunk written.
 	writeSeq int64
 }

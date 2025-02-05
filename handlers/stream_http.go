@@ -103,14 +103,10 @@ func (h *StreamHTTPHandler) writeHeaders(w http.ResponseWriter, resp *http.Respo
 		return nil
 	}
 
-	markedAsM3u8 := false
-	if utils.IsAnM3U8Media(resp) {
-		w.Header().Set("Content-Type", "video/mp2t")
-		markedAsM3u8 = true
-	}
+	isM3u8 := utils.IsAnM3U8Media(resp)
 
 	for k, v := range resp.Header {
-		if strings.ToLower(k) == "content-length" || (strings.ToLower(k) == "content-type" && markedAsM3u8) {
+		if strings.ToLower(k) == "content-length" || (strings.ToLower(k) == "content-type" && isM3u8) {
 			continue
 		}
 		for _, val := range v {

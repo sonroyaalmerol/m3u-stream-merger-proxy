@@ -95,6 +95,8 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 	}
 	defer h.coordinator.writerActive.Store(false)
 
+	h.coordinator.firstSegmentContentType.Store("")
+
 	mediaURL := lbResult.Response.Request.URL.String()
 	lastMediaSeq := int64(-1)
 	var lastErr error
@@ -166,15 +168,19 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 
 			if metadata.IsEndlist {
 				// Process remaining segments before ending
-				h.processSegments(ctx, metadata.Segments)
+				h.processSegments(ctx, metadata.Segments, false)
 				h.coordinator.writeError(io.EOF, proxy.StatusEOF)
 				return
 			}
 
 			if metadata.MediaSequence > lastMediaSeq {
-				lastChangeTime = time.Now() // Reset timeout on sequence change
+				lastChangeTime = time.Now()
 				lastMediaSeq = metadata.MediaSequence
-				if err := h.processSegments(ctx, metadata.Segments); err != nil {
+
+				// Only check content type if we haven't detected it yet
+				detectContentType := h.coordinator.firstSegmentContentType.Load() == ""
+
+				if err := h.processSegments(ctx, metadata.Segments, detectContentType); err != nil {
 					if ctx.Err() != nil {
 						h.coordinator.writeError(ctx.Err(), proxy.StatusClientClosed)
 						return
@@ -186,13 +192,13 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 	}
 }
 
-func (h *M3U8StreamHandler) processSegments(ctx context.Context, segments []string) error {
-	for _, segment := range segments {
+func (h *M3U8StreamHandler) processSegments(ctx context.Context, segments []string, detectContentType bool) error {
+	for i, segment := range segments {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			if err := h.streamSegment(ctx, segment); err != nil {
+			if err := h.streamSegment(ctx, segment, detectContentType && i == 0); err != nil {
 				h.logger.Errorf("Error streaming segment: %v", err)
 				continue
 			}
@@ -201,7 +207,7 @@ func (h *M3U8StreamHandler) processSegments(ctx context.Context, segments []stri
 	return nil
 }
 
-func (h *M3U8StreamHandler) streamSegment(ctx context.Context, segmentURL string) error {
+func (h *M3U8StreamHandler) streamSegment(ctx context.Context, segmentURL string, detectContentType bool) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", segmentURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -215,6 +221,24 @@ func (h *M3U8StreamHandler) streamSegment(ctx context.Context, segmentURL string
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("segment request failed with status: %d", resp.StatusCode)
+	}
+
+	// Check content type if this is the first segment and we haven't detected it yet
+	if detectContentType {
+		contentType := resp.Header.Get("Content-Type")
+		if contentType == "" {
+			// Try to detect from content if header not present
+			buffer := make([]byte, 512)
+			n, _ := io.ReadAtLeast(resp.Body, buffer, 1)
+			if n > 0 {
+				contentType = http.DetectContentType(buffer[:n])
+			}
+			if contentType == "" {
+				contentType = "video/MP2T" // Default to MPEG-TS if we can't detect
+			}
+		}
+		h.coordinator.firstSegmentContentType.Store(contentType)
+		h.logger.Debugf("Detected segment content type: %s", contentType)
 	}
 
 	chunk := newChunkData()
