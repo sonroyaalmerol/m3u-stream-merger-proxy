@@ -202,16 +202,30 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 	}
 }
 
-func (h *M3U8StreamHandler) processSegments(ctx context.Context, segments []string, detectContentType bool) error {
+func (h *M3U8StreamHandler) processSegments(ctx context.Context, segments []string, checkFirstSegment bool) error {
+	const maxErrors = 3
+
+	errorCount := 0
 	for i, segment := range segments {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			if err := h.streamSegment(ctx, segment, detectContentType && i == 0); err != nil {
+			if err := h.streamSegment(ctx, segment, checkFirstSegment && i == 0); err != nil {
+				if strings.Contains(err.Error(), "cannot be safely concatenated") {
+					return err
+				}
+
+				errorCount++
 				h.logger.Errorf("Error streaming segment: %v", err)
+
+				if errorCount >= maxErrors {
+					return fmt.Errorf("maximum segment errors reached (%d), last error: %w", maxErrors, err)
+				}
 				continue
 			}
+			// Reset error count on successful segment
+			errorCount = 0
 		}
 	}
 	return nil
@@ -244,15 +258,15 @@ func (h *M3U8StreamHandler) streamSegment(ctx context.Context, segmentURL string
 				contentType = http.DetectContentType(buffer[:n])
 			}
 
-			if !safeConcatTypes[strings.ToLower(contentType)] {
-				return fmt.Errorf("content type %s cannot be safely concatenated", contentType)
-			}
-
 			if contentType == "" {
 				contentType = "video/MP2T" // Default to MPEG-TS if we can't detect
 			}
 		}
 		h.coordinator.firstSegmentContentType.Store(contentType)
+		if !safeConcatTypes[strings.ToLower(contentType)] {
+			return fmt.Errorf("content type %s cannot be safely concatenated", contentType)
+		}
+
 		h.logger.Debugf("Detected segment content type: %s", contentType)
 	}
 
