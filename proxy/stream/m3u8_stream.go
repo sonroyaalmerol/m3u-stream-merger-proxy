@@ -175,7 +175,10 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 
 			if metadata.IsEndlist {
 				// Process remaining segments before ending
-				h.processSegments(ctx, metadata.Segments, false)
+				err = h.processSegments(ctx, metadata.Segments, false)
+				if err != nil {
+					h.logger.Errorf("Error processing segments: %v", err)
+				}
 				h.coordinator.writeError(io.EOF, proxy.StatusEOF)
 				return
 			}
@@ -290,11 +293,11 @@ func (h *M3U8StreamHandler) parsePlaylist(mediaURL string, content string) (*Pla
 			metadata.IsMaster = true
 			return metadata, nil
 		case strings.HasPrefix(line, "#EXT-X-VERSION:"):
-			fmt.Sscanf(line, "#EXT-X-VERSION:%d", &metadata.Version)
+			_, _ = fmt.Sscanf(line, "#EXT-X-VERSION:%d", &metadata.Version)
 		case strings.HasPrefix(line, "#EXT-X-TARGETDURATION:"):
-			fmt.Sscanf(line, "#EXT-X-TARGETDURATION:%f", &metadata.TargetDuration)
+			_, _ = fmt.Sscanf(line, "#EXT-X-TARGETDURATION:%f", &metadata.TargetDuration)
 		case strings.HasPrefix(line, "#EXT-X-MEDIA-SEQUENCE:"):
-			fmt.Sscanf(line, "#EXT-X-MEDIA-SEQUENCE:%d", &metadata.MediaSequence)
+			_, _ = fmt.Sscanf(line, "#EXT-X-MEDIA-SEQUENCE:%d", &metadata.MediaSequence)
 		case line == "#EXT-X-ENDLIST":
 			metadata.IsEndlist = true
 		case !strings.HasPrefix(line, "#") && line != "":

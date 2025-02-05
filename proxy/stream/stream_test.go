@@ -239,10 +239,7 @@ func TestM3U8StreamHandler_HandleHLSStream(t *testing.T) {
 			}()
 
 			// Wait for result or timeout
-			var result StreamResult
-			select {
-			case result = <-resultCh:
-			}
+			result := <-resultCh
 
 			if result.Status != tt.expectedResult.Status {
 				t.Errorf("HandleHLSStream() status = %v, want %v", result.Status, tt.expectedResult.Status)
