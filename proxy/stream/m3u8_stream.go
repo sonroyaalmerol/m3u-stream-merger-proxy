@@ -9,6 +9,8 @@ import (
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/utils"
+	"math"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strings"
@@ -67,7 +69,7 @@ func (h *M3U8StreamHandler) HandleHLSStream(
 		return StreamResult{0, fmt.Errorf("invalid parameters"), proxy.StatusServerError}
 	}
 
-	// Initialize the writer context before registering client
+	// Initialize the writer context before starting writer
 	h.coordinator.writerCtxMu.Lock()
 	if h.coordinator.writerCtx == nil {
 		h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
@@ -75,7 +77,7 @@ func (h *M3U8StreamHandler) HandleHLSStream(
 	}
 	h.coordinator.writerCtxMu.Unlock()
 
-	// Let MediaStreamHandler handle the actual streaming
+	// Let MediaStreamHandler handle client registration and streaming
 	mediaHandler := NewMediaStreamHandler(h.config, h.coordinator, h.logger)
 	return mediaHandler.HandleMediaStream(ctx, lbResult, writer, remoteAddr)
 }
@@ -94,69 +96,32 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 	defer h.coordinator.writerActive.Store(false)
 
 	mediaURL := lbResult.Response.Request.URL.String()
+	lastMediaSeq := int64(-1)
+	var lastErr error
+	lastChangeTime := time.Now()
 
-	// Parse the initial playlist
-	body, err := io.ReadAll(lbResult.Response.Body)
-	if err != nil {
-		h.coordinator.writeError(err, proxy.StatusServerError)
-		return
-	}
-	defer lbResult.Response.Body.Close()
-
-	metadata, err := h.parsePlaylist(mediaURL, string(body))
-	if err != nil {
-		h.coordinator.writeError(err, proxy.StatusServerError)
-		return
-	}
-
-	if metadata.IsMaster {
-		h.coordinator.writeError(fmt.Errorf("master playlist not supported"), proxy.StatusServerError)
-		return
-	}
-
-	lastSequence := metadata.MediaSequence
-	noChangeTimeout := time.After(time.Duration(h.config.TimeoutSeconds) * time.Second)
-
-	// Process initial segments
-	for _, segment := range metadata.Segments {
-		select {
-		case <-ctx.Done():
-			h.coordinator.writeError(ctx.Err(), proxy.StatusClientClosed)
-			return
-		default:
-			if err := h.streamSegment(ctx, segment); err != nil {
-				if ctx.Err() != nil {
-					h.coordinator.writeError(ctx.Err(), proxy.StatusClientClosed)
-					return
-				}
-				h.logger.Errorf("Error streaming segment: %v", err)
-				continue
-			}
-		}
-	}
-
-	if metadata.IsEndlist {
-		h.coordinator.writeError(io.EOF, proxy.StatusEOF)
-		return
-	}
-
-	// For live streams, poll for updates
-	ticker := time.NewTicker(time.Second)
+	// Start with a conservative polling rate
+	pollInterval := time.Second
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			h.coordinator.writeError(ctx.Err(), proxy.StatusClientClosed)
-			return
-
-		case <-noChangeTimeout:
-			h.logger.Debug("No new segments detected within timeout period")
-			h.coordinator.writeError(fmt.Errorf("stream timeout: no new segments"), proxy.StatusEOF)
+			if lastErr == nil {
+				h.coordinator.writeError(ctx.Err(), proxy.StatusClientClosed)
+			}
 			return
 
 		case <-ticker.C:
-			// Fetch current playlist
+			// Check timeout first
+			if time.Since(lastChangeTime) > time.Duration(h.config.TimeoutSeconds)*time.Second+pollInterval {
+				h.logger.Debug("No sequence changes detected within timeout period")
+				h.coordinator.writeError(fmt.Errorf("stream timeout: no new segments"), proxy.StatusEOF)
+				return
+			}
+
+			// Create new request for each poll
 			req, err := http.NewRequestWithContext(ctx, "GET", mediaURL, nil)
 			if err != nil {
 				continue
@@ -178,23 +143,62 @@ func (h *M3U8StreamHandler) startHLSWriter(ctx context.Context, lbResult *loadba
 				continue
 			}
 
-			if metadata.MediaSequence > lastSequence {
-				// New segments found, reset timeout
-				noChangeTimeout = time.After(time.Duration(h.config.TimeoutSeconds) * time.Second)
-				lastSequence = metadata.MediaSequence
+			// Update polling rate based on target duration
+			if metadata.TargetDuration > 0 {
+				// HLS spec recommends polling at no less than target duration / 2
+				newInterval := time.Duration(metadata.TargetDuration * float64(time.Second) / 2)
 
-				for _, segment := range metadata.Segments {
-					if err := h.streamSegment(ctx, segment); err != nil {
-						if ctx.Err() != nil {
-							h.coordinator.writeError(ctx.Err(), proxy.StatusClientClosed)
-							return
-						}
-						h.logger.Errorf("Error streaming segment: %v", err)
+				// Add a small random jitter (±10%) to prevent thundering herd
+				jitter := time.Duration(float64(newInterval) * (0.9 + 0.2*rand.Float64()))
+
+				// Only update if significantly different (>10% change)
+				if math.Abs(float64(jitter-pollInterval)) > float64(pollInterval)*0.1 {
+					pollInterval = jitter
+					ticker.Reset(pollInterval)
+					h.logger.Debugf("Updated polling interval to %v", pollInterval)
+				}
+			}
+
+			if metadata.IsMaster {
+				h.coordinator.writeError(fmt.Errorf("master playlist not supported"), proxy.StatusServerError)
+				return
+			}
+
+			if metadata.IsEndlist {
+				// Process remaining segments before ending
+				h.processSegments(ctx, metadata.Segments)
+				h.coordinator.writeError(io.EOF, proxy.StatusEOF)
+				return
+			}
+
+			if metadata.MediaSequence > lastMediaSeq {
+				lastChangeTime = time.Now() // Reset timeout on sequence change
+				lastMediaSeq = metadata.MediaSequence
+				if err := h.processSegments(ctx, metadata.Segments); err != nil {
+					if ctx.Err() != nil {
+						h.coordinator.writeError(ctx.Err(), proxy.StatusClientClosed)
+						return
 					}
+					lastErr = err
 				}
 			}
 		}
 	}
+}
+
+func (h *M3U8StreamHandler) processSegments(ctx context.Context, segments []string) error {
+	for _, segment := range segments {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			if err := h.streamSegment(ctx, segment); err != nil {
+				h.logger.Errorf("Error streaming segment: %v", err)
+				continue
+			}
+		}
+	}
+	return nil
 }
 
 func (h *M3U8StreamHandler) streamSegment(ctx context.Context, segmentURL string) error {
@@ -214,29 +218,24 @@ func (h *M3U8StreamHandler) streamSegment(ctx context.Context, segmentURL string
 	}
 
 	chunk := newChunkData()
-	defer func() {
-		if chunk != nil {
-			chunk.Reset()
-		}
-	}()
-
 	if _, err := io.Copy(chunk.Buffer, resp.Body); err != nil {
+		chunk.Reset()
 		return fmt.Errorf("failed to copy segment data: %w", err)
 	}
 
 	chunk.Timestamp = time.Now()
 	if !h.coordinator.Write(chunk) {
+		chunk.Reset()
 		return fmt.Errorf("failed to write chunk")
 	}
 
-	// Chunk was successfully written, don't reset it
-	chunk = nil
 	return nil
 }
 
 func (h *M3U8StreamHandler) parsePlaylist(mediaURL string, content string) (*PlaylistMetadata, error) {
 	metadata := &PlaylistMetadata{
-		Segments: make([]string, 0, 32),
+		Segments:       make([]string, 0, 32),
+		TargetDuration: 2, // Default target duration as fallback
 	}
 
 	base, err := url.Parse(mediaURL)
@@ -254,6 +253,12 @@ func (h *M3U8StreamHandler) parsePlaylist(mediaURL string, content string) (*Pla
 		case strings.HasPrefix(line, "#EXT-X-STREAM-INF"):
 			metadata.IsMaster = true
 			return metadata, nil
+		case strings.HasPrefix(line, "#EXT-X-VERSION:"):
+			fmt.Sscanf(line, "#EXT-X-VERSION:%d", &metadata.Version)
+		case strings.HasPrefix(line, "#EXT-X-TARGETDURATION:"):
+			fmt.Sscanf(line, "#EXT-X-TARGETDURATION:%f", &metadata.TargetDuration)
+		case strings.HasPrefix(line, "#EXT-X-MEDIA-SEQUENCE:"):
+			fmt.Sscanf(line, "#EXT-X-MEDIA-SEQUENCE:%d", &metadata.MediaSequence)
 		case line == "#EXT-X-ENDLIST":
 			metadata.IsEndlist = true
 		case !strings.HasPrefix(line, "#") && line != "":
