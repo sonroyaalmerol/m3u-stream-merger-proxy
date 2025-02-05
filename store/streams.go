@@ -98,7 +98,7 @@ func GenerateStreamURL(baseUrl string, stream StreamInfo) string {
 			}
 
 			ext, err := utils.GetFileExtensionFromUrl(srcUrl)
-			if err != nil {
+			if err != nil || strings.ToLower(ext) == ".m3u8" || strings.ToLower(ext) == ".m3u" {
 				return fmt.Sprintf("%s/p/%s/%s", baseUrl, subPath, EncodeSlug(stream))
 			}
 
