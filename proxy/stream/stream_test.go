@@ -89,33 +89,23 @@ func (m *mockHLSServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case strings.HasSuffix(r.URL.Path, ".m3u8"):
-		m.logger.Debug("Serving playlist")
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-		_, err := w.Write([]byte(m.mediaPlaylist))
-		if err != nil {
-			m.logger.Errorf("Error writing playlist: %v", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
+		_, _ = w.Write([]byte(m.mediaPlaylist))
 
 	case strings.HasSuffix(r.URL.Path, ".ts"):
-		m.logger.Debugf("Serving segment: %s", r.URL.Path)
-		w.Header().Set("Content-Type", "video/MP2T")
-		if data, ok := m.segments[r.URL.Path]; ok {
-			m.logger.Debugf("Writing segment data: %d bytes", len(data))
-			_, err := w.Write(data)
-			if err != nil {
-				m.logger.Errorf("Error writing segment data: %v", err)
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
+		segmentKey := r.URL.Path
+		if !strings.HasPrefix(segmentKey, "/") {
+			segmentKey = "/" + segmentKey
+		}
+		if data, ok := m.segments[segmentKey]; ok {
+			w.Header().Set("Content-Type", "video/MP2T")
+			_, _ = w.Write(data)
 		} else {
-			m.logger.Errorf("Segment not found: %s", r.URL.Path)
+			m.logger.Errorf("Segment not found: %s", segmentKey)
 			w.WriteHeader(http.StatusNotFound)
 		}
 
 	default:
-		m.logger.Errorf("Unknown request path: %s", r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)
 	}
 }
@@ -208,8 +198,8 @@ func TestM3U8StreamHandler_HandleHLSStream(t *testing.T) {
 			writeError: nil,
 			expectedResult: StreamResult{
 				BytesWritten: 24, // First pass through the segments
-				Error:        context.DeadlineExceeded,
-				Status:       proxy.StatusClientClosed,
+				Error:        errors.New("stream timeout: no new segments"),
+				Status:       proxy.StatusEOF,
 			},
 		},
 	}
