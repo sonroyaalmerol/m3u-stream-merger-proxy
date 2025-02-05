@@ -263,11 +263,11 @@ func (h *M3U8StreamHandler) streamSegment(ctx context.Context, segmentURL string
 			}
 		}
 		h.coordinator.firstSegmentContentType.Store(contentType)
+		h.logger.Debugf("Detected segment content type: %s", contentType)
+
 		if !safeConcatTypes[strings.ToLower(contentType)] {
 			return fmt.Errorf("content type %s cannot be safely concatenated", contentType)
 		}
-
-		h.logger.Debugf("Detected segment content type: %s", contentType)
 	}
 
 	chunk := newChunkData()
