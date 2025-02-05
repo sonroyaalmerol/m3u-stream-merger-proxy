@@ -80,8 +80,8 @@ func (h *M3U8StreamHandler) HandleHLSStream(
 	h.coordinator.writerCtxMu.Lock()
 	if h.coordinator.writerCtx == nil {
 		h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
-		go h.startHLSWriter(h.coordinator.writerCtx, lbResult)
 	}
+	go h.startHLSWriter(h.coordinator.writerCtx, lbResult)
 	h.coordinator.writerCtxMu.Unlock()
 
 	// Let MediaStreamHandler handle client registration and streaming
