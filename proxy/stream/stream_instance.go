@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy/loadbalancer"
+	"m3u-stream-merger/proxy/stream/buffer"
+	"m3u-stream-merger/proxy/stream/config"
 	"m3u-stream-merger/store"
-	"m3u-stream-merger/utils"
 	"net/http"
 )
 
 type StreamInstance struct {
 	Cm     *store.ConcurrencyManager
-	config *StreamConfig
+	config *config.StreamConfig
 	logger logger.Logger
 }
 
@@ -26,7 +27,7 @@ func WithLogger(logger logger.Logger) StreamInstanceOption {
 
 func NewStreamInstance(
 	cm *store.ConcurrencyManager,
-	config *StreamConfig,
+	config *config.StreamConfig,
 	opts ...StreamInstanceOption,
 ) (*StreamInstance, error) {
 	if cm == nil {
@@ -52,48 +53,14 @@ func NewStreamInstance(
 
 func (instance *StreamInstance) ProxyStream(
 	ctx context.Context,
-	coordinator *StreamCoordinator,
+	coordinator *buffer.StreamCoordinator,
 	lbResult *loadbalancer.LoadBalancerResult,
 	r *http.Request,
 	w http.ResponseWriter,
 	statusChan chan<- int,
 ) {
-	if utils.IsAnM3U8Media(lbResult.Response) {
-		instance.handleM3U8Stream(ctx, coordinator, lbResult, r, w, statusChan)
-		return
-	}
-
-	instance.handleMediaStream(ctx, coordinator, lbResult, r, w, statusChan)
-}
-
-func (instance *StreamInstance) handleM3U8Stream(
-	ctx context.Context,
-	coordinator *StreamCoordinator,
-	lbResult *loadbalancer.LoadBalancerResult,
-	r *http.Request,
-	w http.ResponseWriter,
-	statusChan chan<- int,
-) {
-	handler := NewM3U8StreamHandler(instance.config, coordinator, instance.logger)
-	result := handler.HandleHLSStream(ctx, lbResult, w, r.RemoteAddr)
-
-	if result.Error != nil {
-		instance.logger.Errorf("Stream handler error: %v", result.Error)
-	}
-
-	statusChan <- result.Status
-}
-
-func (instance *StreamInstance) handleMediaStream(
-	ctx context.Context,
-	coordinator *StreamCoordinator,
-	lbResult *loadbalancer.LoadBalancerResult,
-	r *http.Request,
-	w http.ResponseWriter,
-	statusChan chan<- int,
-) {
-	handler := NewMediaStreamHandler(instance.config, coordinator, instance.logger)
-	result := handler.HandleMediaStream(ctx, lbResult, w, r.RemoteAddr)
+	handler := NewStreamHandler(instance.config, coordinator, instance.logger)
+	result := handler.HandleStream(ctx, lbResult, w, r.RemoteAddr)
 
 	if result.Error != nil {
 		instance.logger.Logf("Stream handler status: %v", result.Error)

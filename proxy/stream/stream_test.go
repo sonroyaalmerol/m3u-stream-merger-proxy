@@ -9,6 +9,8 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/loadbalancer"
+	"m3u-stream-merger/proxy/stream/buffer"
+	"m3u-stream-merger/proxy/stream/config"
 	"m3u-stream-merger/store"
 	"net/http"
 	"net/http/httptest"
@@ -116,20 +118,20 @@ func (m *mockHLSServer) Close() {
 	}
 }
 
-func TestM3U8StreamHandler_HandleHLSStream(t *testing.T) {
+func TestM3U8StreamHandler_HandleStream(t *testing.T) {
 	segment1Data := []byte("TESTSEGMNT1!")
 	segment2Data := []byte("TESTSEGMNT2!")
 
 	tests := []struct {
 		name           string
-		config         *StreamConfig
+		config         *config.StreamConfig
 		setupMock      func(*mockHLSServer)
 		writeError     error
 		expectedResult StreamResult
 	}{
 		{
 			name: "successful media playlist",
-			config: &StreamConfig{
+			config: &config.StreamConfig{
 				TimeoutSeconds:   5,
 				ChunkSize:        1024,
 				SharedBufferSize: 5,
@@ -155,7 +157,7 @@ func TestM3U8StreamHandler_HandleHLSStream(t *testing.T) {
 		},
 		{
 			name: "write error during streaming",
-			config: &StreamConfig{
+			config: &config.StreamConfig{
 				TimeoutSeconds:   5,
 				ChunkSize:        1024,
 				SharedBufferSize: 5,
@@ -176,32 +178,6 @@ func TestM3U8StreamHandler_HandleHLSStream(t *testing.T) {
 				Status:       proxy.StatusClientClosed,
 			},
 		},
-		{
-			name: "continuous media playlist without endlist",
-			config: &StreamConfig{
-				TimeoutSeconds:   2,
-				ChunkSize:        1024,
-				SharedBufferSize: 5,
-			},
-			setupMock: func(m *mockHLSServer) {
-				m.mediaPlaylist = `#EXTM3U
-#EXT-X-VERSION:3
-#EXT-X-TARGETDURATION:12
-#EXT-X-MEDIA-SEQUENCE:3086
-#EXTINF:12.008000,
-/segment1.ts
-#EXTINF:12.008000,
-/segment2.ts`
-				m.segments["/segment1.ts"] = segment1Data
-				m.segments["/segment2.ts"] = segment2Data
-			},
-			writeError: nil,
-			expectedResult: StreamResult{
-				BytesWritten: 24, // First pass through the segments
-				Error:        errors.New("stream timeout: no new segments"),
-				Status:       proxy.StatusEOF,
-			},
-		},
 	}
 
 	for _, tt := range tests {
@@ -216,7 +192,7 @@ func TestM3U8StreamHandler_HandleHLSStream(t *testing.T) {
 			tt.setupMock(mockServer)
 
 			cm := store.NewConcurrencyManager()
-			coordinator := NewStreamCoordinator("test_id", tt.config, cm, logger.Default)
+			coordinator := buffer.NewStreamCoordinator("test_id", tt.config, cm, logger.Default)
 
 			// Make first request with short timeout
 			reqCtx, reqCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -228,39 +204,32 @@ func TestM3U8StreamHandler_HandleHLSStream(t *testing.T) {
 				t.Fatalf("Failed to get mock response: %v", err)
 			}
 
-			handler := NewM3U8StreamHandler(tt.config, coordinator, logger.Default)
+			handler := NewStreamHandler(tt.config, coordinator, logger.Default)
 			writer := &mockResponseWriter{err: tt.writeError}
 			lbRes := loadbalancer.LoadBalancerResult{Response: resp, Index: "1"}
 
-			// Create a goroutine to handle connection timeout
-			resultCh := make(chan StreamResult, 1)
-			go func() {
-				resultCh <- handler.HandleHLSStream(ctx, &lbRes, writer, "test-addr")
-			}()
-
-			// Wait for result or timeout
-			result := <-resultCh
+			result := handler.HandleStream(ctx, &lbRes, writer, "test-addr")
 
 			if result.Status != tt.expectedResult.Status {
-				t.Errorf("HandleHLSStream() status = %v, want %v", result.Status, tt.expectedResult.Status)
+				t.Errorf("HandleStream() status = %v, want %v", result.Status, tt.expectedResult.Status)
 			}
 			if result.BytesWritten != tt.expectedResult.BytesWritten {
-				t.Errorf("HandleHLSStream() bytesWritten = %v, want %v", result.BytesWritten, tt.expectedResult.BytesWritten)
+				t.Errorf("HandleStream() bytesWritten = %v, want %v", result.BytesWritten, tt.expectedResult.BytesWritten)
 			}
 			if tt.expectedResult.Error != nil {
 				if result.Error == nil || !strings.Contains(result.Error.Error(), tt.expectedResult.Error.Error()) {
-					t.Errorf("HandleHLSStream() error = %v, want error containing %v", result.Error, tt.expectedResult.Error)
+					t.Errorf("HandleStream() error = %v, want error containing %v", result.Error, tt.expectedResult.Error)
 				}
 			}
 		})
 	}
 }
 
-// Test MediaStreamHandler
-func TestMediaStreamHandler_HandleMediaStream(t *testing.T) {
+// Test StreamHandler
+func TestStreamHandler_HandleStream(t *testing.T) {
 	tests := []struct {
 		name           string
-		config         *StreamConfig
+		config         *config.StreamConfig
 		responseBody   string
 		responseStatus int
 		writeError     error
@@ -268,7 +237,7 @@ func TestMediaStreamHandler_HandleMediaStream(t *testing.T) {
 	}{
 		{
 			name: "successful stream",
-			config: &StreamConfig{
+			config: &config.StreamConfig{
 				TimeoutSeconds:   5,
 				ChunkSize:        1024,
 				SharedBufferSize: 5,
@@ -284,7 +253,7 @@ func TestMediaStreamHandler_HandleMediaStream(t *testing.T) {
 		},
 		{
 			name: "write error",
-			config: &StreamConfig{
+			config: &config.StreamConfig{
 				TimeoutSeconds:   5,
 				ChunkSize:        1024,
 				SharedBufferSize: 5,
@@ -305,10 +274,10 @@ func TestMediaStreamHandler_HandleMediaStream(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			config := NewDefaultStreamConfig()
+			config := config.NewDefaultStreamConfig()
 			cm := store.NewConcurrencyManager()
-			coordinator := NewStreamCoordinator("test_id", config, cm, logger.Default)
-			handler := NewMediaStreamHandler(tt.config, coordinator, logger.Default)
+			coordinator := buffer.NewStreamCoordinator("test_id", config, cm, logger.Default)
+			handler := NewStreamHandler(tt.config, coordinator, logger.Default)
 
 			resp := &http.Response{
 				StatusCode: tt.responseStatus,
@@ -320,16 +289,16 @@ func TestMediaStreamHandler_HandleMediaStream(t *testing.T) {
 			writer := &mockResponseWriter{err: tt.writeError}
 			lbRes := loadbalancer.LoadBalancerResult{Response: resp, Index: "1"}
 
-			result := handler.HandleMediaStream(ctx, &lbRes, writer, "test-addr")
+			result := handler.HandleStream(ctx, &lbRes, writer, "test-addr")
 
 			if result.Status != tt.expectedResult.Status {
-				t.Errorf("HandleMediaStream() status = %v, want %v", result.Status, tt.expectedResult.Status)
+				t.Errorf("HandleStream() status = %v, want %v", result.Status, tt.expectedResult.Status)
 			}
 			if result.BytesWritten != tt.expectedResult.BytesWritten {
-				t.Errorf("HandleMediaStream() bytesWritten = %v, want %v", result.BytesWritten, tt.expectedResult.BytesWritten)
+				t.Errorf("HandleStream() bytesWritten = %v, want %v", result.BytesWritten, tt.expectedResult.BytesWritten)
 			}
 			if (result.Error != nil) != (tt.expectedResult.Error != nil) {
-				t.Errorf("HandleMediaStream() error = %v, want %v", result.Error, tt.expectedResult.Error)
+				t.Errorf("HandleStream() error = %v, want %v", result.Error, tt.expectedResult.Error)
 			}
 		})
 	}
@@ -383,9 +352,9 @@ func TestStreamInstance_ProxyStream(t *testing.T) {
 
 			tt.setupMock(mockServer)
 
-			config := NewDefaultStreamConfig()
+			config := config.NewDefaultStreamConfig()
 			cm := store.NewConcurrencyManager()
-			coordinator := NewStreamCoordinator("test_id", config, cm, logger.Default)
+			coordinator := buffer.NewStreamCoordinator("test_id", config, cm, logger.Default)
 
 			instance, err := NewStreamInstance(cm, config,
 				WithLogger(logger.Default))

@@ -9,7 +9,7 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/loadbalancer"
-	"m3u-stream-merger/proxy/stream"
+	"m3u-stream-merger/proxy/stream/buffer"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
 )
@@ -17,7 +17,7 @@ import (
 type StreamHTTPHandler struct {
 	manager     ProxyInstance
 	logger      logger.Logger
-	coordinator *stream.StreamCoordinator
+	coordinator *buffer.StreamCoordinator
 }
 
 func NewStreamHTTPHandler(manager ProxyInstance, logger logger.Logger) *StreamHTTPHandler {

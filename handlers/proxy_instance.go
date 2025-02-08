@@ -9,35 +9,37 @@ import (
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/proxy/stream"
+	"m3u-stream-merger/proxy/stream/buffer"
+	"m3u-stream-merger/proxy/stream/config"
 	"m3u-stream-merger/store"
 )
 
 type ProxyInstance interface {
 	GetConcurrencyManager() *store.ConcurrencyManager
-	GetStreamRegistry() *stream.StreamRegistry
+	GetStreamRegistry() *buffer.StreamRegistry
 	LoadBalancer(ctx context.Context, req *http.Request, session *store.Session) (*loadbalancer.LoadBalancerResult, error)
-	ProxyStream(ctx context.Context, coordinator *stream.StreamCoordinator,
+	ProxyStream(ctx context.Context, coordinator *buffer.StreamCoordinator,
 		lbResult *loadbalancer.LoadBalancerResult, r *http.Request, w http.ResponseWriter,
 		exitStatus chan<- int)
 }
 
 type DefaultProxyInstance struct {
 	lbConfig     *loadbalancer.LBConfig
-	streamConfig *stream.StreamConfig
-	registry     *stream.StreamRegistry
+	streamConfig *config.StreamConfig
+	registry     *buffer.StreamRegistry
 	cm           *store.ConcurrencyManager
 	logger       logger.Logger
 }
 
 func NewDefaultProxyInstance() *DefaultProxyInstance {
 	cm := store.NewConcurrencyManager()
-	streamConfig := stream.NewDefaultStreamConfig()
+	streamConfig := config.NewDefaultStreamConfig()
 	return &DefaultProxyInstance{
 		lbConfig:     loadbalancer.NewDefaultLBConfig(),
 		streamConfig: streamConfig,
 		cm:           cm,
 		logger:       logger.Default,
-		registry:     stream.NewStreamRegistry(streamConfig, cm, logger.Default, 30*time.Second),
+		registry:     buffer.NewStreamRegistry(streamConfig, cm, logger.Default, 30*time.Second),
 	}
 }
 
@@ -48,7 +50,7 @@ func (sm *DefaultProxyInstance) LoadBalancer(ctx context.Context, req *http.Requ
 	return instance.Balance(ctx, req, session)
 }
 
-func (sm *DefaultProxyInstance) ProxyStream(ctx context.Context, coordinator *stream.StreamCoordinator,
+func (sm *DefaultProxyInstance) ProxyStream(ctx context.Context, coordinator *buffer.StreamCoordinator,
 	lbResult *loadbalancer.LoadBalancerResult, r *http.Request, w http.ResponseWriter,
 	exitStatus chan<- int) {
 	instance, err := stream.NewStreamInstance(sm.cm, sm.streamConfig,
@@ -65,6 +67,6 @@ func (sm *DefaultProxyInstance) GetConcurrencyManager() *store.ConcurrencyManage
 	return sm.cm
 }
 
-func (sm *DefaultProxyInstance) GetStreamRegistry() *stream.StreamRegistry {
+func (sm *DefaultProxyInstance) GetStreamRegistry() *buffer.StreamRegistry {
 	return sm.registry
 }

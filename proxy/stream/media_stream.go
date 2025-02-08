@@ -6,18 +6,21 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/loadbalancer"
+	"m3u-stream-merger/proxy/stream/buffer"
+	"m3u-stream-merger/proxy/stream/config"
+	"m3u-stream-merger/utils"
 	"sync/atomic"
 	"time"
 )
 
-type MediaStreamHandler struct {
-	config      *StreamConfig
+type StreamHandler struct {
+	config      *config.StreamConfig
 	logger      logger.Logger
-	coordinator *StreamCoordinator
+	coordinator *buffer.StreamCoordinator
 }
 
-func NewMediaStreamHandler(config *StreamConfig, coordinator *StreamCoordinator, logger logger.Logger) *MediaStreamHandler {
-	return &MediaStreamHandler{
+func NewStreamHandler(config *config.StreamConfig, coordinator *buffer.StreamCoordinator, logger logger.Logger) *StreamHandler {
+	return &StreamHandler{
 		config:      config,
 		logger:      logger,
 		coordinator: coordinator,
@@ -30,7 +33,7 @@ type StreamResult struct {
 	Status       int
 }
 
-func (h *MediaStreamHandler) HandleMediaStream(
+func (h *StreamHandler) HandleStream(
 	ctx context.Context,
 	lbResult *loadbalancer.LoadBalancerResult,
 	writer ResponseWriter,
@@ -44,42 +47,41 @@ func (h *MediaStreamHandler) HandleMediaStream(
 	if err := h.coordinator.RegisterClient(); err != nil {
 		return StreamResult{0, err, proxy.StatusServerError}
 	}
-	h.logger.Debugf("Client registered: %s, count: %d", remoteAddr, atomic.LoadInt32(&h.coordinator.clientCount))
+	h.logger.Debugf("Client registered: %s, count: %d", remoteAddr, atomic.LoadInt32(&h.coordinator.ClientCount))
 
-	h.coordinator.writerCtxMu.Lock()
-	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 1
+	h.coordinator.WriterCtxMu.Lock()
+	isFirstClient := atomic.LoadInt32(&h.coordinator.ClientCount) == 1
 	if isFirstClient {
-		if h.coordinator.writerCtx == nil {
-			h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
-		}
-		go h.coordinator.StartWriter(h.coordinator.writerCtx, lbResult)
-	}
-	h.coordinator.writerCtxMu.Unlock()
+		h.coordinator.WriterCtx, h.coordinator.WriterCancel = context.WithCancel(context.Background())
 
-	if contentType, ok := h.coordinator.firstSegmentContentType.Load().(string); ok && contentType != "" {
-		writer.Header().Set("Content-Type", contentType)
+		if utils.IsAnM3U8Media(lbResult.Response) {
+			go h.coordinator.StartHLSWriter(h.coordinator.WriterCtx, lbResult)
+		} else {
+			go h.coordinator.StartMediaWriter(h.coordinator.WriterCtx, lbResult)
+		}
 	}
+	h.coordinator.WriterCtxMu.Unlock()
 
 	cleanup := func() {
 		h.coordinator.UnregisterClient()
-		currentCount := atomic.LoadInt32(&h.coordinator.clientCount)
+		currentCount := atomic.LoadInt32(&h.coordinator.ClientCount)
 		h.logger.Debugf("Client unregistered: %s, remaining: %d", remoteAddr, currentCount)
 
 		if currentCount == 0 {
-			h.coordinator.writerCtxMu.Lock()
-			if h.coordinator.writerCancel != nil {
+			h.coordinator.WriterCtxMu.Lock()
+			if h.coordinator.WriterCancel != nil {
 				h.logger.Debug("Stopping writer - no clients remaining")
-				h.coordinator.writerCancel()
-				h.coordinator.writerCancel = nil
-				h.coordinator.writerCtx = nil
+				h.coordinator.WriterCancel()
+				h.coordinator.WriterCancel = nil
+				h.coordinator.WriterCtx = nil
 			}
-			h.coordinator.writerCtxMu.Unlock()
+			h.coordinator.WriterCtxMu.Unlock()
 		}
 	}
 	defer cleanup()
 
 	var bytesWritten int64
-	lastPosition := h.coordinator.buffer.Prev() // Start from previous to get first new chunk
+	lastPosition := h.coordinator.Buffer.Prev() // Start from previous to get first new chunk
 
 	// Create a channel to signal client helper goroutine to stop
 	done := make(chan struct{})
@@ -178,7 +180,7 @@ func (h *MediaStreamHandler) HandleMediaStream(
 }
 
 // safeWrite attempts to write to the writer and recovers from panics
-func (h *MediaStreamHandler) safeWrite(writer ResponseWriter, data []byte) (n int, err error) {
+func (h *StreamHandler) safeWrite(writer ResponseWriter, data []byte) (n int, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			h.logger.Errorf("Panic in write: %v", r)
@@ -190,7 +192,7 @@ func (h *MediaStreamHandler) safeWrite(writer ResponseWriter, data []byte) (n in
 }
 
 // safeFlush attempts to flush the writer and recovers from panics
-func (h *MediaStreamHandler) safeFlush(flusher StreamFlusher) error {
+func (h *StreamHandler) safeFlush(flusher StreamFlusher) error {
 	defer func() {
 		if r := recover(); r != nil {
 			h.logger.Errorf("Panic in flush: %v", r)
