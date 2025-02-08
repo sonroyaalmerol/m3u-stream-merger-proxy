@@ -142,8 +142,6 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 }
 
 func (c *StreamCoordinator) processSegments(ctx context.Context, segments []string) error {
-	const maxErrors = 3
-
 	for _, segment := range segments {
 		select {
 		case <-ctx.Done():
