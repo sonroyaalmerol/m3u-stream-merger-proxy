@@ -1,57 +1,82 @@
 package store
 
 import (
+	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
 	"regexp"
 )
 
-var includeFilters [][]string
-var excludeFilters [][]string
-var filtersInitialized bool
+var (
+	includeRegexes     [][]*regexp.Regexp
+	excludeRegexes     [][]*regexp.Regexp
+	filtersInitialized bool
+)
 
 func checkFilter(stream *StreamInfo) bool {
 	if !filtersInitialized {
-		excludeFilters = [][]string{
-			utils.GetFilters("EXCLUDE_GROUPS"),
-			utils.GetFilters("EXCLUDE_TITLE"),
+		excludeGroups := utils.GetFilters("EXCLUDE_GROUPS")
+		excludeTitle := utils.GetFilters("EXCLUDE_TITLE")
+		includeGroups := utils.GetFilters("INCLUDE_GROUPS")
+		includeTitle := utils.GetFilters("INCLUDE_TITLE")
+
+		excludeRegexes = [][]*regexp.Regexp{
+			compileRegexes(excludeGroups),
+			compileRegexes(excludeTitle),
 		}
-		includeFilters = [][]string{
-			utils.GetFilters("INCLUDE_GROUPS"),
-			utils.GetFilters("INCLUDE_TITLE"),
+		includeRegexes = [][]*regexp.Regexp{
+			compileRegexes(includeGroups),
+			compileRegexes(includeTitle),
 		}
 		filtersInitialized = true
 	}
 
-	if allFiltersEmpty(append(excludeFilters, includeFilters...)...) {
+	if allFiltersEmpty() {
 		return true
 	}
 
-	if matchAny(includeFilters[0], stream.Group) || matchAny(includeFilters[1], stream.Title) {
+	if matchAny(includeRegexes[0], stream.Group) || matchAny(includeRegexes[1], stream.Title) {
 		return true
 	}
 
-	if matchAny(excludeFilters[0], stream.Group) || matchAny(excludeFilters[1], stream.Title) {
+	if matchAny(excludeRegexes[0], stream.Group) || matchAny(excludeRegexes[1], stream.Title) {
 		return false
 	}
 
-	// If there are only include filters and none matched, return false
-	return len(includeFilters[0]) == 0 && len(includeFilters[1]) == 0
+	return len(includeRegexes[0]) == 0 && len(includeRegexes[1]) == 0
 }
 
-func allFiltersEmpty(filters ...[]string) bool {
+func compileRegexes(filters []string) []*regexp.Regexp {
+	var regexes []*regexp.Regexp
 	for _, f := range filters {
-		if len(f) > 0 {
-			return false
+		re, err := regexp.Compile(f)
+		if err != nil {
+			logger.Default.Debugf("Error compiling regex %s: %v", f, err)
+			continue
 		}
+		regexes = append(regexes, re)
 	}
-	return true
+	return regexes
 }
 
-func matchAny(filters []string, text string) bool {
-	for _, filter := range filters {
-		if matched, _ := regexp.MatchString(filter, text); matched {
+func matchAny(regexes []*regexp.Regexp, s string) bool {
+	for _, re := range regexes {
+		if re.MatchString(s) {
 			return true
 		}
 	}
 	return false
+}
+
+func allFiltersEmpty() bool {
+	for _, res := range includeRegexes {
+		if len(res) > 0 {
+			return false
+		}
+	}
+	for _, res := range excludeRegexes {
+		if len(res) > 0 {
+			return false
+		}
+	}
+	return true
 }

@@ -50,28 +50,18 @@ func scanSources() map[string]*StreamInfo {
 				// Check if stream exists and update if necessary
 				if existingStream, exists := streams[streamInfo.Title]; exists {
 					for idx, innerMap := range streamInfo.URLs {
-						// Create map if it doesn't exist
 						if existingStream.URLs[idx] == nil {
 							existingStream.URLs[idx] = make(map[string]string)
 						}
-
-						// Use a map for O(1) URL lookups
-						urlExists := make(map[string]bool)
-						for _, url := range existingStream.URLs[idx] {
-							urlExists[url] = true
-						}
-
-						// Add new unique URLs with sequential subIdx
-						maxSubIdx := len(existingStream.URLs[idx])
-						for _, url := range innerMap {
-							if !urlExists[url] {
-								existingStream.URLs[idx][strconv.Itoa(maxSubIdx)] = url
-								maxSubIdx++
+						// For each URL in the inner map, add it if the hash key is not already present.
+						for hashKey, url := range innerMap {
+							if _, exists := existingStream.URLs[idx][hashKey]; !exists {
+								existingStream.URLs[idx][hashKey] = fmt.Sprintf("%d:::%s", streamInfo.SourceIndex, url)
 							}
 						}
 					}
 				} else {
-					// Store new stream
+					// Store new stream if it doesn't already exist.
 					streams[streamInfo.Title] = streamInfo
 				}
 			})
@@ -115,6 +105,30 @@ func GenerateStreamURL(baseUrl string, stream *StreamInfo) string {
 		}
 	}
 	return fmt.Sprintf("%s/p/stream/%s", baseUrl, EncodeSlug(stream))
+}
+
+func SortStreamSubUrls(urls map[string]string) []string {
+	keys := make([]string, 0, len(urls))
+	for key := range urls {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		idxISplit := strings.SplitN(urls[keys[i]], ":::", 2)
+		idxJSplit := strings.SplitN(urls[keys[j]], ":::", 2)
+		if len(idxISplit) == 2 && len(idxJSplit) == 2 {
+			idxI, err := strconv.Atoi(idxISplit[0])
+			if err != nil {
+				idxI = 0
+			}
+			idxJ, err := strconv.Atoi(idxJSplit[0])
+			if err != nil {
+				idxJ = 0
+			}
+			return idxI < idxJ
+		}
+		return true
+	})
+	return keys
 }
 
 func sortStreams(s map[string]*StreamInfo) []string {

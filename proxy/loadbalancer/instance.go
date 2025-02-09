@@ -228,7 +228,18 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 		return nil, fmt.Errorf("HTTP client cannot be nil")
 	}
 
-	for subIndex, url := range urls {
+	for _, subIndex := range store.SortStreamSubUrls(urls) {
+		fileContent, ok := urls[subIndex]
+		if !ok {
+			continue
+		}
+
+		url := fileContent
+		fileContentSplit := strings.SplitN(fileContent, ":::", 2)
+		if len(fileContent) == 2 {
+			url = fileContentSplit[1]
+		}
+
 		id := index + "|" + subIndex
 		session.Mutex.RLock()
 		alreadyTested := slices.Contains(session.TestedIndexes, index+"|"+subIndex)

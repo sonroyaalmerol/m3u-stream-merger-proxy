@@ -4,12 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
-	"errors"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"m3u-stream-merger/config"
@@ -17,7 +16,10 @@ import (
 	"m3u-stream-merger/utils"
 
 	"github.com/edsrzf/mmap-go"
+	"golang.org/x/crypto/sha3"
 )
+
+var attributeRegex = regexp.MustCompile(`([a-zA-Z0-9_-]+)="([^"]+)"`)
 
 func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
 	initInfo, err := DecodeSlug(slug)
@@ -122,10 +124,9 @@ func parseLine(sessionId string, line string, nextLine string, m3uIndex string) 
 	lineWithoutPairs := line
 
 	// Define a regular expression to capture key-value pairs
-	regex := regexp.MustCompile(`([a-zA-Z0-9_-]+)="([^"]+)"`)
 
 	// Find all key-value pairs in the line
-	matches := regex.FindAllStringSubmatch(line, -1)
+	matches := attributeRegex.FindAllStringSubmatch(line, -1)
 
 	for _, match := range matches {
 		key := strings.TrimSpace(match[1])
@@ -180,28 +181,26 @@ func parseLine(sessionId string, line string, nextLine string, m3uIndex string) 
 		logger.Default.Debugf("Error creating stream cache folder: %s -> %v", sessionDirPath, err)
 	}
 
-	for i := 0; true; i++ {
-		fileName := fmt.Sprintf("%s_%s|%d", base64.StdEncoding.EncodeToString([]byte(currentStream.Title)), m3uIndex, i)
-		filePath := filepath.Join(sessionDirPath, fileName)
+	base64Title := base64.StdEncoding.EncodeToString([]byte(currentStream.Title))
+	h := sha3.Sum224([]byte(cleanUrl))
+	urlHash := hex.EncodeToString(h[:])
+	fileName := fmt.Sprintf("%s_%s|%s", base64Title, m3uIndex, urlHash)
+	filePath := filepath.Join(sessionDirPath, fileName)
 
-		if _, err := os.Stat(filePath); errors.Is(err, os.ErrNotExist) {
-			err = os.WriteFile(filePath, []byte(encodedUrl), 0644)
-			if err != nil {
-				logger.Default.Debugf("Error indexing stream: %s (#%s) -> %v", currentStream.Title, m3uIndex, err)
-			}
-
-			// Initialize maps if not already initialized
-			if currentStream.URLs == nil {
-				currentStream.URLs = make(map[string]map[string]string)
-			}
-			if currentStream.URLs[m3uIndex] == nil {
-				currentStream.URLs[m3uIndex] = make(map[string]string)
-			}
-
-			// Add the URL to the map
-			currentStream.URLs[m3uIndex][strconv.Itoa(i)] = cleanUrl
-			break
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		if err := os.WriteFile(filePath, []byte(encodedUrl), 0644); err != nil {
+			logger.Default.Debugf("Error indexing stream: %s (#%s) -> %v", currentStream.Title, m3uIndex, err)
 		}
+		// Initialize maps if not already initialized
+		if currentStream.URLs == nil {
+			currentStream.URLs = make(map[string]map[string]string)
+		}
+		if currentStream.URLs[m3uIndex] == nil {
+			currentStream.URLs[m3uIndex] = make(map[string]string)
+		}
+
+		// Add the URL to the map
+		currentStream.URLs[m3uIndex][urlHash] = cleanUrl
 	}
 
 	return &currentStream
