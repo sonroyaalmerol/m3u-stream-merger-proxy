@@ -120,7 +120,12 @@ func TestStreamHTTPHandler(t *testing.T) {
 			}()
 
 			// Fetch original stream for comparison
-			originalURL := stream.URLs["1"]["0"]
+			firstKey := ""
+			for key := range stream.URLs["1"] {
+				firstKey = key
+				break
+			}
+			originalURL := stream.URLs["1"][firstKey]
 			t.Logf("Fetching original stream from: %s", originalURL)
 
 			res, err := utils.HTTPClient.Get(originalURL)
