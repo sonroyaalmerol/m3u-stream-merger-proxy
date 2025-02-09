@@ -40,13 +40,13 @@ func (h *StreamHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.coordinator = h.manager.GetStreamRegistry().GetOrCreateCoordinator(streamURL)
 	if h.coordinator == nil {
 		h.logger.Logf("Error handling stream %s: stream URL invalid", streamURL)
-		w.Write([]byte{})
+		_, _ = w.Write([]byte{})
 		return
 	}
 
 	if err := h.handleStream(r.Context(), w, r); err != nil {
 		h.logger.Logf("Error handling stream %s: %v", streamURL, err)
-		w.Write([]byte{})
+		_, _ = w.Write([]byte{})
 	}
 }
 
