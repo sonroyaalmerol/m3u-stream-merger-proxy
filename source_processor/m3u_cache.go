@@ -1,6 +1,7 @@
 package sourceproc
 
 import (
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -49,7 +50,11 @@ func RevalidatingGetM3U(r *http.Request, force bool) string {
 		updates := newCache.processM3UsInRealTime()
 		for range updates {
 			processCount++
-			if processCount%100 == 0 {
+			batch := int(math.Pow(10, math.Floor(math.Log10(float64(processCount))+1)))
+			if batch < 100 {
+				batch = 100
+			}
+			if processCount%batch == 0 {
 				logger.Default.Logf("Processed %d streams so far", processCount)
 			}
 		}
@@ -66,24 +71,6 @@ func GetCurrentStreams() map[string]*StreamInfo {
 		return m3uCache.processedStreams.toMap()
 	}
 	return make(map[string]*StreamInfo)
-}
-
-// GetProcessedStreamCount returns the number of processed streams
-func GetProcessedStreamCount() int64 {
-	m3uCache := M3uCache.cache.Load()
-	if m3uCache != nil {
-		return m3uCache.GetProcessedStreamsCount()
-	}
-	return 0
-}
-
-// IsProcessing returns whether the cache is currently processing streams
-func IsProcessing() bool {
-	m3uCache := M3uCache.cache.Load()
-	if m3uCache != nil {
-		return M3uCache.cache.Load().IsProcessing()
-	}
-	return false
 }
 
 // ClearCache clears both memory and disk cache
@@ -129,53 +116,6 @@ func readCacheFromFile() string {
 		return "#EXTM3U\n"
 	}
 	return string(data)
-}
-
-// ValidateCache ensures the cache exists and is valid
-func ValidateCache() bool {
-	if M3uCache.cache.Load() == nil {
-		return false
-	}
-
-	// Check if cache file exists
-	if _, err := os.Stat(config.GetM3UCachePath()); err != nil {
-		return false
-	}
-
-	// Check if streams directory exists
-	if _, err := os.Stat(config.GetStreamsDirPath()); err != nil {
-		return false
-	}
-
-	return true
-}
-
-// GetCacheFilePath returns the path to the current cache file
-func GetCacheFilePath() string {
-	return config.GetM3UCachePath()
-}
-
-// GetStreamsDirPath returns the path to the streams directory
-func GetStreamsDirPath() string {
-	return config.GetStreamsDirPath()
-}
-
-// GetStreamByTitle retrieves a stream from the cache by its title
-func GetStreamByTitle(title string) *StreamInfo {
-	m3uCache := M3uCache.cache.Load()
-	if m3uCache == nil {
-		return nil
-	}
-
-	shard := m3uCache.processedStreams.getShard(title)
-	shard.RLock()
-	defer shard.RUnlock()
-
-	if stream, exists := shard.streams[title]; exists {
-		return stream.Clone()
-	}
-
-	return nil
 }
 
 func GetCache() *atomic.Pointer[SortedM3UCache] {
