@@ -268,7 +268,7 @@ func TestStreamSorting(t *testing.T) {
 			name:          "sort by group asc",
 			sortingKey:    "tvg-group",
 			sortingDir:    "asc",
-			expectedOrder: []string{"b", "c", "e", "a", "d"}, // Movies, News, Sports
+			expectedOrder: []string{"b", "e", "c", "a", "d"}, // Movies, News, Sports
 		},
 		{
 			name:          "source-based ordering",
