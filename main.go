@@ -17,7 +17,7 @@ func main() {
 	defer cancel()
 
 	logger.Default.Log("Starting updater...")
-	_, err := updater.Initialize(ctx, logger.Default.Logger)
+	_, err := updater.Initialize(ctx, logger.Default)
 	if err != nil {
 		logger.Default.Fatalf("Error initializing updater: %v", err)
 	}
