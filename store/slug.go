@@ -12,7 +12,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-func EncodeSlug(stream StreamInfo) string {
+func EncodeSlug(stream *StreamInfo) string {
 	jsonData, err := json.Marshal(stream)
 	if err != nil {
 		logger.Default.Debugf("[DEBUG] Error json marshal for slug: %v", err)

@@ -14,7 +14,7 @@ import (
 
 type M3UCache struct {
 	sync.RWMutex
-	currentStreams []StreamInfo
+	currentStreams map[string]*StreamInfo
 }
 
 var M3uCache = &M3UCache{}
@@ -45,10 +45,12 @@ func generateM3UContent(r *http.Request) string {
 	defer M3uCache.Unlock()
 
 	M3uCache.currentStreams = scanSources()
+	sortedKeys := sortStreams(M3uCache.currentStreams)
 
 	content.WriteString("#EXTM3U\n")
 
-	for _, stream := range M3uCache.currentStreams {
+	for _, key := range sortedKeys {
+		stream := M3uCache.currentStreams[key]
 		if len(stream.URLs) == 0 {
 			continue
 		}
@@ -66,7 +68,7 @@ func generateM3UContent(r *http.Request) string {
 	return content.String()
 }
 
-func GetCurrentStreams() []StreamInfo {
+func GetCurrentStreams() map[string]*StreamInfo {
 	M3uCache.RLock()
 	defer M3uCache.RUnlock()
 
@@ -121,7 +123,7 @@ func writeCacheToFile(content string) error {
 	return nil
 }
 
-func formatStreamEntry(baseURL string, stream StreamInfo) string {
+func formatStreamEntry(baseURL string, stream *StreamInfo) string {
 	var entry strings.Builder
 
 	extInfTags := []string{"#EXTINF:-1"}
