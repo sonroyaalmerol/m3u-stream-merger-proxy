@@ -53,29 +53,25 @@ func scanSources() map[string]*StreamInfo {
 					if m3uPosition > existingStream.SourceIndex {
 						return
 					}
-					// Merge URLs preserving source order
+
 					for idx, innerMap := range streamInfo.URLs {
+						// Create map if it doesn't exist
 						if existingStream.URLs[idx] == nil {
 							existingStream.URLs[idx] = make(map[string]string)
 						}
 
-						// Get the next available subIdx
-						nextSubIdx := 0
-						strNextSubIdx := strconv.Itoa(nextSubIdx)
-						for k := range existingStream.URLs[idx] {
-							if subIdxInt, err := strconv.Atoi(k); err == nil && subIdxInt >= nextSubIdx {
-								nextSubIdx = subIdxInt + 1
-							} else if err != nil {
-								strNextSubIdx = idx
-								break
-							}
+						// Use a map for O(1) URL lookups
+						urlExists := make(map[string]bool)
+						for _, url := range existingStream.URLs[idx] {
+							urlExists[url] = true
 						}
 
-						// Add new URLs with incremented subIdx
+						// Add new unique URLs with sequential subIdx
+						maxSubIdx := len(existingStream.URLs[idx])
 						for _, url := range innerMap {
-							if !containsURL(existingStream.URLs[idx], url) {
-								existingStream.URLs[idx][strNextSubIdx] = url
-								nextSubIdx++
+							if !urlExists[url] {
+								existingStream.URLs[idx][strconv.Itoa(maxSubIdx)] = url
+								maxSubIdx++
 							}
 						}
 					}
@@ -210,13 +206,4 @@ func sortStreams(s map[string]*StreamInfo) []string {
 	}
 
 	return keys
-}
-
-func containsURL(urls map[string]string, targetURL string) bool {
-	for _, url := range urls {
-		if url == targetURL {
-			return true
-		}
-	}
-	return false
 }
