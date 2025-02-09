@@ -169,7 +169,8 @@ func sortStreams(s map[string]*StreamInfo) []string {
 			// If tvg-chno is same, use source ordering
 			return tieBreaker(i, j)
 		})
-	case "tvg-group": func(i, j int) bool {
+	case "tvg-group":
+		sort.Slice(keys, func(i, j int) bool {
 			// First compare by group
 			if s[keys[i]].Group != s[keys[j]].Group {
 				if dir == "desc" {
@@ -219,4 +220,3 @@ func containsURL(urls map[string]string, targetURL string) bool {
 	}
 	return false
 }
-
