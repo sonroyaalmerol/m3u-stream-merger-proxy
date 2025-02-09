@@ -57,7 +57,7 @@ func (h *StreamHandler) HandleStream(
 		if utils.IsAnM3U8Media(lbResult.Response) {
 			go h.coordinator.StartHLSWriter(h.coordinator.WriterCtx, lbResult, writer)
 		} else {
-			writer.WriteHeader(h.coordinator.GetWriterLBResult().Response.StatusCode)
+			writer.WriteHeader(lbResult.Response.StatusCode)
 			go h.coordinator.StartMediaWriter(h.coordinator.WriterCtx, lbResult)
 		}
 	}
