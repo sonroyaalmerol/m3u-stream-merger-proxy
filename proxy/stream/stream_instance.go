@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"m3u-stream-merger/logger"
+	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/proxy/stream/buffer"
 	"m3u-stream-merger/proxy/stream/config"
@@ -59,6 +60,12 @@ func (instance *StreamInstance) ProxyStream(
 	w http.ResponseWriter,
 	statusChan chan<- int,
 ) {
+	if coordinator.WasInvalid.Load() {
+		instance.logger.Logf("Source is known to have an incompatible media type. Please try a different stream.")
+		statusChan <- proxy.StatusIncompatible
+		return
+	}
+
 	handler := NewStreamHandler(instance.config, coordinator, instance.logger)
 	result := handler.HandleStream(ctx, lbResult, w, r.RemoteAddr)
 

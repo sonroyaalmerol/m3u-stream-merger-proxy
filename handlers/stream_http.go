@@ -129,6 +129,9 @@ func (h *StreamHTTPHandler) handleExitCode(code int,
 	lbResult *loadbalancer.LoadBalancerResult, r *http.Request,
 	session *store.Session) bool {
 	switch code {
+	case proxy.StatusIncompatible:
+		session.AddInvalidIndex(lbResult.Index + "|" + lbResult.SubIndex)
+		fallthrough
 	case proxy.StatusEOF:
 		fallthrough
 	case proxy.StatusServerError:

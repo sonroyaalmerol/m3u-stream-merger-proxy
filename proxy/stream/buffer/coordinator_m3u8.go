@@ -188,6 +188,7 @@ func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string
 	c.logger.Debugf("Detected segment content type: %s", contentType)
 
 	if !safeConcatTypes[strings.ToLower(contentType)] {
+		c.WasInvalid.Store(true)
 		c.logger.Errorf("%s cannot be safely concatenated and is not supported by this proxy.", contentType)
 		return fmt.Errorf("content type %s cannot be safely concatenated", contentType)
 	}

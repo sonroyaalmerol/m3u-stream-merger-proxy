@@ -232,7 +232,13 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 		id := index + "|" + subIndex
 		session.Mutex.RLock()
 		alreadyTested := slices.Contains(session.TestedIndexes, index+"|"+subIndex)
+		isInvalid := slices.Contains(session.InvalidIndexes, index+"|"+subIndex)
 		session.Mutex.RUnlock()
+
+		if isInvalid {
+			instance.logger.Debugf("Skipping M3U_%s|%s: marked as invalid", index, subIndex)
+			continue
+		}
 
 		if alreadyTested {
 			instance.logger.Debugf("Skipping M3U_%s|%s: marked as previous stream", index, subIndex)
