@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 
 	"m3u-stream-merger/logger"
@@ -75,7 +74,7 @@ func DecodeSlug(encodedSlug string) (*StreamInfo, error) {
 
 	decoder := decoderPool.Get().(*zstd.Decoder)
 	defer decoderPool.Put(decoder)
-	decoder.Reset(bytes.NewReader(decodedData))
+	_ = decoder.Reset(bytes.NewReader(decodedData))
 
 	decompressedData, err := io.ReadAll(decoder)
 	if err != nil {
@@ -89,21 +88,4 @@ func DecodeSlug(encodedSlug string) (*StreamInfo, error) {
 
 	result.URLs = make(map[string]map[string]string)
 	return &result, nil
-}
-
-// Helper function to clean Base64URL string
-func cleanBase64URL(input string) string {
-	// Replace URL-safe characters with standard Base64 characters
-	input = strings.ReplaceAll(input, "-", "+")
-	input = strings.ReplaceAll(input, "_", "/")
-
-	// Add padding if necessary
-	switch len(input) % 4 {
-	case 2:
-		input += "=="
-	case 3:
-		input += "="
-	}
-
-	return input
 }

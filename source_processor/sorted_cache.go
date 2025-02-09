@@ -73,7 +73,7 @@ func NewSortedM3UCache(r *http.Request) *SortedM3UCache {
 	heap.Init(&cache.streamHeap)
 
 	// Write initial M3U header
-	cache.writer.WriteString("#EXTM3U\n")
+	_, _ = cache.writer.WriteString("#EXTM3U\n")
 	cache.writer.Flush()
 
 	return cache
@@ -160,16 +160,16 @@ func (sc *SortedM3UCache) finalize() {
 	defer sc.Unlock()
 
 	// Truncate file and seek to start
-	sc.file.Truncate(0)
-	sc.file.Seek(0, 0)
+	_ = sc.file.Truncate(0)
+	_, _ = sc.file.Seek(0, 0)
 
 	// Write single header
-	sc.writer.WriteString("#EXTM3U\n")
+	_, _ = sc.writer.WriteString("#EXTM3U\n")
 
 	// Write sorted entries
 	for sc.streamHeap.Len() > 0 {
 		entry := heap.Pop(&sc.streamHeap).(*M3UEntry)
-		sc.writer.WriteString(entry.content)
+		_, _ = sc.writer.WriteString(entry.content)
 	}
 
 	// Flush and move file
