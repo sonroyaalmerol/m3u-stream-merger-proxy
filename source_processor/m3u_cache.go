@@ -50,7 +50,7 @@ func RevalidatingGetM3U(r *http.Request, force bool) string {
 		updates := newCache.processM3UsInRealTime()
 		for range updates {
 			processCount++
-			batch := int(math.Pow(10, math.Floor(math.Log10(float64(processCount))+1)))
+			batch := int(math.Pow(10, math.Floor(math.Log10(float64(processCount)))))
 			if batch < 100 {
 				batch = 100
 			}
