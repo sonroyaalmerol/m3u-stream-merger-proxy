@@ -34,7 +34,7 @@ type PlaylistMetadata struct {
 	IsMaster       bool
 }
 
-func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadbalancer.LoadBalancerResult) {
+func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadbalancer.LoadBalancerResult, writer http.ResponseWriter) {
 	defer func() {
 		c.LBResultOnWrite.Store(nil)
 		if r := recover(); r != nil {
@@ -116,7 +116,7 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 
 			if metadata.IsEndlist {
 				// Process remaining segments before ending
-				err = c.processSegments(ctx, metadata.Segments)
+				err = c.processSegments(ctx, metadata.Segments, writer)
 				if err != nil {
 					c.logger.Errorf("Error processing segments: %v", err)
 				}
@@ -128,7 +128,7 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 				lastChangeTime = time.Now()
 				lastMediaSeq = metadata.MediaSequence
 
-				if err := c.processSegments(ctx, metadata.Segments); err != nil {
+				if err := c.processSegments(ctx, metadata.Segments, writer); err != nil {
 					if ctx.Err() != nil {
 						c.writeError(err, proxy.StatusServerError)
 						return
@@ -141,13 +141,13 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 	}
 }
 
-func (c *StreamCoordinator) processSegments(ctx context.Context, segments []string) error {
+func (c *StreamCoordinator) processSegments(ctx context.Context, segments []string, writer http.ResponseWriter) error {
 	for _, segment := range segments {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			if err := c.streamSegment(ctx, segment); err != nil {
+			if err := c.streamSegment(ctx, segment, writer); err != nil {
 				if err != io.EOF {
 					return err
 				}
@@ -157,7 +157,7 @@ func (c *StreamCoordinator) processSegments(ctx context.Context, segments []stri
 	return nil
 }
 
-func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string) error {
+func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string, writer http.ResponseWriter) error {
 	buffer := make([]byte, c.config.ChunkSize)
 	timeout := c.getTimeoutDuration()
 	backoff := proxy.NewBackoffStrategy(c.config.InitialBackoff,
@@ -191,6 +191,11 @@ func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string
 		c.WasInvalid.Store(true)
 		c.logger.Errorf("%s cannot be safely concatenated and is not supported by this proxy.", contentType)
 		return fmt.Errorf("content type %s cannot be safely concatenated", contentType)
+	}
+
+	if !c.WrittenHeader.Load() {
+		writer.Header().Add("Content-Type", contentType)
+		c.WrittenHeader.Store(true)
 	}
 
 	lastSuccess := time.Now()

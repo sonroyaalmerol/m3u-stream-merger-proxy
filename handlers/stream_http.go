@@ -120,7 +120,6 @@ func (h *StreamHTTPHandler) writeHeaders(w http.ResponseWriter, resp *http.Respo
 		}
 	}
 
-	w.WriteHeader(resp.StatusCode)
 	h.logger.Debugf("Headers set for response: %v", w.Header())
 	return nil
 }
