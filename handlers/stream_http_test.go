@@ -92,6 +92,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 				}
 
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+					w.WriteHeader(lbRes.Response.StatusCode)
 					exitStatus <- proxy.StatusM3U8Parsed // Normal completion
 				}
 
@@ -125,6 +126,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 
 				firstCall := true
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+					w.WriteHeader(lbRes.Response.StatusCode)
 					if firstCall {
 						firstCall = false
 						exitStatus <- proxy.StatusM3U8ParseError // Trigger retry
@@ -158,6 +160,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
 					// Simulate a long operation that gets cancelled
+					w.WriteHeader(lbRes.Response.StatusCode)
 					select {
 					case <-ctx.Done():
 						exitStatus <- proxy.StatusClientClosed
@@ -189,6 +192,10 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 					return coordinator
 				}
 
+				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+					w.WriteHeader(lbRes.Response.StatusCode)
+				}
+
 				return manager
 			},
 			expectedStatus: http.StatusInternalServerError,
@@ -208,6 +215,10 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 					return cm
 				}
 
+				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+					w.WriteHeader(lbRes.Response.StatusCode)
+				}
+
 				manager.getRegistryFunc = func() *buffer.StreamRegistry {
 					return coordinator
 				}
@@ -219,12 +230,16 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 		},
 		{
 			name: "stream with server error response",
-			path: "/test.m3u8",
+			path: "/test",
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
 
 				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, session *store.Session) (*loadbalancer.LoadBalancerResult, error) {
 					return &loadbalancer.LoadBalancerResult{Response: mockResponse(http.StatusInternalServerError, "server error"), URL: "http://error.com", Index: "1", SubIndex: "1"}, nil
+				}
+
+				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+					w.WriteHeader(lbRes.Response.StatusCode)
 				}
 
 				manager.getCmFunc = func() *store.ConcurrencyManager {
@@ -254,6 +269,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 				}
 
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+					w.WriteHeader(lbRes.Response.StatusCode)
 					exitStatus <- proxy.StatusM3U8Parsed
 				}
 
@@ -330,6 +346,7 @@ func TestStreamHTTPHandler_DisconnectionConcurrency(t *testing.T) {
 				}
 
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+					w.WriteHeader(lbRes.Response.StatusCode)
 					// Randomly decide between normal completion, client disconnect, or EOF
 					time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond)
 					outcomes := []int{
@@ -373,6 +390,7 @@ func TestStreamHTTPHandler_DisconnectionConcurrency(t *testing.T) {
 				}
 
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+					w.WriteHeader(lbRes.Response.StatusCode)
 					streamWG.Done()
 					streamWG.Wait()                        // Wait for all streams to be ready
 					exitStatus <- proxy.StatusClientClosed // All disconnect at once
@@ -412,6 +430,7 @@ func TestStreamHTTPHandler_DisconnectionConcurrency(t *testing.T) {
 				}
 
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+					w.WriteHeader(lbRes.Response.StatusCode)
 					time.Sleep(time.Duration(rand.Intn(50)) * time.Millisecond)
 
 					// Mix of different completion statuses including retry scenarios
@@ -466,6 +485,7 @@ func TestStreamHTTPHandler_DisconnectionConcurrency(t *testing.T) {
 				}
 
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, r *http.Request, w http.ResponseWriter, exitStatus chan<- int) {
+					w.WriteHeader(lbRes.Response.StatusCode)
 					// Very short-lived connections
 					time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
 					exitStatus <- proxy.StatusClientClosed
