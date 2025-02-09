@@ -120,35 +120,62 @@ func sortStreams(s map[string]*StreamInfo) []string {
 	key := os.Getenv("SORTING_KEY")
 	dir := strings.ToLower(os.Getenv("SORTING_DIRECTION"))
 
+	tieBreaker := func(i, j int) bool {
+		if s[keys[i]].SourceM3U != s[keys[j]].SourceM3U {
+			return s[keys[i]].SourceM3U < s[keys[j]].SourceM3U
+		}
+		return s[keys[i]].SourceIndex < s[keys[j]].SourceIndex
+	}
+
 	// Sort the keys based on the values they point to
 	switch key {
 	case "tvg-id":
 		sort.Slice(keys, func(i, j int) bool {
-			if dir == "desc" {
-				return s[keys[i]].TvgID > s[keys[j]].TvgID
+			// First compare by tvg-id
+			if s[keys[i]].TvgID != s[keys[j]].TvgID {
+				if dir == "desc" {
+					return s[keys[i]].TvgID > s[keys[j]].TvgID
+				}
+				return s[keys[i]].TvgID < s[keys[j]].TvgID
 			}
-			return s[keys[i]].TvgID < s[keys[j]].TvgID
+			// If tvg-id is same, use source ordering
+			return tieBreaker(i, j)
 		})
 	case "tvg-chno":
 		sort.Slice(keys, func(i, j int) bool {
-			if dir == "desc" {
-				return s[keys[i]].TvgChNo > s[keys[j]].TvgChNo
+			// First compare by tvg-chno
+			if s[keys[i]].TvgChNo != s[keys[j]].TvgChNo {
+				if dir == "desc" {
+					return s[keys[i]].TvgChNo > s[keys[j]].TvgChNo
+				}
+				return s[keys[i]].TvgChNo < s[keys[j]].TvgChNo
 			}
-			return s[keys[i]].TvgChNo < s[keys[j]].TvgChNo
+			// If tvg-chno is same, use source ordering
+			return tieBreaker(i, j)
 		})
 	case "tvg-group":
 		sort.Slice(keys, func(i, j int) bool {
-			if dir == "desc" {
-				return s[keys[i]].Group > s[keys[j]].Group
+			// First compare by group
+			if s[keys[i]].Group != s[keys[j]].Group {
+				if dir == "desc" {
+					return s[keys[i]].Group > s[keys[j]].Group
+				}
+				return s[keys[i]].Group < s[keys[j]].Group
 			}
-			return s[keys[i]].Group < s[keys[j]].Group
+			// If group is same, use source ordering
+			return tieBreaker(i, j)
 		})
 	case "tvg-type":
 		sort.Slice(keys, func(i, j int) bool {
-			if dir == "desc" {
-				return s[keys[i]].TvgType > s[keys[j]].TvgType
+			// First compare by type
+			if s[keys[i]].TvgType != s[keys[j]].TvgType {
+				if dir == "desc" {
+					return s[keys[i]].TvgType > s[keys[j]].TvgType
+				}
+				return s[keys[i]].TvgType < s[keys[j]].TvgType
 			}
-			return s[keys[i]].TvgType < s[keys[j]].TvgType
+			// If type is same, use source ordering
+			return tieBreaker(i, j)
 		})
 	case "source":
 		sort.Slice(keys, func(i, j int) bool {
