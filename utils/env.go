@@ -12,8 +12,8 @@ func GetEnv(env string) string {
 	switch env {
 	case "USER_AGENT":
 		// Set the custom User-Agent header
-		userAgent, userAgentExists := os.LookupEnv("USER_AGENT")
-		if !userAgentExists {
+		userAgent, exists := os.LookupEnv("USER_AGENT")
+		if !exists {
 			userAgent = "IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)"
 		}
 		return userAgent
@@ -22,56 +22,67 @@ func GetEnv(env string) string {
 	}
 }
 
-var m3uIndexes []string
-var m3uIndexesInitialized bool
+var (
+	m3uIndexes         []string
+	m3uIndexesOnce = new(sync.Once)
+)
 
 func GetM3UIndexes() []string {
-	if m3uIndexesInitialized {
-		return m3uIndexes
-	}
-	m3uIndexes = []string{}
-	for _, env := range os.Environ() {
-		pair := strings.SplitN(env, "=", 2)
-		if strings.HasPrefix(pair[0], "M3U_URL_") {
-			indexString := strings.TrimPrefix(pair[0], "M3U_URL_")
-			m3uIndexes = append(m3uIndexes, indexString)
+	m3uIndexesOnce.Do(func() {
+		for _, env := range os.Environ() {
+			pair := strings.SplitN(env, "=", 2)
+			if strings.HasPrefix(pair[0], "M3U_URL_") {
+				indexString := strings.TrimPrefix(pair[0], "M3U_URL_")
+				m3uIndexes = append(m3uIndexes, indexString)
+			}
 		}
-	}
-	m3uIndexesInitialized = true
+	})
 	return m3uIndexes
 }
 
 var (
-	filters            = make(map[string][]string)
-	filtersInitialized = make(map[string]bool)
-	filterMutex        sync.RWMutex
+	filters     = make(map[string][]string)
+	filterMutex sync.RWMutex
 )
 
 func GetFilters(baseEnv string) []string {
 	filterMutex.RLock()
-	if filtersInitialized[baseEnv] {
-		result := filters[baseEnv]
+	if cached, ok := filters[baseEnv]; ok {
 		filterMutex.RUnlock()
-		return result
+		return cached
 	}
 	filterMutex.RUnlock()
 
 	filterMutex.Lock()
 	defer filterMutex.Unlock()
 
-	envFilters := []string{}
+	if cached, ok := filters[baseEnv]; ok {
+		return cached
+	}
+
+	var envFilters []string
+	prefix := fmt.Sprintf("%s_", baseEnv)
 	for _, env := range os.Environ() {
 		pair := strings.SplitN(env, "=", 2)
-		if strings.HasPrefix(pair[0], baseEnv) {
-			indexString := strings.TrimPrefix(pair[0], fmt.Sprintf("%s_", baseEnv))
-			_, err := strconv.Atoi(indexString)
-			if err != nil {
+		if strings.HasPrefix(pair[0], prefix) {
+			// Remove the prefix (e.g. "FILTER_")
+			indexStr := strings.TrimPrefix(pair[0], prefix)
+			// Ensure the suffix is an integer.
+			if _, err := strconv.Atoi(indexStr); err != nil {
 				continue
 			}
 			envFilters = append(envFilters, pair[1])
 		}
 	}
-	filtersInitialized[baseEnv] = true
 	filters[baseEnv] = envFilters
-	return filters[baseEnv]
+	return envFilters
+}
+
+func ResetCaches() {
+	m3uIndexesOnce = new(sync.Once)
+	m3uIndexes = nil
+
+	filterMutex.Lock()
+	filters = make(map[string][]string)
+	filterMutex.Unlock()
 }

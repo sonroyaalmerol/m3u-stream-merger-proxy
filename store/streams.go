@@ -25,69 +25,71 @@ func GetStreamBySlug(slug string) (StreamInfo, error) {
 	return *streamInfo, nil
 }
 
-func scanSources() []StreamInfo {
-	var (
-		result  = make([]StreamInfo, 0) // Slice to store final results
-		streams sync.Map                // map[string]*StreamInfo
-	)
-
+func scanSources() map[string]*StreamInfo {
+	streams := make(map[string]*StreamInfo)
+	var streamsMu sync.Mutex
 	sessionIdHash := sha3.Sum224([]byte(time.Now().String()))
 	sessionId := hex.EncodeToString(sessionIdHash[:])
-
 	var wg sync.WaitGroup
-	for _, m3uIndex := range utils.GetM3UIndexes() {
+
+	m3uIndexes := utils.GetM3UIndexes()
+	for m3uIdx, m3uIndex := range m3uIndexes {
 		wg.Add(1)
-		go func(m3uIndex string) {
+		go func(m3uIndex string, m3uPosition int) {
 			defer wg.Done()
-
+			currentIndex := 0
 			err := M3UScanner(m3uIndex, sessionId, func(streamInfo *StreamInfo) {
-				// Check uniqueness and update if necessary
-				if existingStream, exists := streams.Load(streamInfo.Title); exists {
-					for idx, innerMap := range streamInfo.URLs {
-						if _, ok := existingStream.(*StreamInfo).URLs[idx]; !ok {
-							existingStream.(*StreamInfo).URLs[idx] = innerMap
-							continue
-						}
+				streamsMu.Lock()
+				defer streamsMu.Unlock()
 
+				streamInfo.SourceM3U = m3uIndex
+				streamInfo.SourceIndex = currentIndex
+				currentIndex++
+
+				// Check if stream exists and update if necessary
+				if existingStream, exists := streams[streamInfo.Title]; exists {
+					// Keep the earliest source if merging
+					if m3uPosition > existingStream.SourceIndex {
+						return
+					}
+					// Merge URLs preserving all unique ones
+					for idx, innerMap := range streamInfo.URLs {
+						if existingStream.URLs[idx] == nil {
+							existingStream.URLs[idx] = make(map[string]string)
+						}
 						for subIdx, url := range innerMap {
-							existingStream.(*StreamInfo).URLs[idx][subIdx] = url
+							if !containsURL(existingStream.URLs[idx], url) {
+								existingStream.URLs[idx][subIdx] = url
+							}
 						}
 					}
-					streams.Store(streamInfo.Title, existingStream)
 				} else {
-					streams.Store(streamInfo.Title, streamInfo)
+					// Store new stream
+					streams[streamInfo.Title] = streamInfo
 				}
 			})
 			if err != nil {
 				logger.Default.Debugf("error getting streams: %v", err)
 			}
-		}(m3uIndex)
+		}(m3uIndex, m3uIdx)
 	}
 	wg.Wait()
 
+	// Clean up old session directories
 	entries, err := os.ReadDir(config.GetStreamsDirPath())
 	if err == nil {
 		for _, e := range entries {
 			if e.Name() == sessionId {
 				continue
 			}
-
 			_ = os.RemoveAll(filepath.Join(config.GetStreamsDirPath(), e.Name()))
 		}
 	}
 
-	streams.Range(func(key, value any) bool {
-		stream := value.(*StreamInfo)
-		result = append(result, *stream)
-		return true
-	})
-
-	sortStreams(result)
-
-	return result
+	return streams
 }
 
-func GenerateStreamURL(baseUrl string, stream StreamInfo) string {
+func GenerateStreamURL(baseUrl string, stream *StreamInfo) string {
 	var subPath string
 	var err error
 	for _, innerMap := range stream.URLs {
@@ -108,45 +110,70 @@ func GenerateStreamURL(baseUrl string, stream StreamInfo) string {
 	return fmt.Sprintf("%s/p/stream/%s", baseUrl, EncodeSlug(stream))
 }
 
-func sortStreams(s []StreamInfo) {
-	key := os.Getenv("SORTING_KEY")
-	dir := os.Getenv("SORTING_DIRECTION")
+func sortStreams(s map[string]*StreamInfo) []string {
+	// Create a slice of keys
+	keys := make([]string, 0, len(s))
+	for k := range s {
+		keys = append(keys, k)
+	}
 
+	key := os.Getenv("SORTING_KEY")
+	dir := strings.ToLower(os.Getenv("SORTING_DIRECTION"))
+
+	// Sort the keys based on the values they point to
 	switch key {
 	case "tvg-id":
-		sort.Slice(s, func(i, j int) bool {
-			if strings.ToLower(dir) == `desc` {
-				return s[i].TvgID > s[j].TvgID
+		sort.Slice(keys, func(i, j int) bool {
+			if dir == "desc" {
+				return s[keys[i]].TvgID > s[keys[j]].TvgID
 			}
-			return s[i].TvgID < s[j].TvgID
+			return s[keys[i]].TvgID < s[keys[j]].TvgID
 		})
 	case "tvg-chno":
-		sort.Slice(s, func(i, j int) bool {
-			if strings.ToLower(dir) == `desc` {
-				return s[i].TvgChNo > s[j].TvgChNo
+		sort.Slice(keys, func(i, j int) bool {
+			if dir == "desc" {
+				return s[keys[i]].TvgChNo > s[keys[j]].TvgChNo
 			}
-			return s[i].TvgChNo < s[j].TvgChNo
+			return s[keys[i]].TvgChNo < s[keys[j]].TvgChNo
 		})
 	case "tvg-group":
-		sort.Slice(s, func(i, j int) bool {
-			if strings.ToLower(dir) == `desc` {
-				return s[i].Group > s[j].Group
+		sort.Slice(keys, func(i, j int) bool {
+			if dir == "desc" {
+				return s[keys[i]].Group > s[keys[j]].Group
 			}
-			return s[i].Group < s[j].Group
+			return s[keys[i]].Group < s[keys[j]].Group
 		})
 	case "tvg-type":
-		sort.Slice(s, func(i, j int) bool {
-			if strings.ToLower(dir) == `desc` {
-				return s[i].TvgType > s[j].TvgType
+		sort.Slice(keys, func(i, j int) bool {
+			if dir == "desc" {
+				return s[keys[i]].TvgType > s[keys[j]].TvgType
 			}
-			return s[i].TvgType < s[j].TvgType
+			return s[keys[i]].TvgType < s[keys[j]].TvgType
+		})
+	case "source":
+		sort.Slice(keys, func(i, j int) bool {
+			if s[keys[i]].SourceM3U != s[keys[j]].SourceM3U {
+				return s[keys[i]].SourceM3U < s[keys[j]].SourceM3U
+			}
+			return s[keys[i]].SourceIndex < s[keys[j]].SourceIndex
 		})
 	default:
-		sort.Slice(s, func(i, j int) bool {
-			if strings.ToLower(dir) == `desc` {
-				return s[i].Title > s[j].Title
+		sort.Slice(keys, func(i, j int) bool {
+			if dir == "desc" {
+				return s[keys[i]].Title > s[keys[j]].Title
 			}
-			return s[i].Title < s[j].Title
+			return s[keys[i]].Title < s[keys[j]].Title
 		})
 	}
+
+	return keys
+}
+
+func containsURL(urls map[string]string, targetURL string) bool {
+	for _, url := range urls {
+		if url == targetURL {
+			return true
+		}
+	}
+	return false
 }

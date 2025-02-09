@@ -170,6 +170,11 @@ func parseLine(sessionId string, line string, nextLine string, m3uIndex string) 
 
 	sessionDirPath := filepath.Join(config.GetStreamsDirPath(), sessionId)
 
+	if currentStream.Title == "" {
+		logger.Default.Debugf("Stream missing title, skipping: %s", line)
+		return nil
+	}
+
 	err := os.MkdirAll(sessionDirPath, os.ModePerm)
 	if err != nil {
 		logger.Default.Debugf("Error creating stream cache folder: %s -> %v", sessionDirPath, err)
