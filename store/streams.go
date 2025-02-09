@@ -49,11 +49,6 @@ func scanSources() map[string]*StreamInfo {
 
 				// Check if stream exists and update if necessary
 				if existingStream, exists := streams[streamInfo.Title]; exists {
-					// Keep the earliest source if merging
-					if m3uPosition > existingStream.SourceIndex {
-						return
-					}
-
 					for idx, innerMap := range streamInfo.URLs {
 						// Create map if it doesn't exist
 						if existingStream.URLs[idx] == nil {
