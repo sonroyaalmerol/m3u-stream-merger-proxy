@@ -134,14 +134,6 @@ func NewStreamCoordinator(streamID string, config *config.StreamConfig, cm *stor
 func (c *StreamCoordinator) RegisterClient() error {
 	state := atomic.LoadInt32(&c.state)
 
-	// If stream is closed but there are no clients, allow reset
-	if state == stateClosed && atomic.LoadInt32(&c.ClientCount) == 0 {
-		if atomic.CompareAndSwapInt32(&c.state, stateClosed, stateActive) {
-			c.logger.Debug("Resetting closed stream to active state")
-			state = stateActive
-		}
-	}
-
 	if state != stateActive {
 		c.logger.Warn("Attempt to register client on non-active stream")
 		switch state {
