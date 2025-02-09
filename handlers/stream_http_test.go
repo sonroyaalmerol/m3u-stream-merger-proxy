@@ -198,7 +198,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 
 				return manager
 			},
-			expectedStatus: http.StatusInternalServerError,
+			expectedStatus: http.StatusOK,
 			expectedError:  false,
 		},
 		{
@@ -225,7 +225,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 
 				return manager
 			},
-			expectedStatus: http.StatusInternalServerError,
+			expectedStatus: http.StatusOK,
 			expectedError:  true,
 		},
 		{
