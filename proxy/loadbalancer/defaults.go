@@ -1,7 +1,7 @@
 package loadbalancer
 
 import (
-	"m3u-stream-merger/store"
+	sourceproc "m3u-stream-merger/source_processor"
 	"m3u-stream-merger/utils"
 )
 
@@ -17,6 +17,6 @@ type DefaultSlugParser struct {
 	SlugParser
 }
 
-func (p *DefaultSlugParser) GetStreamBySlug(slug string) (store.StreamInfo, error) {
-	return store.GetStreamBySlug(slug)
+func (p *DefaultSlugParser) GetStreamBySlug(slug string) (*sourceproc.StreamInfo, error) {
+	return sourceproc.GetStreamBySlug(slug)
 }

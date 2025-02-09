@@ -7,18 +7,18 @@ import (
 	"time"
 
 	"m3u-stream-merger/logger"
-	"m3u-stream-merger/store"
+	sourceproc "m3u-stream-merger/source_processor"
 )
 
 type M3UHTTPHandler struct {
 	logger logger.Logger
-	Cache  *store.M3UCache
+	Cache  *sourceproc.M3UCache
 }
 
 func NewM3UHTTPHandler(logger logger.Logger) *M3UHTTPHandler {
 	return &M3UHTTPHandler{
 		logger: logger,
-		Cache:  store.M3uCache,
+		Cache:  sourceproc.M3uCache,
 	}
 }
 
@@ -31,7 +31,7 @@ func (h *M3UHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
-	content := store.RevalidatingGetM3U(r, false)
+	content := sourceproc.RevalidatingGetM3U(r, false)
 	if _, err := w.Write([]byte(content)); err != nil {
 		h.logger.Debugf("Error writing http response: %v", err)
 	}

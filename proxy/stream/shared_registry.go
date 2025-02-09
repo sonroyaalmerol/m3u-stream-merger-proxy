@@ -2,6 +2,7 @@ package stream
 
 import (
 	"m3u-stream-merger/logger"
+	sourceproc "m3u-stream-merger/source_processor"
 	"m3u-stream-merger/store"
 	"sync"
 	"sync/atomic"
@@ -38,13 +39,13 @@ func NewStreamRegistry(config *StreamConfig, cm *store.ConcurrencyManager, logge
 func (r *StreamRegistry) GetOrCreateCoordinator(streamID string) *StreamCoordinator {
 	coordId := streamID
 	if !r.Unrestrict {
-		streamInfo, err := store.DecodeSlug(streamID)
+		streamInfo, err := sourceproc.DecodeSlug(streamID)
 		if err != nil {
 			r.logger.Logf("Invalid m3uID for GetOrCreateCoordinator from %s", streamID)
 			return nil
 		}
 
-		existingStreams := store.GetCurrentStreams()
+		existingStreams := sourceproc.GetCurrentStreams()
 
 		if _, ok := existingStreams[streamInfo.Title]; !ok {
 			r.logger.Logf("Invalid m3uID for GetOrCreateCoordinator from %s", streamID)
