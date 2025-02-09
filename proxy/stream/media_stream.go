@@ -55,7 +55,7 @@ func (h *StreamHandler) HandleStream(
 		h.coordinator.WriterCtx, h.coordinator.WriterCancel = context.WithCancel(context.Background())
 
 		if utils.IsAnM3U8Media(lbResult.Response) {
-			go h.coordinator.StartHLSWriter(h.coordinator.WriterCtx, lbResult)
+			go h.coordinator.StartHLSWriter(h.coordinator.WriterCtx, lbResult, writer)
 		} else {
 			go h.coordinator.StartMediaWriter(h.coordinator.WriterCtx, lbResult)
 		}
