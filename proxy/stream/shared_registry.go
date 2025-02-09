@@ -67,17 +67,7 @@ func (r *StreamRegistry) GetOrCreateCoordinator(streamID string) *StreamCoordina
 	return coord
 }
 
-func (r *StreamRegistry) RemoveCoordinator(streamID string) {
-	coordId := streamID
-	if !r.Unrestrict {
-		streamInfo, err := store.DecodeSlug(streamID)
-		if err != nil {
-			r.logger.Logf("Invalid m3uID for RemoveCoordinator from %s", streamID)
-			return
-		}
-		coordId = streamInfo.Title
-	}
-
+func (r *StreamRegistry) RemoveCoordinator(coordId string) {
 	r.coordinators.Delete(coordId)
 }
 
