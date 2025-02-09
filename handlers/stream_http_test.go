@@ -72,6 +72,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 	config := config.NewDefaultStreamConfig()
 	config.ChunkSize = 1024 * 1024
 	coordinator := buffer.NewStreamRegistry(config, cm, logger.Default, time.Second)
+	coordinator.Unrestrict = true
 
 	tests := []struct {
 		name           string
@@ -311,6 +312,7 @@ func TestStreamHTTPHandler_DisconnectionConcurrency(t *testing.T) {
 	config := config.NewDefaultStreamConfig()
 	config.ChunkSize = 1024 * 1024
 	coordinator := buffer.NewStreamRegistry(config, cm, logger.Default, time.Second)
+	coordinator.Unrestrict = true
 
 	tests := []struct {
 		name         string

@@ -16,6 +16,8 @@ type StreamRegistry struct {
 	cleanupTicker *time.Ticker
 	cm            *store.ConcurrencyManager
 	done          chan struct{}
+
+	Unrestrict bool
 }
 
 func NewStreamRegistry(config *config.StreamConfig, cm *store.ConcurrencyManager, logger logger.Logger, cleanupInterval time.Duration) *StreamRegistry {
@@ -35,13 +37,30 @@ func NewStreamRegistry(config *config.StreamConfig, cm *store.ConcurrencyManager
 }
 
 func (r *StreamRegistry) GetOrCreateCoordinator(streamID string) *StreamCoordinator {
-	if coord, ok := r.coordinators.Load(streamID); ok {
+	coordId := streamID
+	if !r.Unrestrict {
+		streamInfo, err := store.DecodeSlug(streamID)
+		if err != nil {
+			r.logger.Logf("Invalid m3uID for GetOrCreateCoordinator from %s", streamID)
+			return nil
+		}
+
+		existingStreams := store.GetCurrentStreams()
+
+		if _, ok := existingStreams[streamInfo.Title]; !ok {
+			r.logger.Logf("Invalid m3uID for GetOrCreateCoordinator from %s", streamID)
+			return nil
+		}
+		coordId = streamInfo.Title
+	}
+
+	if coord, ok := r.coordinators.Load(coordId); ok {
 		return coord.(*StreamCoordinator)
 	}
 
-	coord := NewStreamCoordinator(streamID, r.config, r.cm, r.logger)
+	coord := NewStreamCoordinator(coordId, r.config, r.cm, r.logger)
 
-	actual, loaded := r.coordinators.LoadOrStore(streamID, coord)
+	actual, loaded := r.coordinators.LoadOrStore(coordId, coord)
 	if loaded {
 		return actual.(*StreamCoordinator)
 	}
@@ -49,8 +68,8 @@ func (r *StreamRegistry) GetOrCreateCoordinator(streamID string) *StreamCoordina
 	return coord
 }
 
-func (r *StreamRegistry) RemoveCoordinator(streamID string) {
-	r.coordinators.Delete(streamID)
+func (r *StreamRegistry) RemoveCoordinator(coordId string) {
+	r.coordinators.Delete(coordId)
 }
 
 func (r *StreamRegistry) runCleanup() {
