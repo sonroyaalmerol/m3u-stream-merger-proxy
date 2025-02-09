@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -52,14 +53,29 @@ func scanSources() map[string]*StreamInfo {
 					if m3uPosition > existingStream.SourceIndex {
 						return
 					}
-					// Merge URLs preserving all unique ones
+					// Merge URLs preserving source order
 					for idx, innerMap := range streamInfo.URLs {
 						if existingStream.URLs[idx] == nil {
 							existingStream.URLs[idx] = make(map[string]string)
 						}
-						for subIdx, url := range innerMap {
+
+						// Get the next available subIdx
+						nextSubIdx := 0
+						strNextSubIdx := strconv.Itoa(nextSubIdx)
+						for k := range existingStream.URLs[idx] {
+							if subIdxInt, err := strconv.Atoi(k); err == nil && subIdxInt >= nextSubIdx {
+								nextSubIdx = subIdxInt + 1
+							} else if err != nil {
+								strNextSubIdx = idx
+								break
+							}
+						}
+
+						// Add new URLs with incremented subIdx
+						for _, url := range innerMap {
 							if !containsURL(existingStream.URLs[idx], url) {
-								existingStream.URLs[idx][subIdx] = url
+								existingStream.URLs[idx][strNextSubIdx] = url
+								nextSubIdx++
 							}
 						}
 					}
@@ -153,8 +169,7 @@ func sortStreams(s map[string]*StreamInfo) []string {
 			// If tvg-chno is same, use source ordering
 			return tieBreaker(i, j)
 		})
-	case "tvg-group":
-		sort.Slice(keys, func(i, j int) bool {
+	case "tvg-group": func(i, j int) bool {
 			// First compare by group
 			if s[keys[i]].Group != s[keys[j]].Group {
 				if dir == "desc" {
@@ -204,3 +219,4 @@ func containsURL(urls map[string]string, targetURL string) bool {
 	}
 	return false
 }
+
