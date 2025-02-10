@@ -15,7 +15,7 @@ type StreamConfig struct {
 }
 
 func NewDefaultStreamConfig() *StreamConfig {
-	finalBufferSize := 4
+	finalBufferSize := 8
 	finalTimeoutSeconds := 3
 	finalMaxRetries := 5
 

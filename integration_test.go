@@ -13,9 +13,27 @@ import (
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/handlers"
 	"m3u-stream-merger/logger"
-	"m3u-stream-merger/store"
+	sourceproc "m3u-stream-merger/source_processor"
 	"m3u-stream-merger/utils"
 )
+
+func waitForCache(t *testing.T, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		cache := sourceproc.GetCache().Load()
+		if cache != nil && !cache.IsProcessing() {
+			// Check if cache file exists and has content
+			if _, err := os.Stat(config.GetM3UCachePath()); err == nil {
+				content, err := os.ReadFile(config.GetM3UCachePath())
+				if err == nil && len(content) > 0 && strings.Contains(string(content), "EXTINF") {
+					return
+				}
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("Cache did not complete processing within timeout")
+}
 
 func TestStreamHTTPHandler(t *testing.T) {
 	// Create temp directory for test data
@@ -64,18 +82,17 @@ func TestStreamHTTPHandler(t *testing.T) {
 	t.Setenv("M3U_URL_1", m3uURL)
 	t.Setenv("DEBUG", "true")
 
-	// Download M3U source
-	t.Log("Downloading M3U source")
-	if err := store.DownloadM3USource("1"); err != nil {
-		t.Fatalf("Failed to download M3U source: %v", err)
-	}
-
 	// Test M3U playlist generation
 	t.Log("Testing M3U playlist generation")
 	m3uReq := httptest.NewRequest(http.MethodGet, "/playlist.m3u", nil)
 	m3uW := httptest.NewRecorder()
 	m3uHandler.ServeHTTP(m3uW, m3uReq)
 
+	waitForCache(t, 5*time.Second)
+
+	m3uReq = httptest.NewRequest(http.MethodGet, "/playlist.m3u", nil)
+	m3uW = httptest.NewRecorder()
+	m3uHandler.ServeHTTP(m3uW, m3uReq)
 	if m3uW.Code != http.StatusOK {
 		t.Errorf("Playlist Route - Expected status code %d, got %d", http.StatusOK, m3uW.Code)
 		t.Log("Response Body:", m3uW.Body.String())
@@ -83,7 +100,7 @@ func TestStreamHTTPHandler(t *testing.T) {
 
 	// Get streams and test each one
 	t.Log("Retrieving streams from store")
-	streams := store.GetCurrentStreams()
+	streams := sourceproc.GetCurrentStreams()
 	t.Logf("Found %d streams", len(streams))
 	if len(streams) == 0 {
 		t.Error("No streams found in store")
@@ -104,7 +121,7 @@ func TestStreamHTTPHandler(t *testing.T) {
 			t.Logf("Testing stream: %s", stream.Title)
 			t.Logf("Stream URLs: %v", stream.URLs)
 
-			genStreamUrl := strings.TrimSpace(store.GenerateStreamURL("", stream))
+			genStreamUrl := strings.TrimSpace(sourceproc.GenerateStreamURL("", stream))
 			t.Logf("Generated stream URL: %s", genStreamUrl)
 
 			req := httptest.NewRequest(http.MethodGet, genStreamUrl, nil)
@@ -117,8 +134,18 @@ func TestStreamHTTPHandler(t *testing.T) {
 				close(done)
 			}()
 
-			originalURL := stream.URLs["1"]["0"]
-			res, err := utils.HTTPClient.Get(originalURL)
+			// Fetch original stream for comparison
+			firstKey := ""
+			for key := range stream.URLs["1"] {
+				firstKey = key
+				break
+			}
+			originalURL := stream.URLs["1"][firstKey]
+			t.Logf("Fetching original stream from: %s", originalURL)
+
+			originalURLSplit := strings.SplitN(originalURL, ":::", 2)
+
+			res, err := utils.HTTPClient.Get(originalURLSplit[1])
 			if err != nil {
 				t.Logf("Failed to fetch original stream: %v", err)
 				success = false

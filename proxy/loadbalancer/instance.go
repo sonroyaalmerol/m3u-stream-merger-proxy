@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
+	sourceproc "m3u-stream-merger/source_processor"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
 	"net/http"
@@ -16,7 +17,7 @@ import (
 )
 
 type LoadBalancerInstance struct {
-	Info          store.StreamInfo
+	Info          *sourceproc.StreamInfo
 	Cm            *store.ConcurrencyManager
 	config        *LBConfig
 	httpClient    HTTPClient
@@ -228,7 +229,18 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 		return nil, fmt.Errorf("HTTP client cannot be nil")
 	}
 
-	for subIndex, url := range urls {
+	for _, subIndex := range sourceproc.SortStreamSubUrls(urls) {
+		fileContent, ok := urls[subIndex]
+		if !ok {
+			continue
+		}
+
+		url := fileContent
+		fileContentSplit := strings.SplitN(fileContent, ":::", 2)
+		if len(fileContentSplit) == 2 {
+			url = fileContentSplit[1]
+		}
+
 		id := index + "|" + subIndex
 		session.Mutex.RLock()
 		alreadyTested := slices.Contains(session.TestedIndexes, index+"|"+subIndex)
