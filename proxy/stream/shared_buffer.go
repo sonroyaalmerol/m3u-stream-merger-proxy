@@ -185,6 +185,12 @@ func (c *StreamCoordinator) StartWriter(ctx context.Context, lbResult *loadbalan
 			c.writeError(fmt.Errorf("internal server error"), proxy.StatusServerError)
 		}
 	}()
+
+	if lbResult == nil || lbResult.Response == nil || lbResult.Response.Body == nil {
+		c.writeError(fmt.Errorf("invalid upstream response"), proxy.StatusServerError)
+		return
+	}
+
 	defer lbResult.Response.Body.Close()
 
 	c.lbResultOnWrite.Store(lbResult)
@@ -296,6 +302,7 @@ func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 	if atomic.LoadInt32(&c.state) != stateActive {
 		c.logger.Debug("Write: Stream not active")
 		c.mu.Unlock()
+		chunk.Reset() // Properly return the buffer to the pool.
 		return false
 	}
 
@@ -303,6 +310,7 @@ func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 	if !ok || current == nil {
 		c.logger.Debug("Write: Current buffer position is nil")
 		c.mu.Unlock()
+		chunk.Reset() // Ensure no leaked buffer.
 		return false
 	}
 
@@ -310,15 +318,18 @@ func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 	seq := atomic.AddInt64(&c.writeSeq, 1)
 	current.seq = seq
 
-	// Swap buffers to avoid copying
+	// Swap buffers to avoid copying.
+	// current.Buffer (the ring's buffer) is replaced with chunk.Buffer.
+	// The chunk now holds the old buffer.
 	oldBuffer := current.Buffer
 	current.Buffer = chunk.Buffer
-	chunk.Buffer = oldBuffer // Caller is responsible for calling Reset() on the chunk
+	chunk.Buffer = oldBuffer
 
 	current.Error = chunk.Error
 	current.Status = chunk.Status
 	current.Timestamp = chunk.Timestamp
 
+	// Advance the ring.
 	c.buffer = c.buffer.Next()
 	c.logger.Debug("Write: Advanced buffer position")
 
@@ -331,6 +342,11 @@ func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 		c.logger.Debugf("Write: Setting error state: err=%v, status=%d", current.Error, current.Status)
 	}
 	c.mu.Unlock()
+
+	// Now that the chunk's data has been “swallowed” by the ring,
+	// we immediately reset the caller’s chunk so its (old) buffer is
+	// returned to the pool.
+	chunk.Reset()
 
 	// Notify subscribers outside the lock to avoid deadlock.
 	c.notifySubscribers()
