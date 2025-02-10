@@ -80,6 +80,9 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 	fileName := fmt.Sprintf("%s_%s|%s", base64Title, m3uIndex, urlHash)
 	filePath := filepath.Join(config.GetStreamsDirPath(), fileName)
 
+	stream.SourceM3U = m3uIndex
+	stream.SourceIndex = nextLine.LineNum
+
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		content := fmt.Sprintf("%d:::%s", nextLine.LineNum, encodedUrl)
 		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
