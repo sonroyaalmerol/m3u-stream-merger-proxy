@@ -158,11 +158,6 @@ func (c *StreamCoordinator) processSegments(ctx context.Context, segments []stri
 }
 
 func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string, writer http.ResponseWriter) error {
-	buffer := make([]byte, c.config.ChunkSize)
-	timeout := c.getTimeoutDuration()
-	backoff := proxy.NewBackoffStrategy(c.config.InitialBackoff,
-		time.Duration(c.config.TimeoutSeconds-1)*time.Second)
-
 	req, err := http.NewRequest("GET", segmentURL, nil)
 	if err != nil {
 		return fmt.Errorf("Error creating request to segment: %v", err)
@@ -176,6 +171,7 @@ func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string
 	if resp == nil {
 		return errors.New("Returned nil response from HTTP client")
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("Non-200 status code received: %d for %s", resp.StatusCode, segmentURL)
@@ -199,71 +195,15 @@ func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string
 		c.WrittenHeader.Store(true)
 	}
 
-	lastSuccess := time.Now()
-	lastErr := time.Now()
-	zeroReads := 0
-
-	for atomic.LoadInt32(&c.state) == stateActive {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			if c.shouldTimeout(lastSuccess, timeout) {
-				return nil
-			}
-
-			n, err := resp.Body.Read(buffer)
-			c.logger.Debugf("StartHLSWriter: Read %d bytes, err: %v", n, err)
-
-			if n == 0 {
-				zeroReads++
-				if zeroReads > 10 {
-					return io.EOF
-				}
-				time.Sleep(10 * time.Millisecond)
-				continue
-			}
-
-			lastSuccess = time.Now()
-			zeroReads = 0
-
-			if err == io.EOF {
-				if n > 0 {
-					chunk := newChunkData()
-					_, _ = chunk.Buffer.Write(buffer[:n])
-					chunk.Timestamp = time.Now()
-					if !c.Write(chunk) {
-						chunk.Reset()
-					}
-				}
-				return io.EOF
-			}
-
-			if err != nil {
-				if c.shouldRetry(timeout) {
-					backoff.Sleep(ctx)
-					lastErr = time.Now()
-					continue
-				}
-				return err
-			}
-
-			chunk := newChunkData()
-			_, _ = chunk.Buffer.Write(buffer[:n])
-			chunk.Timestamp = time.Now()
-			if !c.Write(chunk) {
-				chunk.Reset()
-			}
-
-			// Only reset the backoff if at least one second has passed
-			if time.Since(lastErr) >= time.Second {
-				backoff.Reset()
-				lastErr = time.Now()
-			}
+	return c.readAndWriteStream(ctx, resp.Body, func(b []byte) error {
+		chunk := newChunkData()
+		_, _ = chunk.Buffer.Write(b)
+		chunk.Timestamp = time.Now()
+		if !c.Write(chunk) {
+			chunk.Reset()
 		}
-	}
-
-	return nil
+		return nil
+	})
 }
 
 func (c *StreamCoordinator) parsePlaylist(mediaURL string, content string) (*PlaylistMetadata, error) {

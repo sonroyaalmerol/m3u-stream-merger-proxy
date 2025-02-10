@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/loadbalancer"
@@ -379,4 +380,71 @@ func (c *StreamCoordinator) writeError(err error, status int) {
 		chunk.Reset()
 	}
 	atomic.StoreInt32(&c.state, stateClosed)
+}
+
+func (c *StreamCoordinator) readAndWriteStream(
+	ctx context.Context,
+	body io.ReadCloser,
+	processChunk func([]byte) error,
+) error {
+	buffer := make([]byte, c.config.ChunkSize)
+	timeout := c.getTimeoutDuration()
+	backoff := proxy.NewBackoffStrategy(c.config.InitialBackoff,
+		time.Duration(c.config.TimeoutSeconds-1)*time.Second)
+
+	lastSuccess := time.Now()
+	lastErr := time.Now()
+	zeroReads := 0
+
+	for atomic.LoadInt32(&c.state) == stateActive {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			if c.shouldTimeout(lastSuccess, timeout) {
+				return fmt.Errorf("stream timeout: no new segments")
+			}
+
+			n, err := body.Read(buffer)
+			c.logger.Debugf("Read %d bytes, err: %v", n, err)
+
+			if n == 0 {
+				zeroReads++
+				if zeroReads > 10 {
+					return io.EOF
+				}
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			lastSuccess = time.Now()
+			zeroReads = 0
+
+			if err == io.EOF && n > 0 {
+				if err = processChunk(buffer[:n]); err != nil {
+					return err
+				}
+				return io.EOF
+			}
+
+			if err != nil {
+				if c.shouldRetry(timeout) {
+					backoff.Sleep(ctx)
+					lastErr = time.Now()
+					continue
+				}
+				return err
+			}
+
+			if err = processChunk(buffer[:n]); err != nil {
+				return err
+			}
+
+			// Reset the backoff if at least one second has passed.
+			if time.Since(lastErr) >= time.Second {
+				backoff.Reset()
+				lastErr = time.Now()
+			}
+		}
+	}
+	return nil
 }
