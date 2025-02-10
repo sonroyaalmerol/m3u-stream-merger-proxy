@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 
 	"m3u-stream-merger/config"
@@ -12,7 +13,8 @@ import (
 )
 
 type M3UCache struct {
-	cache atomic.Pointer[SortedM3UCache]
+	cache           atomic.Pointer[M3UManager]
+	slugToInfoCache sync.Map // map[string]*StreamInfo
 }
 
 var M3uCache = &M3UCache{}
@@ -30,7 +32,7 @@ func RevalidatingGetM3U(r *http.Request, force bool) string {
 	}
 
 	// Create new cache and start processing
-	newCache := NewSortedM3UCache(r)
+	newCache := NewM3UManager(r)
 	if force {
 		if err := os.Remove(config.GetM3UCachePath()); err != nil && !os.IsNotExist(err) {
 			logger.Default.Errorf("Error removing existing cache: %v", err)
@@ -81,6 +83,8 @@ func ClearCache() {
 		M3uCache.cache.Store(nil)
 	}
 
+	M3uCache.slugToInfoCache.Clear()
+
 	logger.Default.Log("Clearing memory and disk M3U cache.")
 	cleanupCacheFiles()
 }
@@ -118,6 +122,6 @@ func readCacheFromFile() string {
 	return string(data)
 }
 
-func GetCache() *atomic.Pointer[SortedM3UCache] {
+func GetCache() *atomic.Pointer[M3UManager] {
 	return &M3uCache.cache
 }

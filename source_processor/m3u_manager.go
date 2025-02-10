@@ -15,6 +15,9 @@ import (
 	"m3u-stream-merger/utils"
 )
 
+var sortingKey string
+var sortingDir string
+
 // M3UEntry represents a single stream entry
 type M3UEntry struct {
 	content    string
@@ -27,9 +30,7 @@ type M3UHeap []*M3UEntry
 
 func (h M3UHeap) Len() int { return len(h) }
 func (h M3UHeap) Less(i, j int) bool {
-	key := os.Getenv("SORTING_KEY")
-	dir := strings.ToLower(os.Getenv("SORTING_DIRECTION"))
-	return getSortFunction(key, dir)(h[i].streamInfo, h[j].streamInfo, "", "")
+	return getSortFunction(sortingKey, sortingDir)(h[i].streamInfo, h[j].streamInfo, "", "")
 }
 func (h M3UHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
 func (h *M3UHeap) Push(x interface{}) { *h = append(*h, x.(*M3UEntry)) }
@@ -41,8 +42,8 @@ func (h *M3UHeap) Pop() interface{} {
 	return x
 }
 
-// SortedM3UCache manages stream entries with sorting
-type SortedM3UCache struct {
+// M3UManager manages stream entries with sorting
+type M3UManager struct {
 	sync.RWMutex
 	baseURL          string
 	processedStreams *ShardedStreamMap
@@ -54,7 +55,7 @@ type SortedM3UCache struct {
 	entryCount       int
 }
 
-func NewSortedM3UCache(r *http.Request) *SortedM3UCache {
+func NewM3UManager(r *http.Request) *M3UManager {
 	tmpPath := filepath.Join(config.GetConfig().TempPath, "tmp.m3u")
 	file, err := createCacheFile(tmpPath)
 	if err != nil {
@@ -62,7 +63,10 @@ func NewSortedM3UCache(r *http.Request) *SortedM3UCache {
 		return nil
 	}
 
-	cache := &SortedM3UCache{
+	sortingKey = os.Getenv("SORTING_KEY")
+	sortingDir = strings.ToLower(os.Getenv("SORTING_DIRECTION"))
+
+	cache := &M3UManager{
 		processedStreams: newShardedStreamMap(),
 		baseURL:          utils.DetermineBaseURL(r),
 		file:             file,
@@ -79,7 +83,7 @@ func NewSortedM3UCache(r *http.Request) *SortedM3UCache {
 	return cache
 }
 
-func (sc *SortedM3UCache) processM3UsInRealTime() chan string {
+func (sc *M3UManager) processM3UsInRealTime() chan string {
 	updates := make(chan string, 100)
 	streamResults := streamDownloadM3USources()
 	streamCh := make(chan *StreamInfo, 100)
@@ -121,7 +125,7 @@ func (sc *SortedM3UCache) processM3UsInRealTime() chan string {
 	return updates
 }
 
-func (sc *SortedM3UCache) addStreamToCache(stream *StreamInfo) string {
+func (sc *M3UManager) addStreamToCache(stream *StreamInfo) string {
 	if stream == nil || len(stream.URLs) == 0 {
 		return ""
 	}
@@ -155,7 +159,7 @@ func (sc *SortedM3UCache) addStreamToCache(stream *StreamInfo) string {
 	return entry
 }
 
-func (sc *SortedM3UCache) finalize() {
+func (sc *M3UManager) finalize() {
 	sc.Lock()
 	defer sc.Unlock()
 
@@ -186,7 +190,7 @@ func (sc *SortedM3UCache) finalize() {
 	logger.Default.Log("M3U cache has finished the revalidation process.")
 }
 
-func (sc *SortedM3UCache) cleanup() {
+func (sc *M3UManager) cleanup() {
 	if sc.writer != nil {
 		sc.writer.Flush()
 	}
@@ -195,7 +199,7 @@ func (sc *SortedM3UCache) cleanup() {
 	}
 }
 
-func (sc *SortedM3UCache) GetCurrentContent() string {
+func (sc *M3UManager) GetCurrentContent() string {
 	sc.RLock()
 	defer sc.RUnlock()
 
@@ -209,15 +213,15 @@ func (sc *SortedM3UCache) GetCurrentContent() string {
 	return string(content)
 }
 
-func (sc *SortedM3UCache) IsProcessing() bool {
+func (sc *M3UManager) IsProcessing() bool {
 	return sc.isProcessing.Load()
 }
 
-func (sc *SortedM3UCache) GetProcessedStreamsCount() int64 {
+func (sc *M3UManager) GetProcessedStreamsCount() int64 {
 	return sc.streamCount.Load()
 }
 
-func (sc *SortedM3UCache) handleSourceProcessorResult(result *SourceProcessorResult, streamCh chan<- *StreamInfo) {
+func (sc *M3UManager) handleSourceProcessorResult(result *SourceProcessorResult, streamCh chan<- *StreamInfo) {
 	var currentLine string
 
 	// Handle errors asynchronously
