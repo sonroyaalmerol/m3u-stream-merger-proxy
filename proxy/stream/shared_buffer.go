@@ -318,12 +318,8 @@ func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 	seq := atomic.AddInt64(&c.writeSeq, 1)
 	current.seq = seq
 
-	// Swap buffers to avoid copying.
-	// current.Buffer (the ring's buffer) is replaced with chunk.Buffer.
-	// The chunk now holds the old buffer.
-	oldBuffer := current.Buffer
-	current.Buffer = chunk.Buffer
-	chunk.Buffer = oldBuffer
+	current.Buffer.Reset()
+	_, _ = current.Buffer.Write(chunk.Buffer.Bytes())
 
 	current.Error = chunk.Error
 	current.Status = chunk.Status
