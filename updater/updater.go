@@ -3,8 +3,7 @@ package updater
 import (
 	"context"
 	"m3u-stream-merger/logger"
-	"m3u-stream-merger/store"
-	"m3u-stream-merger/utils"
+	sourceproc "m3u-stream-merger/source_processor"
 	"os"
 	"strings"
 	"sync"
@@ -32,7 +31,7 @@ func Initialize(ctx context.Context, logger logger.Logger) (*Updater, error) {
 
 	if clearOnBoot == "true" {
 		updateInstance.logger.Log("CLEAR_ON_BOOT enabled. Clearing current cache.")
-		store.ClearCache()
+		sourceproc.ClearCache()
 	}
 
 	cronSched := os.Getenv("SYNC_CRON")
@@ -76,40 +75,21 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 	case <-ctx.Done():
 		return
 	default:
-		instance.logger.Log("Background process: Checking M3U_URLs...")
-		var wg sync.WaitGroup
-
-		indexes := utils.GetM3UIndexes()
-		for _, idx := range indexes {
-			instance.logger.Logf("Background process: Fetching M3U_URL_%s...", idx)
-			wg.Add(1)
-			// Start the goroutine for periodic updates
-			go func(idx string) {
-				defer wg.Done()
-				err := store.DownloadM3USource(idx)
-				if err != nil {
-					instance.logger.Debugf("Background process: Error fetching M3U_URL_%s: %v", idx, err)
-				}
-			}(idx)
-		}
-		wg.Wait()
-
-		instance.logger.Logf("Background process: M3U fetching complete.")
-
-		store.ClearSessionStore()
+		instance.logger.Log("Background process: Updating sources...")
+		sourceproc.ClearCache()
 
 		cacheOnSync := os.Getenv("CACHE_ON_SYNC")
 		if len(strings.TrimSpace(cacheOnSync)) == 0 {
 			cacheOnSync = "false"
 		}
 
-		instance.logger.Log("Background process: Updated M3U store.")
+		instance.logger.Log("Background process: Building merged M3U...")
 		if cacheOnSync == "true" {
 			if _, ok := os.LookupEnv("BASE_URL"); !ok {
 				instance.logger.Log("BASE_URL is required for CACHE_ON_SYNC to work.")
 			}
 			instance.logger.Log("CACHE_ON_SYNC enabled. Building cache.")
-			_ = store.RevalidatingGetM3U(nil, true)
+			_ = sourceproc.RevalidatingGetM3U(nil, true)
 		}
 	}
 }

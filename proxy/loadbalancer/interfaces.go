@@ -1,7 +1,7 @@
 package loadbalancer
 
 import (
-	"m3u-stream-merger/store"
+	sourceproc "m3u-stream-merger/source_processor"
 	"net/http"
 )
 
@@ -14,5 +14,5 @@ type IndexProvider interface {
 }
 
 type SlugParser interface {
-	GetStreamBySlug(slug string) (store.StreamInfo, error)
+	GetStreamBySlug(slug string) (*sourceproc.StreamInfo, error)
 }
