@@ -14,7 +14,7 @@ type StreamConfig struct {
 }
 
 func NewDefaultStreamConfig() *StreamConfig {
-	finalBufferSize := 4
+	finalBufferSize := 8
 	finalTimeoutSeconds := 3
 
 	bufferSize, ok := os.LookupEnv("BUFFER_CHUNK_NUM")
