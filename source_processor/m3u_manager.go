@@ -3,6 +3,7 @@ package sourceproc
 import (
 	"bufio"
 	"container/heap"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -183,11 +184,57 @@ func (sc *M3UManager) finalize() {
 	finalPath := config.GetM3UCachePath()
 
 	sc.file.Close()
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		logger.Default.Errorf("Error moving cache file: %v", err)
+
+	// First try a simple rename (fastest when possible)
+	err := os.Rename(tmpPath, finalPath)
+	if err != nil {
+		if linkErr, ok := err.(*os.LinkError); ok && linkErr.Err.Error() == "invalid cross-device link" {
+			// Fall back to copy if it's a cross-device error
+			if err := copyFileContentsFast(tmpPath, finalPath); err != nil {
+				logger.Default.Errorf("Error copying cache file: %v", err)
+				return
+			}
+			// Clean up temp file after successful copy
+			os.Remove(tmpPath)
+		} else {
+			logger.Default.Errorf("Error moving cache file: %v", err)
+			return
+		}
 	}
 
 	logger.Default.Log("M3U cache has finished the revalidation process.")
+}
+
+// Optimized copy function with buffered I/O
+func copyFileContentsFast(src, dst string) error {
+	// Ensure destination directory exists
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+
+	// Open source file
+	source, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+
+	// Create destination file
+	destination, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destination.Close()
+
+	// Use a large buffer for better performance
+	buf := make([]byte, 32*1024) // 32KB buffer
+	_, err = io.CopyBuffer(destination, source, buf)
+	if err != nil {
+		return err
+	}
+
+	// Sync to ensure write is complete
+	return destination.Sync()
 }
 
 func (sc *M3UManager) cleanup() {
