@@ -398,16 +398,8 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) (
 		currentWriteSeq := atomic.LoadInt64(&c.writeSeq)
 		minSeq := currentWriteSeq - int64(c.config.SharedBufferSize)
 		if cd.seq < minSeq {
-			c.logger.Warn("ReadChunks: Client pointer is stale; " +
-				"resetting to the latest chunk and returning a stale error")
-			errorChunk := &ChunkData{
-				Buffer:    nil,
-				Error:     fmt.Errorf("data lost due to slow consumer; read pointer reset"),
-				Status:    proxy.StatusServerError,
-				Timestamp: time.Now(),
-			}
-			c.mu.RUnlock()
-			return nil, errorChunk, c.buffer
+			c.logger.Warn("ReadChunks: Client pointer is stale; resetting to the latest chunk")
+			fromPosition = c.buffer
 		}
 	}
 
