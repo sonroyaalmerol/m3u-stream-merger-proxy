@@ -389,39 +389,62 @@ func TestSortingVariations(t *testing.T) {
 	}
 }
 
-func TestMergeAttributes(t *testing.T) {
-	target := &StreamInfo{
-		TvgID:   "",
-		Title:   "",
-		Group:   "",
-		TvgChNo: "001",
-		TvgType: "defaultType",
-		LogoURL: "defaultLogo",
-		URLs:    make(map[string]map[string]string),
-	}
+func TestMergeAttributesToM3UFile(t *testing.T) {
+	m3u1 := `#EXTINF:-1 tvg-chno="010",First Channel`
+	url1 := "http://example.com/source1"
+	s1 := parseLine(m3u1, &LineDetails{Content: url1, LineNum: 1}, "M3U_Test")
+	require.NotNil(t, s1, "Failed to parse source 1")
 
-	source := &StreamInfo{
-		TvgID:   "source-id",
-		TvgChNo: "002",
-		Title:   "Source Title",
-		TvgType: "sourceType",
-		Group:   "Source Group",
-		LogoURL: "http://source/logo.png",
-		URLs:    make(map[string]map[string]string),
-	}
+	m3u2 := `#EXTINF:-1 tvg-id="id-2" tvg-chno="010" tvg-name="First Channel" tvg-type="type-2",First Channel`
+	url2 := "http://example.com/source2"
+	s2 := parseLine(m3u2, &LineDetails{Content: url2, LineNum: 2}, "M3U_Test")
+	require.NotNil(t, s2, "Failed to parse source 2")
 
-	mergeAttributes(target, source)
+	m3u3 := `#EXTINF:-1 tvg-chno="010" tvg-name="First Channel" group-title="Group-3",First Channel`
+	url3 := "http://example.com/source3"
+	s3 := parseLine(m3u3, &LineDetails{Content: url3, LineNum: 3}, "M3U_Test")
+	require.NotNil(t, s3, "Failed to parse source 3")
 
-	assert.Equal(t, "source-id", target.TvgID,
-		"TvgID should be taken from source when missing in target")
-	assert.Equal(t, "Source Title", target.Title,
-		"Title should be taken from source when missing in target")
-	assert.Equal(t, "Source Group", target.Group,
-		"Group should be taken from source when missing in target")
-	assert.Equal(t, "001", target.TvgChNo,
-		"TvgChNo should not be overwritten if already present")
-	assert.Equal(t, "defaultType", target.TvgType,
-		"TvgType should not be overwritten if already present")
-	assert.Equal(t, "defaultLogo", target.LogoURL,
-		"LogoURL should not be overwritten if already present")
+	m3u4 := `#EXTINF:-1 tvg-chno="010" tvg-name="First Channel" tvg-logo="http://logo/source4.png",First Channel`
+	url4 := "http://example.com/source4"
+	s4 := parseLine(m3u4, &LineDetails{Content: url4, LineNum: 4}, "M3U_Test")
+	require.NotNil(t, s4, "Failed to parse source 4")
+
+	m3u5 := `#EXTINF:-1 tvg-id="id-5" tvg-chno="010" tvg-name="First Channel",First Channel`
+	url5 := "http://example.com/source5"
+	s5 := parseLine(m3u5, &LineDetails{Content: url5, LineNum: 5}, "M3U_Test")
+	require.NotNil(t, s5, "Failed to parse source 5")
+
+	mergeAttributes(s1, s2) // sets tvg-id and tvg-type
+	mergeAttributes(s1, s3) // sets group (group-title)
+	mergeAttributes(s1, s4) // sets tvg-logo
+	mergeAttributes(s1, s5) // should not override tvg-id as it's already set
+
+	baseURL := "http://dummy" // base URL for stream generation
+	entry := formatStreamEntry(baseURL, s1)
+	m3uContent := "#EXTM3U\n" + entry
+
+	tempFile, err := os.CreateTemp("", "merged-*.m3u")
+	require.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	_, err = tempFile.Write([]byte(m3uContent))
+	require.NoError(t, err)
+	tempFile.Close()
+
+	contentFromFile, err := os.ReadFile(tempFile.Name())
+	require.NoError(t, err)
+	contentStr := string(contentFromFile)
+
+	parsedStreams := parseM3UContent(contentStr)
+	require.Len(t, parsedStreams, 1, "Should have one stream entry in the parsed M3U content")
+
+	parsed := parsedStreams[0]
+	assert.Equal(t, "Group-3", parsed.group, "Group should be 'Group-3'")
+	assert.Equal(t, "010", parsed.chno, "Channel number should be '010'")
+	assert.Equal(t, "First Channel", parsed.name, "Channel name should be 'First Channel'")
+
+	assert.Contains(t, contentStr, `tvg-id="id-2"`, "Should contain tvg-id from merged attributes")
+	assert.Contains(t, contentStr, `tvg-type="type-2"`, "Should contain tvg-type from merged attributes")
+	assert.Contains(t, contentStr, `tvg-logo="http://logo/source4.png"`, "Should contain tvg-logo from merged attributes")
 }
