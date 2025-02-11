@@ -141,6 +141,7 @@ func (sc *M3UManager) addStreamToCache(stream *StreamInfo) string {
 	// Check for existing stream
 	if existing, exists := shard.streams[stream.Title]; exists {
 		mergeURLs(existing, stream)
+		mergeAttributes(existing, stream)
 		return "" // No update needed for merged streams
 	}
 

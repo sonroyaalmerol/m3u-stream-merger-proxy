@@ -388,3 +388,40 @@ func TestSortingVariations(t *testing.T) {
 		})
 	}
 }
+
+func TestMergeAttributes(t *testing.T) {
+	target := &StreamInfo{
+		TvgID:   "",
+		Title:   "",
+		Group:   "",
+		TvgChNo: "001",
+		TvgType: "defaultType",
+		LogoURL: "defaultLogo",
+		URLs:    make(map[string]map[string]string),
+	}
+
+	source := &StreamInfo{
+		TvgID:   "source-id",
+		TvgChNo: "002",
+		Title:   "Source Title",
+		TvgType: "sourceType",
+		Group:   "Source Group",
+		LogoURL: "http://source/logo.png",
+		URLs:    make(map[string]map[string]string),
+	}
+
+	mergeAttributes(target, source)
+
+	assert.Equal(t, "source-id", target.TvgID,
+		"TvgID should be taken from source when missing in target")
+	assert.Equal(t, "Source Title", target.Title,
+		"Title should be taken from source when missing in target")
+	assert.Equal(t, "Source Group", target.Group,
+		"Group should be taken from source when missing in target")
+	assert.Equal(t, "001", target.TvgChNo,
+		"TvgChNo should not be overwritten if already present")
+	assert.Equal(t, "defaultType", target.TvgType,
+		"TvgType should not be overwritten if already present")
+	assert.Equal(t, "defaultLogo", target.LogoURL,
+		"LogoURL should not be overwritten if already present")
+}
