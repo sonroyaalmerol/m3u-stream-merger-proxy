@@ -57,13 +57,9 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, w http.ResponseWri
 	coordinator := h.manager.GetStreamRegistry().GetOrCreateCoordinator(streamURL)
 
 	for {
-		lbResult := coordinator.GetWriterLBResult()
-		var err error
-		if lbResult == nil {
-			lbResult, err = h.manager.LoadBalancer(ctx, r, session)
-			if err != nil {
-				return err
-			}
+		lbResult, err := h.manager.LoadBalancer(ctx, r, session)
+		if err != nil {
+			return err
 		}
 
 		resp := lbResult.Response

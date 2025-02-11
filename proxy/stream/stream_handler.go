@@ -43,8 +43,10 @@ func (h *StreamHandler) HandleStream(
 
 	h.coordinator.writerCtxMu.Lock()
 	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 0
-	if isFirstClient {
-		h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
+	if isFirstClient || atomic.LoadInt32(&h.coordinator.state) != stateActive {
+		if h.coordinator.writerCtx == nil {
+			h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
+		}
 		go h.coordinator.StartWriter(h.coordinator.writerCtx, lbResult)
 	}
 	h.coordinator.writerCtxMu.Unlock()
