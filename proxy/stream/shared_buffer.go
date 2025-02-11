@@ -133,6 +133,11 @@ func NewStreamCoordinator(
 	return coord
 }
 
+// GetWriterLBResult returns the load balancer result for the current writer call.
+func (c *StreamCoordinator) GetWriterLBResult() *loadbalancer.LoadBalancerResult {
+	return c.lbResultOnWrite.Load()
+}
+
 // RegisterClient registers a new client and returns an error if the stream
 // is no longer active.
 func (c *StreamCoordinator) RegisterClient() error {

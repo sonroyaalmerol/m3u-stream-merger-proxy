@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"time"
 
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
@@ -57,9 +58,17 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, w http.ResponseWri
 	coordinator := h.manager.GetStreamRegistry().GetOrCreateCoordinator(streamURL)
 
 	for {
-		lbResult, err := h.manager.LoadBalancer(ctx, r, session)
-		if err != nil {
-			return err
+		lbResult := coordinator.GetWriterLBResult()
+		var err error
+		if lbResult == nil {
+			h.logger.Logf("No existing shared buffer found for %s", streamURL)
+			h.logger.Logf("Client %s executing load balancer.", r.RemoteAddr)
+			lbResult, err = h.manager.LoadBalancer(ctx, r, session)
+			if err != nil {
+				return err
+			}
+		} else {
+			h.logger.Logf("Existing shared buffer found for %s", streamURL)
 		}
 
 		resp := lbResult.Response
@@ -87,6 +96,13 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, w http.ResponseWri
 				return nil
 			}
 			// Otherwise, retry with a new lbResult.
+		}
+
+		select {
+		case <-ctx.Done():
+			h.logger.Logf("Client has closed the stream: %s", r.RemoteAddr)
+			return nil
+		case <-time.After(500 * time.Millisecond):
 		}
 	}
 }
