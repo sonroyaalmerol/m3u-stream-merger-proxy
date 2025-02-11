@@ -74,6 +74,8 @@ type StreamCoordinator struct {
 	cm        *store.ConcurrencyManager
 	streamID  string
 
+	initializationMu sync.Mutex
+
 	// state represents active, draining, or closed.
 	state int32
 
@@ -165,11 +167,6 @@ func (c *StreamCoordinator) UnregisterClient() {
 // HasClient returns true if there is at least one client connected.
 func (c *StreamCoordinator) HasClient() bool {
 	return atomic.LoadInt32(&c.clientCount) > 0
-}
-
-// GetWriterLBResult returns the load balancer result for the current writer call.
-func (c *StreamCoordinator) GetWriterLBResult() *loadbalancer.LoadBalancerResult {
-	return c.lbResultOnWrite.Load()
 }
 
 // shouldTimeout checks if the time since the last successful read exceeds the timeout.

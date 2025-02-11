@@ -41,19 +41,23 @@ func (h *StreamHandler) HandleStream(
 		return StreamResult{0, fmt.Errorf("coordinator is nil"), proxy.StatusServerError}
 	}
 
-	h.coordinator.writerCtxMu.Lock()
+	h.coordinator.initializationMu.Lock()
 	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 0
-	if isFirstClient || atomic.LoadInt32(&h.coordinator.state) != stateActive {
+	if isFirstClient || h.coordinator.lbResultOnWrite.Load() == nil {
+		h.coordinator.writerCtxMu.Lock()
 		if h.coordinator.writerCtx == nil {
 			h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
 		}
+		h.coordinator.writerCtxMu.Unlock()
 		go h.coordinator.StartWriter(h.coordinator.writerCtx, lbResult)
 	}
-	h.coordinator.writerCtxMu.Unlock()
 
 	if err := h.coordinator.RegisterClient(); err != nil {
+		h.coordinator.initializationMu.Unlock()
 		return StreamResult{0, err, proxy.StatusServerError}
 	}
+	h.coordinator.initializationMu.Unlock()
+
 	h.logger.Debugf("Client registered: %s, count: %d", remoteAddr, atomic.LoadInt32(&h.coordinator.clientCount))
 
 	cleanup := func() {
