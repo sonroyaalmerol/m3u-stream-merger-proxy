@@ -17,6 +17,11 @@ import (
 	"github.com/valyala/bytebufferpool"
 )
 
+var (
+	ErrStreamClosed   = errors.New("stream is closed")
+	ErrStreamDraining = errors.New("stream is draining")
+)
+
 // ChunkData holds a chunk of streamed data along with metadata.
 type ChunkData struct {
 	Buffer    *bytebufferpool.ByteBuffer
@@ -141,12 +146,28 @@ func (c *StreamCoordinator) GetWriterLBResult() *loadbalancer.LoadBalancerResult
 // RegisterClient registers a new client and returns an error if the stream
 // is no longer active.
 func (c *StreamCoordinator) RegisterClient() error {
-	if atomic.LoadInt32(&c.state) != stateActive {
-		c.logger.Warn("Attempt to register a client on a non-active stream")
-		return errors.New("stream is closed")
+	state := atomic.LoadInt32(&c.state)
+
+	// If stream is closed but there are no clients, allow reset
+	if state == stateClosed && atomic.LoadInt32(&c.clientCount) == 0 {
+		if atomic.CompareAndSwapInt32(&c.state, stateClosed, stateActive) {
+			c.logger.Debug("Resetting closed stream to active state")
+			state = stateActive
+		}
 	}
+
+	if state != stateActive {
+		c.logger.Warn("Attempt to register client on non-active stream")
+		switch state {
+		case stateDraining:
+			return ErrStreamDraining
+		default:
+			return ErrStreamClosed
+		}
+	}
+
 	count := atomic.AddInt32(&c.clientCount, 1)
-	c.logger.Logf("Client registered (%s). Total clients: %d", c.streamID, count)
+	c.logger.Debugf("Client registered. Total clients: %d", count)
 	return nil
 }
 
