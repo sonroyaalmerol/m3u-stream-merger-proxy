@@ -172,10 +172,12 @@ func (sc *M3UManager) finalize() {
 	// Write single header
 	_, _ = sc.writer.WriteString("#EXTM3U\n")
 
-	// Write sorted entries
+	// Write sorted entries; reformat each entry with current attributes.
 	for sc.streamHeap.Len() > 0 {
 		entry := heap.Pop(&sc.streamHeap).(*M3UEntry)
-		_, _ = sc.writer.WriteString(entry.content)
+		// Reformat the entry using the latest stream info.
+		updatedEntry := formatStreamEntry(sc.baseURL, entry.streamInfo)
+		_, _ = sc.writer.WriteString(updatedEntry)
 	}
 
 	// Flush and move file
@@ -189,7 +191,8 @@ func (sc *M3UManager) finalize() {
 	// First try a simple rename (fastest when possible)
 	err := os.Rename(tmpPath, finalPath)
 	if err != nil {
-		if linkErr, ok := err.(*os.LinkError); ok && linkErr.Err.Error() == "invalid cross-device link" {
+		if linkErr, ok := err.(*os.LinkError); ok &&
+			linkErr.Err.Error() == "invalid cross-device link" {
 			// Fall back to copy if it's a cross-device error
 			if err := copyFileContentsFast(tmpPath, finalPath); err != nil {
 				logger.Default.Errorf("Error copying cache file: %v", err)
