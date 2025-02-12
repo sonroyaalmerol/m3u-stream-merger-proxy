@@ -41,17 +41,41 @@ func (h *StreamHandler) HandleStream(
 		return StreamResult{0, fmt.Errorf("coordinator is nil"), proxy.StatusServerError}
 	}
 
-	h.coordinator.writerCtxMu.Lock()
-	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 0
-	if isFirstClient {
-		h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
-		go h.coordinator.StartWriter(h.coordinator.writerCtx, lbResult)
+	// Lock the initialization (writer-start) section.
+	h.coordinator.initializationMu.Lock()
+	// Check if we have already started the writer.
+	if !h.coordinator.writerStarted {
+		// Mark the writer as started.
+		h.coordinator.writerStarted = true
+
+		h.coordinator.writerCtxMu.Lock()
+		if h.coordinator.writerCtx == nil {
+			h.coordinator.writerCtx, h.coordinator.writerCancel =
+				context.WithCancel(context.Background())
+		}
+		h.coordinator.writerCtxMu.Unlock()
+
+		h.coordinator.lastError.Store((*ChunkData)(nil))
+		h.coordinator.clearBuffer()
+
+		// Start the writer in its own goroutine.
+		go func() {
+			// When the writer stops, reset the flag.
+			defer func() {
+				h.coordinator.initializationMu.Lock()
+				h.coordinator.writerStarted = false
+				h.coordinator.initializationMu.Unlock()
+			}()
+			h.coordinator.StartWriter(h.coordinator.writerCtx, lbResult)
+		}()
 	}
-	h.coordinator.writerCtxMu.Unlock()
 
 	if err := h.coordinator.RegisterClient(); err != nil {
+		h.coordinator.initializationMu.Unlock()
 		return StreamResult{0, err, proxy.StatusServerError}
 	}
+	h.coordinator.initializationMu.Unlock()
+
 	h.logger.Debugf("Client registered: %s, count: %d", remoteAddr, atomic.LoadInt32(&h.coordinator.clientCount))
 
 	cleanup := func() {
@@ -66,7 +90,15 @@ func (h *StreamHandler) HandleStream(
 				h.coordinator.writerCancel()
 				h.coordinator.writerCancel = nil
 			}
+			h.coordinator.writerCtx = nil
 			h.coordinator.writerCtxMu.Unlock()
+
+			h.coordinator.lastError.Store((*ChunkData)(nil))
+			h.coordinator.clearBuffer()
+
+			h.coordinator.mu.Lock()
+			h.coordinator.writerChan = make(chan struct{}, 1)
+			h.coordinator.mu.Unlock()
 		}
 	}
 	defer cleanup()

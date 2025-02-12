@@ -17,6 +17,11 @@ import (
 	"github.com/valyala/bytebufferpool"
 )
 
+var (
+	ErrStreamClosed   = errors.New("stream is closed")
+	ErrStreamDraining = errors.New("stream is draining")
+)
+
 // ChunkData holds a chunk of streamed data along with metadata.
 type ChunkData struct {
 	Buffer    *bytebufferpool.ByteBuffer
@@ -59,20 +64,23 @@ const (
 
 // StreamCoordinator coordinates the ring-buffer used for streaming.
 type StreamCoordinator struct {
-	buffer       *ring.Ring
-	mu           sync.RWMutex
-	broadcast    chan struct{}
-	clientCount  int32
-	writerCtx    context.Context
-	writerCancel context.CancelFunc
-	writerChan   chan struct{}
-	writerCtxMu  sync.Mutex
+	buffer        *ring.Ring
+	mu            sync.RWMutex
+	broadcast     chan struct{}
+	clientCount   int32
+	writerStarted bool
+	writerCtx     context.Context
+	writerCancel  context.CancelFunc
+	writerChan    chan struct{}
+	writerCtxMu   sync.Mutex
 
 	lastError atomic.Value
 	logger    logger.Logger
 	config    *StreamConfig
 	cm        *store.ConcurrencyManager
 	streamID  string
+
+	initializationMu sync.Mutex
 
 	// state represents active, draining, or closed.
 	state int32
@@ -131,15 +139,24 @@ func NewStreamCoordinator(
 	return coord
 }
 
+// GetWriterLBResult returns the load balancer result for the current writer call.
+func (c *StreamCoordinator) GetWriterLBResult() *loadbalancer.LoadBalancerResult {
+	return c.lbResultOnWrite.Load()
+}
+
 // RegisterClient registers a new client and returns an error if the stream
 // is no longer active.
 func (c *StreamCoordinator) RegisterClient() error {
-	if atomic.LoadInt32(&c.state) != stateActive {
-		c.logger.Warn("Attempt to register a client on a non-active stream")
-		return errors.New("stream is closed")
+	state := atomic.LoadInt32(&c.state)
+
+	// If stream is closed but there are no clients, allow reset
+	if state != stateActive && atomic.LoadInt32(&c.clientCount) == 0 {
+		c.logger.Debug("Resetting closed stream to active state")
+		atomic.StoreInt32(&c.state, stateActive)
 	}
+
 	count := atomic.AddInt32(&c.clientCount, 1)
-	c.logger.Logf("Client registered (%s). Total clients: %d", c.streamID, count)
+	c.logger.Debugf("Client registered. Total clients: %d", count)
 	return nil
 }
 
@@ -165,11 +182,6 @@ func (c *StreamCoordinator) UnregisterClient() {
 // HasClient returns true if there is at least one client connected.
 func (c *StreamCoordinator) HasClient() bool {
 	return atomic.LoadInt32(&c.clientCount) > 0
-}
-
-// GetWriterLBResult returns the load balancer result for the current writer call.
-func (c *StreamCoordinator) GetWriterLBResult() *loadbalancer.LoadBalancerResult {
-	return c.lbResultOnWrite.Load()
 }
 
 // shouldTimeout checks if the time since the last successful read exceeds the timeout.
@@ -375,16 +387,8 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) (
 		currentWriteSeq := atomic.LoadInt64(&c.writeSeq)
 		minSeq := currentWriteSeq - int64(c.config.SharedBufferSize)
 		if cd.seq < minSeq {
-			c.logger.Warn("ReadChunks: Client pointer is stale; " +
-				"resetting to the latest chunk and returning a stale error")
-			errorChunk := &ChunkData{
-				Buffer:    nil,
-				Error:     fmt.Errorf("data lost due to slow consumer; read pointer reset"),
-				Status:    proxy.StatusServerError,
-				Timestamp: time.Now(),
-			}
-			c.mu.RUnlock()
-			return nil, errorChunk, c.buffer
+			c.logger.Warn("ReadChunks: Client pointer is stale; resetting to the latest chunk")
+			fromPosition = c.buffer
 		}
 	}
 

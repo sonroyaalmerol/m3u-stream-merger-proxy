@@ -5,19 +5,18 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"time"
 
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/loadbalancer"
-	"m3u-stream-merger/proxy/stream"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
 )
 
 type StreamHTTPHandler struct {
-	manager     ProxyInstance
-	logger      logger.Logger
-	coordinator *stream.StreamCoordinator
+	manager ProxyInstance
+	logger  logger.Logger
 }
 
 func NewStreamHTTPHandler(manager ProxyInstance, logger logger.Logger) *StreamHTTPHandler {
@@ -28,24 +27,8 @@ func NewStreamHTTPHandler(manager ProxyInstance, logger logger.Logger) *StreamHT
 }
 
 func (h *StreamHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.logger.Logf("Received request from %s for URL: %s", r.RemoteAddr, r.URL.Path)
-	streamURL := h.extractStreamURL(r.URL.Path)
-	if streamURL == "" {
-		h.logger.Logf("Invalid m3uID for request from %s: %s",
-			r.RemoteAddr, r.URL.Path)
-		http.NotFound(w, r)
-		return
-	}
-
-	h.coordinator = h.manager.GetStreamRegistry().GetOrCreateCoordinator(streamURL)
-	if h.coordinator == nil {
-		h.logger.Logf("Error handling stream %s: stream URL invalid", streamURL)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
 	if err := h.handleStream(r.Context(), w, r); err != nil {
-		h.logger.Logf("Error handling stream %s: %v", streamURL, err)
+		h.logger.Logf("Error handling stream: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }
@@ -61,17 +44,31 @@ func (h *StreamHTTPHandler) extractStreamURL(urlPath string) string {
 
 func (h *StreamHTTPHandler) handleStream(ctx context.Context, w http.ResponseWriter,
 	r *http.Request) error {
+	h.logger.Logf("Received request from %s for URL: %s", r.RemoteAddr, r.URL.Path)
+	streamURL := h.extractStreamURL(r.URL.Path)
+	if streamURL == "" {
+		h.logger.Logf("Invalid m3uID for request from %s: %s",
+			r.RemoteAddr, r.URL.Path)
+		http.NotFound(w, r)
+	}
+
 	session := store.GetOrCreateSession(r)
 	firstWrite := true
 
+	coordinator := h.manager.GetStreamRegistry().GetOrCreateCoordinator(streamURL)
+
 	for {
-		lbResult := h.coordinator.GetWriterLBResult()
+		lbResult := coordinator.GetWriterLBResult()
 		var err error
 		if lbResult == nil {
+			h.logger.Logf("No existing shared buffer found for %s", streamURL)
+			h.logger.Logf("Client %s executing load balancer.", r.RemoteAddr)
 			lbResult, err = h.manager.LoadBalancer(ctx, r, session)
 			if err != nil {
 				return err
 			}
+		} else {
+			h.logger.Logf("Existing shared buffer found for %s", streamURL)
 		}
 
 		resp := lbResult.Response
@@ -86,7 +83,7 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, w http.ResponseWri
 		proxyCtx, cancel := context.WithCancel(ctx)
 		go func() {
 			defer cancel()
-			h.manager.ProxyStream(proxyCtx, h.coordinator, lbResult, r, w,
+			h.manager.ProxyStream(proxyCtx, coordinator, lbResult, r, w,
 				exitStatus)
 		}()
 
@@ -99,6 +96,13 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, w http.ResponseWri
 				return nil
 			}
 			// Otherwise, retry with a new lbResult.
+		}
+
+		select {
+		case <-ctx.Done():
+			h.logger.Logf("Client has closed the stream: %s", r.RemoteAddr)
+			return nil
+		case <-time.After(500 * time.Millisecond):
 		}
 	}
 }
