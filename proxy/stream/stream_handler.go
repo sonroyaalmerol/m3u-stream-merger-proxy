@@ -72,6 +72,7 @@ func (h *StreamHandler) HandleStream(
 				h.coordinator.writerCancel()
 				h.coordinator.writerCancel = nil
 			}
+			h.coordinator.writerCtx = nil
 			h.coordinator.writerCtxMu.Unlock()
 		}
 	}
