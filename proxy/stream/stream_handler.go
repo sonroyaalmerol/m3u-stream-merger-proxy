@@ -81,6 +81,10 @@ func (h *StreamHandler) HandleStream(
 
 			h.coordinator.lastError.Store((*ChunkData)(nil))
 			h.coordinator.clearBuffer()
+
+			h.coordinator.mu.Lock()
+			h.coordinator.writerChan = make(chan struct{}, 1)
+			h.coordinator.mu.Unlock()
 		}
 	}
 	defer cleanup()
