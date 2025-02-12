@@ -70,7 +70,6 @@ type M3UManager struct {
 	file             *os.File
 	writer           *bufio.Writer
 	streamHeap       M3UHeap
-	entryCount       int
 	heapEntries      map[string]*M3UEntry
 }
 
