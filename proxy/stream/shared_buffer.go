@@ -64,14 +64,15 @@ const (
 
 // StreamCoordinator coordinates the ring-buffer used for streaming.
 type StreamCoordinator struct {
-	buffer       *ring.Ring
-	mu           sync.RWMutex
-	broadcast    chan struct{}
-	clientCount  int32
-	writerCtx    context.Context
-	writerCancel context.CancelFunc
-	writerChan   chan struct{}
-	writerCtxMu  sync.Mutex
+	buffer        *ring.Ring
+	mu            sync.RWMutex
+	broadcast     chan struct{}
+	clientCount   int32
+	writerStarted bool
+	writerCtx     context.Context
+	writerCancel  context.CancelFunc
+	writerChan    chan struct{}
+	writerCtxMu   sync.Mutex
 
 	lastError atomic.Value
 	logger    logger.Logger

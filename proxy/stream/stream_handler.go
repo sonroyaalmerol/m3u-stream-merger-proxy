@@ -41,19 +41,33 @@ func (h *StreamHandler) HandleStream(
 		return StreamResult{0, fmt.Errorf("coordinator is nil"), proxy.StatusServerError}
 	}
 
+	// Lock the initialization (writer-start) section.
 	h.coordinator.initializationMu.Lock()
-	isFirstClient := atomic.LoadInt32(&h.coordinator.clientCount) == 0
-	if isFirstClient || h.coordinator.lbResultOnWrite.Load() == nil {
+	// Check if we have already started the writer.
+	if !h.coordinator.writerStarted {
+		// Mark the writer as started.
+		h.coordinator.writerStarted = true
+
 		h.coordinator.writerCtxMu.Lock()
 		if h.coordinator.writerCtx == nil {
-			h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
+			h.coordinator.writerCtx, h.coordinator.writerCancel =
+				context.WithCancel(context.Background())
 		}
 		h.coordinator.writerCtxMu.Unlock()
 
 		h.coordinator.lastError.Store((*ChunkData)(nil))
 		h.coordinator.clearBuffer()
 
-		go h.coordinator.StartWriter(h.coordinator.writerCtx, lbResult)
+		// Start the writer in its own goroutine.
+		go func() {
+			// When the writer stops, reset the flag.
+			defer func() {
+				h.coordinator.initializationMu.Lock()
+				h.coordinator.writerStarted = false
+				h.coordinator.initializationMu.Unlock()
+			}()
+			h.coordinator.StartWriter(h.coordinator.writerCtx, lbResult)
+		}()
 	}
 
 	if err := h.coordinator.RegisterClient(); err != nil {
