@@ -152,7 +152,6 @@ func (c *StreamCoordinator) RegisterClient() error {
 	if state != stateActive && atomic.LoadInt32(&c.clientCount) == 0 {
 		c.logger.Debug("Resetting closed stream to active state")
 		atomic.StoreInt32(&c.state, stateActive)
-		c.lastError.Store((*ChunkData)(nil))
 	}
 
 	count := atomic.AddInt32(&c.clientCount, 1)

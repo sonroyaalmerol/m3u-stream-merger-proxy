@@ -49,6 +49,10 @@ func (h *StreamHandler) HandleStream(
 			h.coordinator.writerCtx, h.coordinator.writerCancel = context.WithCancel(context.Background())
 		}
 		h.coordinator.writerCtxMu.Unlock()
+
+		h.coordinator.lastError.Store((*ChunkData)(nil))
+		h.coordinator.clearBuffer()
+
 		go h.coordinator.StartWriter(h.coordinator.writerCtx, lbResult)
 	}
 
@@ -74,6 +78,9 @@ func (h *StreamHandler) HandleStream(
 			}
 			h.coordinator.writerCtx = nil
 			h.coordinator.writerCtxMu.Unlock()
+
+			h.coordinator.lastError.Store((*ChunkData)(nil))
+			h.coordinator.clearBuffer()
 		}
 	}
 	defer cleanup()
