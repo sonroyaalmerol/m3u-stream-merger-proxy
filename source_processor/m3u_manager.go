@@ -27,20 +27,37 @@ type M3UEntry struct {
 }
 
 // M3UHeap implements heap.Interface
+// M3UHeap implements heap.Interface
 type M3UHeap []*M3UEntry
 
 func (h M3UHeap) Len() int { return len(h) }
+
 func (h M3UHeap) Less(i, j int) bool {
 	return getSortFunction(sortingKey, sortingDir)(h[i].streamInfo, h[j].streamInfo, "", "")
 }
-func (h M3UHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *M3UHeap) Push(x interface{}) { *h = append(*h, x.(*M3UEntry)) }
+
+func (h M3UHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	// Update each entry’s index
+	h[i].index = i
+	h[j].index = j
+}
+
+func (h *M3UHeap) Push(x interface{}) {
+	entry := x.(*M3UEntry)
+	// Set the new element's index to the new length before appending.
+	entry.index = len(*h)
+	*h = append(*h, entry)
+}
+
 func (h *M3UHeap) Pop() interface{} {
 	old := *h
 	n := len(old)
-	x := old[n-1]
+	entry := old[n-1]
+	// Invalidate the index of the popped element.
+	entry.index = -1
 	*h = old[0 : n-1]
-	return x
+	return entry
 }
 
 // M3UManager manages stream entries with sorting
@@ -54,6 +71,7 @@ type M3UManager struct {
 	writer           *bufio.Writer
 	streamHeap       M3UHeap
 	entryCount       int
+	heapEntries      map[string]*M3UEntry
 }
 
 func NewM3UManager(r *http.Request) *M3UManager {
@@ -73,8 +91,8 @@ func NewM3UManager(r *http.Request) *M3UManager {
 		file:             file,
 		writer:           bufio.NewWriter(file),
 		streamHeap:       make(M3UHeap, 0),
+		heapEntries:      make(map[string]*M3UEntry),
 	}
-
 	heap.Init(&cache.streamHeap)
 
 	// Write initial M3U header
@@ -138,27 +156,36 @@ func (sc *M3UManager) addStreamToCache(stream *StreamInfo) string {
 	shard.Lock()
 	defer shard.Unlock()
 
-	// Check for existing stream
+	// Check if a stream with the same title already exists.
 	if existing, exists := shard.streams[stream.Title]; exists {
+		// Merge new data into the existing stream.
 		mergeURLs(existing, stream)
 		mergeAttributes(existing, stream)
-		return "" // No update needed for merged streams
+		// If we have a corresponding heap entry, update its content and reheapify.
+		if heapEntry, ok := sc.heapEntries[stream.Title]; ok {
+			heapEntry.content = formatStreamEntry(sc.baseURL, existing)
+			heap.Fix(&sc.streamHeap, heapEntry.index)
+		}
+		return ""
 	}
 
-	// Add new stream
+	// Otherwise, add the new stream.
 	shard.streams[stream.Title] = stream
 	sc.streamCount.Add(1)
 
-	// Format and add entry to heap
-	entry := formatStreamEntry(sc.baseURL, stream)
-	heap.Push(&sc.streamHeap, &M3UEntry{
-		content:    entry,
+	entryStr := formatStreamEntry(sc.baseURL, stream)
+	newEntry := &M3UEntry{
+		content:    entryStr,
 		streamInfo: stream,
-		index:      sc.entryCount,
-	})
-	sc.entryCount++
+		// The index will be set inside Push.
+	}
 
-	return entry
+	// Push the new entry onto the heap.
+	heap.Push(&sc.streamHeap, newEntry)
+	// Save the pointer to this entry in the mapping.
+	sc.heapEntries[stream.Title] = newEntry
+
+	return entryStr
 }
 
 func (sc *M3UManager) finalize() {
