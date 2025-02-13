@@ -20,50 +20,62 @@ type M3UCache struct {
 var M3uCache = &M3UCache{}
 
 func RevalidatingGetM3U(r *http.Request, force bool) string {
-	// Get current cache pointer atomically
+	// Grab the current cache if it exists.
 	currentCache := M3uCache.cache.Load()
 
-	// Check if we can use existing cache
-	if !force && currentCache != nil {
-		if !currentCache.IsProcessing() {
-			return readCacheFromFile()
+	// If there is an existing cache, check if it’s still being processed.
+	if currentCache != nil {
+		if currentCache.IsProcessing() {
+			// Wait until initial revalidation is complete.
+			<-currentCache.initialDone
 		}
-		return currentCache.GetCurrentContent()
+		return readCacheFromFile()
 	}
 
-	// Create new cache and start processing
+	// No cache exists yet ➜ create a new one.
 	newCache := NewM3UManager(r)
+	if newCache == nil {
+		return "#EXTM3U\n"
+	}
+
 	if force {
-		if err := os.Remove(config.GetM3UCachePath()); err != nil && !os.IsNotExist(err) {
+		// For forced revalidation remove the previous file.
+		if err := os.Remove(config.GetM3UCachePath()); err != nil &&
+			!os.IsNotExist(err) {
 			logger.Default.Errorf("Error removing existing cache: %v", err)
 		}
 		M3uCache.cache.Store(newCache)
 	} else {
+		// If another goroutine raced and created one, use that.
 		if !M3uCache.cache.CompareAndSwap(nil, newCache) {
-			// Another thread already created a cache, use that one
-			return M3uCache.cache.Load().GetCurrentContent()
+			currentCache = M3uCache.cache.Load()
+			if currentCache != nil && currentCache.IsProcessing() {
+				<-currentCache.initialDone
+			}
+			return readCacheFromFile()
 		}
 	}
 
-	// Initialize processing
-	logger.Default.Log("Starting M3U cache processing...")
-	go func() {
-		processCount := 0
-		updates := newCache.processM3UsInRealTime()
-		for range updates {
-			processCount++
-			batch := int(math.Pow(10, math.Floor(math.Log10(float64(processCount)))))
-			if batch < 100 {
-				batch = 100
-			}
-			if processCount%batch == 0 {
-				logger.Default.Logf("Processed %d streams so far", processCount)
-			}
-		}
-		logger.Default.Logf("Completed processing %d total streams", processCount)
-	}()
+	logger.Default.Log("Starting initial M3U cache processing...")
 
-	return newCache.GetCurrentContent()
+	// Trigger processing synchronously here.
+	updates := newCache.processM3UsInRealTime()
+	// Block until the update channel is closed (i.e. revalidation is complete).
+	processCount := 0
+	for range updates {
+		processCount++
+		batch := int(math.Pow(10, math.Floor(math.Log10(float64(processCount)))))
+		if batch < 100 {
+			batch = 100
+		}
+		if processCount%batch == 0 {
+			logger.Default.Logf("Processed %d streams so far", processCount)
+		}
+	}
+	logger.Default.Logf("Completed processing %d total streams", processCount)
+
+	// At this point the initial revalidation is finished.
+	return readCacheFromFile()
 }
 
 // GetCurrentStreams returns a map of all currently processed streams
