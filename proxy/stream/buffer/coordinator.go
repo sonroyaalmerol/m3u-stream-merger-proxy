@@ -64,16 +64,15 @@ const (
 )
 
 type StreamCoordinator struct {
-	Buffer        *ring.Ring
-	Mu            sync.RWMutex
-	broadcast     chan struct{}
-	ClientCount   int32
-	WriterCtx     context.Context
-	WriterCancel  context.CancelFunc
-	WriterChan    chan struct{}
-	WriterCtxMu   sync.Mutex
-	WriterActive  atomic.Bool
-	WriterStarted bool
+	Buffer       *ring.Ring
+	Mu           sync.RWMutex
+	broadcast    chan struct{}
+	ClientCount  int32
+	WriterCtx    context.Context
+	WriterCancel context.CancelFunc
+	WriterChan   chan struct{}
+	WriterCtxMu  sync.Mutex
+	WriterActive atomic.Bool
 
 	LastError atomic.Value
 	logger    logger.Logger
@@ -175,24 +174,6 @@ func (c *StreamCoordinator) UnregisterClient() {
 		c.ClearBuffer()
 		c.notifySubscribers()
 	}
-}
-
-func (c *StreamCoordinator) initiateShutdown() {
-	if !atomic.CompareAndSwapInt32(&c.state, stateActive, stateDraining) {
-		return // Already draining or closed
-	}
-
-	c.WriterCtxMu.Lock()
-	if c.WriterCancel != nil {
-		c.WriterCancel()
-		c.WriterCancel = nil
-	}
-	c.WriterCtxMu.Unlock()
-
-	c.WriterActive.Store(false)
-	c.ClearBuffer()
-	atomic.StoreInt32(&c.state, stateClosed)
-	c.notifySubscribers()
 }
 
 func (c *StreamCoordinator) HasClient() bool {

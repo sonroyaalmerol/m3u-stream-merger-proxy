@@ -47,9 +47,9 @@ func (h *StreamHandler) HandleStream(
 	// Lock the initialization (writer-start) section.
 	h.coordinator.InitializationMu.Lock()
 	// Check if we have already started the writer.
-	if !h.coordinator.WriterStarted {
+	if !h.coordinator.WriterActive.Load() {
 		// Mark the writer as started.
-		h.coordinator.WriterStarted = true
+		h.coordinator.WriterActive.Store(true)
 
 		h.coordinator.WriterCtxMu.Lock()
 		if h.coordinator.WriterCtx == nil {
@@ -65,7 +65,7 @@ func (h *StreamHandler) HandleStream(
 			// When the writer stops, reset the flag.
 			defer func() {
 				h.coordinator.InitializationMu.Lock()
-				h.coordinator.WriterStarted = false
+				h.coordinator.WriterActive.Store(false)
 				h.coordinator.InitializationMu.Unlock()
 			}()
 			if utils.IsAnM3U8Media(lbResult.Response) {

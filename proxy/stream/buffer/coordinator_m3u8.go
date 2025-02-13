@@ -47,7 +47,6 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 		c.logger.Warn("Writer already active, aborting start")
 		return
 	}
-	defer c.WriterActive.Store(false)
 
 	c.LBResultOnWrite.Store(lbResult)
 	c.logger.Debug("StartHLSWriter: Beginning read loop")
