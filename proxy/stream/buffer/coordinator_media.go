@@ -19,11 +19,6 @@ func (c *StreamCoordinator) StartMediaWriter(ctx context.Context, lbResult *load
 	}()
 	defer lbResult.Response.Body.Close()
 
-	if !c.WriterActive.CompareAndSwap(false, true) {
-		c.logger.Warn("Writer already active, aborting start")
-		return
-	}
-
 	c.LBResultOnWrite.Store(lbResult)
 	c.logger.Debug("StartMediaWriter: Beginning read loop")
 
