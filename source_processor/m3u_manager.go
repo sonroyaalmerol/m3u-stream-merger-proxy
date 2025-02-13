@@ -71,6 +71,8 @@ type M3UManager struct {
 	writer           *bufio.Writer
 	streamHeap       M3UHeap
 	heapEntries      map[string]*M3UEntry
+	initialDone      chan struct{}
+	initialOnce      sync.Once
 }
 
 func NewM3UManager(r *http.Request) *M3UManager {
@@ -91,6 +93,7 @@ func NewM3UManager(r *http.Request) *M3UManager {
 		writer:           bufio.NewWriter(file),
 		streamHeap:       make(M3UHeap, 0),
 		heapEntries:      make(map[string]*M3UEntry),
+		initialDone:      make(chan struct{}),
 	}
 	heap.Init(&cache.streamHeap)
 
@@ -233,6 +236,11 @@ func (sc *M3UManager) finalize() {
 	}
 
 	logger.Default.Log("M3U cache has finished the revalidation process.")
+
+	// Signal that the initial revalidation is complete.
+	sc.initialOnce.Do(func() {
+		close(sc.initialDone)
+	})
 }
 
 // Optimized copy function with buffered I/O
