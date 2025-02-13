@@ -387,7 +387,7 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) (
 		currentWriteSeq := atomic.LoadInt64(&c.writeSeq)
 		minSeq := currentWriteSeq - int64(c.config.SharedBufferSize)
 		if cd.seq < minSeq {
-			c.logger.Warn("ReadChunks: Client pointer is stale; resetting to the latest chunk")
+			c.logger.Debug("ReadChunks: Client pointer is stale; resetting to the latest chunk")
 			fromPosition = c.buffer
 		}
 	}
