@@ -171,6 +171,7 @@ func TestRevalidatingGetM3U(t *testing.T) {
 	cleanup := setupTestEnvironment(t)
 	defer cleanup()
 
+	// Subtests for RevalidatingGetM3U.
 	tests := []struct {
 		name          string
 		force         bool
@@ -185,13 +186,16 @@ func TestRevalidatingGetM3U(t *testing.T) {
 			sortingKey: "",
 			sortingDir: "asc",
 			setup: func(t *testing.T) {
+				// Clear any existing cache before running this test.
+				if cache := M3uCache.cache.Load(); cache != nil {
+					cache.processedStreams.clear()
+				}
 				M3uCache.cache.Store(nil)
 			},
 			validateOrder: func(t *testing.T, streams []testStreamInfo) {
-				// Verify all streams are present
+				// Verify all streams are present.
 				assert.Equal(t, 15, len(streams), "Should have 15 channels")
-
-				// Verify groups are present
+				// Verify all expected groups appear.
 				groups := make(map[string]bool)
 				for _, s := range streams {
 					groups[s.group] = true
@@ -208,25 +212,30 @@ func TestRevalidatingGetM3U(t *testing.T) {
 			sortingKey: "tvg-chno",
 			sortingDir: "asc",
 			setup: func(t *testing.T) {
+				// Set the sorting environment variables.
 				os.Setenv("SORTING_KEY", "tvg-chno")
 				os.Setenv("SORTING_DIRECTION", "asc")
+				// Clear the global cache so a new M3UManager is generated.
+				if cache := M3uCache.cache.Load(); cache != nil {
+					cache.processedStreams.clear()
+				}
+				M3uCache.cache.Store(nil)
 			},
 			validateOrder: func(t *testing.T, streams []testStreamInfo) {
-				// Convert to numbers and verify they're in ascending order
+				// Verify that channel numbers are in ascending order.
 				var numbers []int
 				for _, s := range streams {
 					num, err := strconv.Atoi(s.chno)
 					require.NoError(t, err)
 					numbers = append(numbers, num)
 				}
-
 				for i := 1; i < len(numbers); i++ {
 					assert.GreaterOrEqual(t, numbers[i], numbers[i-1],
 						"Channel numbers should be in ascending order, got %d after %d",
 						numbers[i], numbers[i-1])
 				}
 
-				// Also verify we have all expected numbers
+				// Also verify we have all the expected numbers.
 				expectedNumbers := []int{1, 2, 100, 101, 200, 201, 300, 301, 400, 401, 500, 501, 600, 601, 602}
 				sort.Ints(numbers)
 				assert.Equal(t, expectedNumbers, numbers, "Should have all expected channel numbers in order")
@@ -238,15 +247,23 @@ func TestRevalidatingGetM3U(t *testing.T) {
 			sortingKey: "tvg-group",
 			sortingDir: "asc",
 			setup: func(t *testing.T) {
+				// Set group sorting to ascending.
 				os.Setenv("SORTING_KEY", "tvg-group")
 				os.Setenv("SORTING_DIRECTION", "asc")
+				// Clear the global cache.
+				if cache := M3uCache.cache.Load(); cache != nil {
+					cache.processedStreams.clear()
+				}
+				M3uCache.cache.Store(nil)
 			},
 			validateOrder: func(t *testing.T, streams []testStreamInfo) {
-				// Groups should be in alphabetical order
+				// Check that the groups are sorted alphabetically.
 				lastGroup := ""
 				for _, s := range streams {
-					assert.GreaterOrEqual(t, strings.Compare(s.group, lastGroup), 0,
-						"Groups should be in alphabetical order, got %s after %s", s.group, lastGroup)
+					cmp := strings.Compare(s.group, lastGroup)
+					assert.GreaterOrEqual(t, cmp, 0,
+						"Groups should be in alphabetical order, got %s after %s",
+						s.group, lastGroup)
 					lastGroup = s.group
 				}
 			},
@@ -257,23 +274,18 @@ func TestRevalidatingGetM3U(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.setup(t)
 
-			// Make request to start processing
+			// Generate a new cache (force regeneration if needed).
 			req := httptest.NewRequest(http.MethodGet, "http://example.com", nil)
 			RevalidatingGetM3U(req, tt.force)
 
-			// Wait for cache to complete
+			// Wait for the cache processing to complete.
 			waitForCache(t, 5*time.Second)
 
-			// Read final cache file
+			// Read the generated M3U file.
 			content, err := os.ReadFile(config.GetM3UCachePath())
 			require.NoError(t, err)
-			contentStr := string(content)
+			streams := parseM3UContent(string(content))
 
-			// Basic validation
-			assert.Contains(t, contentStr, "#EXTM3U")
-
-			// Parse content and validate order
-			streams := parseM3UContent(contentStr)
 			tt.validateOrder(t, streams)
 		})
 	}
@@ -347,7 +359,8 @@ func TestSortingVariations(t *testing.T) {
 				channels := []string{"BBC News", "CNN US", "Discovery Channel", "Disney Channel"}
 				for _, channel := range channels {
 					idx := strings.Index(content, channel)
-					assert.Greater(t, idx, lastFoundIdx)
+					assert.Greater(t, idx, lastFoundIdx,
+						"channel %s should come after previous channel", channel)
 					lastFoundIdx = idx
 				}
 			},
@@ -361,7 +374,8 @@ func TestSortingVariations(t *testing.T) {
 				lastFoundIdx := -1
 				for _, num := range numbers {
 					idx := strings.Index(content, fmt.Sprintf(`tvg-chno="%s"`, num))
-					assert.Greater(t, idx, lastFoundIdx)
+					assert.Greater(t, idx, lastFoundIdx,
+						"channel number %s should appear before a lower one", num)
 					lastFoundIdx = idx
 				}
 			},
@@ -370,21 +384,87 @@ func TestSortingVariations(t *testing.T) {
 
 	for _, tt := range sortingTests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Set sorting environment variables
+			// Set sorting environment variables.
 			os.Setenv("SORTING_KEY", tt.key)
 			os.Setenv("SORTING_DIRECTION", tt.direction)
 
-			// Generate new cache
+			// Clear the global cache to force a new M3UManager creation.
+			if cache := M3uCache.cache.Load(); cache != nil {
+				cache.processedStreams.clear()
+			}
+			M3uCache.cache.Store(nil)
+
+			// Generate new cache.
 			req := httptest.NewRequest(http.MethodGet, "http://example.com", nil)
 			RevalidatingGetM3U(req, true)
 
-			// Wait for cache to complete
+			// Wait for cache processing to be completed.
 			waitForCache(t, 5*time.Second)
 
-			// Read and validate content
+			// Read the final cache file and validate its content.
 			content, err := os.ReadFile(config.GetM3UCachePath())
 			require.NoError(t, err)
 			tt.validate(t, string(content))
 		})
 	}
+}
+
+func TestMergeAttributesToM3UFile(t *testing.T) {
+	m3u1 := `#EXTINF:-1 tvg-chno="010",First Channel`
+	url1 := "http://example.com/source1"
+	s1 := parseLine(m3u1, &LineDetails{Content: url1, LineNum: 1}, "M3U_Test")
+	require.NotNil(t, s1, "Failed to parse source 1")
+
+	m3u2 := `#EXTINF:-1 tvg-id="id-2" tvg-chno="010" tvg-name="First Channel" tvg-type="type-2",First Channel`
+	url2 := "http://example.com/source2"
+	s2 := parseLine(m3u2, &LineDetails{Content: url2, LineNum: 2}, "M3U_Test")
+	require.NotNil(t, s2, "Failed to parse source 2")
+
+	m3u3 := `#EXTINF:-1 tvg-chno="010" tvg-name="First Channel" group-title="Group-3",First Channel`
+	url3 := "http://example.com/source3"
+	s3 := parseLine(m3u3, &LineDetails{Content: url3, LineNum: 3}, "M3U_Test")
+	require.NotNil(t, s3, "Failed to parse source 3")
+
+	m3u4 := `#EXTINF:-1 tvg-chno="010" tvg-name="First Channel" tvg-logo="http://logo/source4.png",First Channel`
+	url4 := "http://example.com/source4"
+	s4 := parseLine(m3u4, &LineDetails{Content: url4, LineNum: 4}, "M3U_Test")
+	require.NotNil(t, s4, "Failed to parse source 4")
+
+	m3u5 := `#EXTINF:-1 tvg-id="id-5" tvg-chno="010" tvg-name="First Channel",First Channel`
+	url5 := "http://example.com/source5"
+	s5 := parseLine(m3u5, &LineDetails{Content: url5, LineNum: 5}, "M3U_Test")
+	require.NotNil(t, s5, "Failed to parse source 5")
+
+	mergeAttributes(s1, s2) // sets tvg-id and tvg-type
+	mergeAttributes(s1, s3) // sets group (group-title)
+	mergeAttributes(s1, s4) // sets tvg-logo
+	mergeAttributes(s1, s5) // should not override tvg-id as it's already set
+
+	baseURL := "http://dummy" // base URL for stream generation
+	entry := formatStreamEntry(baseURL, s1)
+	m3uContent := "#EXTM3U\n" + entry
+
+	tempFile, err := os.CreateTemp("", "merged-*.m3u")
+	require.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	_, err = tempFile.Write([]byte(m3uContent))
+	require.NoError(t, err)
+	tempFile.Close()
+
+	contentFromFile, err := os.ReadFile(tempFile.Name())
+	require.NoError(t, err)
+	contentStr := string(contentFromFile)
+
+	parsedStreams := parseM3UContent(contentStr)
+	require.Len(t, parsedStreams, 1, "Should have one stream entry in the parsed M3U content")
+
+	parsed := parsedStreams[0]
+	assert.Equal(t, "Group-3", parsed.group, "Group should be 'Group-3'")
+	assert.Equal(t, "010", parsed.chno, "Channel number should be '010'")
+	assert.Equal(t, "First Channel", parsed.name, "Channel name should be 'First Channel'")
+
+	assert.Contains(t, contentStr, `tvg-id="id-2"`, "Should contain tvg-id from merged attributes")
+	assert.Contains(t, contentStr, `tvg-type="type-2"`, "Should contain tvg-type from merged attributes")
+	assert.Contains(t, contentStr, `tvg-logo="http://logo/source4.png"`, "Should contain tvg-logo from merged attributes")
 }

@@ -44,24 +44,46 @@ func (h *StreamHandler) HandleStream(
 		return StreamResult{0, fmt.Errorf("coordinator is nil"), proxy.StatusServerError}
 	}
 
+	// Lock the initialization (writer-start) section.
+	h.coordinator.InitializationMu.Lock()
+	// Check if we have already started the writer.
+	if !h.coordinator.WriterStarted {
+		// Mark the writer as started.
+		h.coordinator.WriterStarted = true
+
+		h.coordinator.WriterCtxMu.Lock()
+		if h.coordinator.WriterCtx == nil {
+			h.coordinator.WriterCtx, h.coordinator.WriterCancel = context.WithCancel(context.Background())
+		}
+		h.coordinator.WriterCtxMu.Unlock()
+
+		h.coordinator.LastError.Store((*buffer.ChunkData)(nil))
+		h.coordinator.ClearBuffer()
+
+		// Start the writer in its own goroutine.
+		go func() {
+			// When the writer stops, reset the flag.
+			defer func() {
+				h.coordinator.InitializationMu.Lock()
+				h.coordinator.WriterStarted = false
+				h.coordinator.InitializationMu.Unlock()
+			}()
+			if utils.IsAnM3U8Media(lbResult.Response) {
+				h.coordinator.StartHLSWriter(h.coordinator.WriterCtx, lbResult, writer)
+			} else {
+				writer.WriteHeader(lbResult.Response.StatusCode)
+				h.coordinator.StartMediaWriter(h.coordinator.WriterCtx, lbResult)
+			}
+		}()
+	}
+
 	if err := h.coordinator.RegisterClient(); err != nil {
+		h.coordinator.InitializationMu.Unlock()
 		return StreamResult{0, err, proxy.StatusServerError}
 	}
+	h.coordinator.InitializationMu.Unlock()
+
 	h.logger.Debugf("Client registered: %s, count: %d", remoteAddr, atomic.LoadInt32(&h.coordinator.ClientCount))
-
-	h.coordinator.WriterCtxMu.Lock()
-	isFirstClient := atomic.LoadInt32(&h.coordinator.ClientCount) == 1
-	if isFirstClient {
-		h.coordinator.WriterCtx, h.coordinator.WriterCancel = context.WithCancel(context.Background())
-
-		if utils.IsAnM3U8Media(lbResult.Response) {
-			go h.coordinator.StartHLSWriter(h.coordinator.WriterCtx, lbResult, writer)
-		} else {
-			writer.WriteHeader(lbResult.Response.StatusCode)
-			go h.coordinator.StartMediaWriter(h.coordinator.WriterCtx, lbResult)
-		}
-	}
-	h.coordinator.WriterCtxMu.Unlock()
 
 	cleanup := func() {
 		h.coordinator.UnregisterClient()
@@ -76,7 +98,15 @@ func (h *StreamHandler) HandleStream(
 				h.coordinator.WriterCancel = nil
 				h.coordinator.WriterCtx = nil
 			}
+			h.coordinator.WriterCtx = nil
 			h.coordinator.WriterCtxMu.Unlock()
+
+			h.coordinator.LastError.Store((*buffer.ChunkData)(nil))
+			h.coordinator.ClearBuffer()
+
+			h.coordinator.Mu.Lock()
+			h.coordinator.WriterChan = make(chan struct{}, 1)
+			h.coordinator.Mu.Unlock()
 		}
 	}
 	defer cleanup()
