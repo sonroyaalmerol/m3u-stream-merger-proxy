@@ -63,7 +63,7 @@ func (h *M3UHTTPHandler) parseCredentials(raw string) [][]string {
 	for _, item := range strings.Split(raw, "|") {
 		cred := strings.Split(item, ":")
 		if len(cred) == 3 {
-			if d, err := time.Parse(time.DateOnly, cred[2]); err != nil {
+			if d, err := time.ParseInLocation(time.DateOnly, cred[2], time.Local); err != nil {
 				h.logger.Warnf("invalid credential format: %s", item)
 				continue
 			} else if time.Now().After(d) {
