@@ -137,9 +137,6 @@ func (p *M3UProcessor) addStream(stream *StreamInfo) error {
 		return nil
 	}
 
-	p.Lock()
-	defer p.Unlock()
-
 	p.streamCount.Add(1)
 
 	return p.sortingMgr.AddToSorter(stream)
