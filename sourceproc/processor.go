@@ -144,12 +144,11 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 			go func() {
 				defer wgWorkers.Done()
 				for stream := range streamCh {
-					if err := p.addStream(stream); err != nil {
-						select {
-						case errors <- err:
-						default:
-							logger.Default.Errorf("Error channel full, dropping error: %v", err)
-						}
+					err := p.addStream(stream)
+					select {
+					case errors <- err:
+					default:
+						logger.Default.Errorf("Error channel full, dropping error: %v", err)
 					}
 				}
 			}()
