@@ -149,10 +149,16 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 	p.Lock()
 	defer p.Unlock()
 
-	p.writer.WriteString("#EXTM3U\n")
+	_, err := p.writer.WriteString("#EXTM3U\n")
+	if err != nil {
+		logger.Default.Errorf("Error writing to M3U file: %v", err)
+	}
 
-	err := p.sortingMgr.GetSortedEntries(func(entry *StreamInfo) {
-		p.writer.WriteString(formatStreamEntry(baseURL, entry))
+	err = p.sortingMgr.GetSortedEntries(func(entry *StreamInfo) {
+		_, writeErr := p.writer.WriteString(formatStreamEntry(baseURL, entry))
+		if writeErr != nil {
+			logger.Default.Errorf("Error writing to M3U file: %v", err)
+		}
 	})
 	if err != nil {
 		logger.Default.Errorf("Error streaming sorted entries: %v", err)

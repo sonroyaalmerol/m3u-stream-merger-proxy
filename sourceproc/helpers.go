@@ -55,21 +55,6 @@ func GenerateStreamURL(baseUrl string, stream *StreamInfo) string {
 	return fmt.Sprintf("%s/p/stream/%s", baseUrl, EncodeSlug(stream))
 }
 
-func readResultFile() string {
-	latest, err := config.GetLatestProcessedM3UPath()
-	if err != nil {
-		logger.Default.Error(err.Error())
-		return "#EXTM3U\n"
-	}
-
-	data, err := os.ReadFile(latest)
-	if err != nil {
-		logger.Default.Error(err.Error())
-		return "#EXTM3U\n"
-	}
-	return string(data)
-}
-
 func SortStreamSubUrls(urls map[string]string) []string {
 	type urlInfo struct {
 		key string

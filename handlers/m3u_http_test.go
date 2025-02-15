@@ -44,7 +44,10 @@ func setupTest(t *testing.T) (*M3UHTTPHandler, *httptest.ResponseRecorder, *http
 	})
 
 	processor := sourceproc.NewProcessor()
-	processor.Run(context.Background(), nil)
+	err = processor.Run(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	handler := NewM3UHTTPHandler(&logger.DefaultLogger{}, processor.GetResultPath())
 

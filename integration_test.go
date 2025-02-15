@@ -68,7 +68,10 @@ func TestStreamHTTPHandler(t *testing.T) {
 	m3uW := httptest.NewRecorder()
 
 	processor := sourceproc.NewProcessor()
-	processor.Run(context.Background(), m3uReq)
+	err = processor.Run(context.Background(), m3uReq)
+	if err != nil {
+		t.Fatal(err)
+	}
 	m3uHandler := handlers.NewM3UHTTPHandler(logger.Default, processor.GetResultPath())
 
 	m3uHandler.ServeHTTP(m3uW, m3uReq)
