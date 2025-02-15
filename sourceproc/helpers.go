@@ -2,7 +2,6 @@ package sourceproc
 
 import (
 	"fmt"
-	"hash/fnv"
 	"os"
 	"sort"
 	"strconv"
@@ -85,10 +84,4 @@ func ClearProcessedM3Us() {
 	if err != nil {
 		logger.Default.Error(err.Error())
 	}
-}
-
-func fnvHash(s string) uint32 {
-	h := fnv.New32a()
-	h.Write([]byte(s))
-	return h.Sum32()
 }
