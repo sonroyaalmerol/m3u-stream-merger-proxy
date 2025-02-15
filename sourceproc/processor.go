@@ -3,6 +3,7 @@ package sourceproc
 import (
 	"bufio"
 	"context"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -43,12 +44,22 @@ func NewProcessor() *M3UProcessor {
 }
 
 func (p *M3UProcessor) Start(r *http.Request) {
+	processCount := 0
 	errors := p.processStreams(r)
 	for err := range errors {
 		if err != nil {
 			logger.Default.Errorf("Error while processing stream: %v", err)
 		}
+		processCount++
+		batch := int(math.Pow(10, math.Floor(math.Log10(float64(processCount)))))
+		if batch < 100 {
+			batch = 100
+		}
+		if processCount%batch == 0 {
+			logger.Default.Logf("Processed %d streams so far", processCount)
+		}
 	}
+	logger.Default.Logf("Completed processing %d total streams", processCount)
 }
 
 func (p *M3UProcessor) Wait(ctx context.Context) error {
@@ -122,7 +133,6 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 		}()
 
 		for stream := range streamCh {
-			logger.Default.Log(stream.Title)
 			errors <- p.addStream(stream)
 		}
 
