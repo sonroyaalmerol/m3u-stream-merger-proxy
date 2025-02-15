@@ -1,8 +1,6 @@
 package sourceproc
 
 import (
-	"crypto/sha1"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"sort"
@@ -86,10 +84,4 @@ func ClearProcessedM3Us() {
 	if err != nil {
 		logger.Default.Error(err.Error())
 	}
-}
-
-func generateTitleHash(title string) string {
-	h := sha1.New()
-	h.Write([]byte(sanitizeField(title)))
-	return hex.EncodeToString(h.Sum(nil))[:12] // 12-character hash
 }
