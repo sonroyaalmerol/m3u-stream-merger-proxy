@@ -112,11 +112,6 @@ func (m *SortingManager) AddToSorter(s *StreamInfo) error {
 	return nil
 }
 
-func (m *SortingManager) getMutex(title string) *sync.Mutex {
-	hash := xxhash.Sum64String(title)
-	return m.muxes[hash%mutexShards]
-}
-
 func (m *SortingManager) Close() {
 	basePath := config.GetSortDirPath()
 	os.RemoveAll(basePath)
