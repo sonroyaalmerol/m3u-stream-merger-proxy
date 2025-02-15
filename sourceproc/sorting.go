@@ -248,7 +248,7 @@ func reverseLexicographical(value string) string {
 }
 
 func sanitizeField(value string) string {
-	return strings.NewReplacer(
+	santized := strings.NewReplacer(
 		"/", "_",
 		"\\", "_",
 		":", "_",
@@ -259,5 +259,11 @@ func sanitizeField(value string) string {
 		">", "_",
 		"|", "_",
 		" ", "",
-	).Replace(value)[:100]
+	).Replace(value)
+
+	if len(santized) > 100 {
+		santized = santized[:100]
+	}
+
+	return santized
 }
