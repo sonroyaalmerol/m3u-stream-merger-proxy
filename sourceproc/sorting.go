@@ -21,6 +21,8 @@ type SortingManager struct {
 func newSortingManager() *SortingManager {
 	sortingKey := os.Getenv("SORTING_KEY")
 	sortingDir := strings.ToLower(os.Getenv("SORTING_DIRECTION"))
+	basePath := config.GetSortDirPath()
+	_ = os.MkdirAll(basePath, os.ModeDir)
 
 	return &SortingManager{
 		muxes:      make(map[string]*sync.Mutex),
@@ -98,6 +100,11 @@ func (m *SortingManager) AddToSorter(s *StreamInfo) error {
 	}
 
 	return nil
+}
+
+func (m *SortingManager) Close() {
+	basePath := config.GetSortDirPath()
+	os.RemoveAll(basePath)
 }
 
 func (m *SortingManager) GetSortedEntries(callback func(*StreamInfo)) error {
@@ -251,5 +258,6 @@ func sanitizeField(value string) string {
 		"<", "_",
 		">", "_",
 		"|", "_",
-	).Replace(value)
+		" ", "",
+	).Replace(value)[:100]
 }

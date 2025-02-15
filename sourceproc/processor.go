@@ -167,6 +167,8 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 	p.writer.Flush()
 	p.file.Close()
 
+	p.sortingMgr.Close()
+
 	close(p.revalidatingDone)
 }
 
