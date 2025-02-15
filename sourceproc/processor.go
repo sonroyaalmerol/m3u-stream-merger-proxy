@@ -136,7 +136,7 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 		}()
 
 		// Worker pool to process streams concurrently
-		numWorkers := runtime.NumCPU()
+		numWorkers := runtime.NumCPU() * 2
 		var wgWorkers sync.WaitGroup
 		wgWorkers.Add(numWorkers)
 
