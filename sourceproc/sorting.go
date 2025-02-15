@@ -1,13 +1,13 @@
 package sourceproc
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,100 +15,88 @@ import (
 	"github.com/cespare/xxhash"
 )
 
-const mutexShards = 4096
+const (
+	mutexShards       = 4096
+	shardFileTemplate = "shard-%04d.json"
+)
 
 type SortingManager struct {
 	muxes      []*sync.Mutex       // Sharded mutexes
-	caches     []map[string]string // Sharded caches mapping sanitized titles to filenames
+	indexes    []map[string]bool   // In-memory existence checks
+	buffers    []map[string][]byte // Buffered writes
 	sortingKey string
 	sortingDir string
+	basePath   string
 }
 
 func newSortingManager() *SortingManager {
 	sortingKey := os.Getenv("SORTING_KEY")
 	sortingDir := strings.ToLower(os.Getenv("SORTING_DIRECTION"))
 	basePath := config.GetSortDirPath()
-	err := os.MkdirAll(basePath, 0755) // Create basePath once here
-	if err != nil {
+
+	if err := os.MkdirAll(basePath, 0755); err != nil {
 		logger.Default.Error(err.Error())
 	}
 
 	muxes := make([]*sync.Mutex, mutexShards)
-	caches := make([]map[string]string, mutexShards)
+	indexes := make([]map[string]bool, mutexShards)
+	buffers := make([]map[string][]byte, mutexShards)
+
 	for i := range muxes {
 		muxes[i] = &sync.Mutex{}
-		caches[i] = make(map[string]string)
+		indexes[i] = make(map[string]bool)
+		buffers[i] = make(map[string][]byte)
 	}
 
 	return &SortingManager{
 		muxes:      muxes,
-		caches:     caches,
+		indexes:    indexes,
+		buffers:    buffers,
 		sortingKey: sortingKey,
 		sortingDir: sortingDir,
+		basePath:   basePath,
 	}
 }
 
 func (m *SortingManager) AddToSorter(s *StreamInfo) error {
-	basePath := config.GetSortDirPath()
-
-	var primaryField string
-	switch m.sortingKey {
-	case "tvg-id":
-		primaryField = normalizeNumericField(s.TvgID, 10, m.sortingDir)
-	case "tvg-chno", "channel-id", "channel-number":
-		primaryField = normalizeNumericField(s.TvgChNo, 10, m.sortingDir)
-	case "tvg-group", "group-title":
-		primaryField = normalizeStringField(s.Group, m.sortingDir)
-	case "tvg-type":
-		primaryField = normalizeStringField(s.TvgType, m.sortingDir)
-	case "source":
-		primaryField = normalizeNumericField(s.SourceM3U, 5, m.sortingDir)
-	default: // Default to sorting by title
-		primaryField = normalizeStringField(s.Title, m.sortingDir)
-	}
-
-	sourceM3U := normalizeNumericField(s.SourceM3U, 5, "asc") // Always ascending
-	sourceIndex := fmt.Sprintf("%05d", s.SourceIndex)         // Always ascending
-
-	group := sanitizeField(s.Group)
-	tvgType := sanitizeField(s.TvgType)
-	title := sanitizeField(s.Title)
+	titleHash := xxhash.Sum64String(s.Title)
+	shardIndex := titleHash % mutexShards
+	mutex := m.muxes[shardIndex]
 	sanitizedTitle := sanitizeField(s.Title)
 
-	filename := fmt.Sprintf("%s_%s_%s_%s_%s_%s_%s.json",
-		primaryField, group, tvgType, sourceM3U, sourceIndex, title, m.sortingKey)
-
-	fullPath := filepath.Join(basePath, filename)
-
-	hash := xxhash.Sum64String(s.Title)
-	shardIndex := hash % mutexShards
-	mutex := m.muxes[shardIndex]
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	// Check cache first
-	if existingFile, exists := m.caches[shardIndex][sanitizedTitle]; exists {
-		if err := mergeStreamInfo(existingFile, s); err != nil {
-			return fmt.Errorf("failed to merge StreamInfo: %w", err)
-		}
-		return nil
+	// Check in-memory index first
+	if m.indexes[shardIndex][sanitizedTitle] {
+		return m.handleExisting(shardIndex, sanitizedTitle, s)
 	}
 
-	// Create new file and update cache
-	file, err := os.OpenFile(fullPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	// Check filesystem if not in memory index
+	shardFile := filepath.Join(m.basePath, fmt.Sprintf(shardFileTemplate, shardIndex))
+	if _, err := os.Stat(shardFile); err == nil {
+		if err := m.loadShard(shardIndex); err != nil {
+			return err
+		}
+		if m.indexes[shardIndex][sanitizedTitle] {
+			return m.handleExisting(shardIndex, sanitizedTitle, s)
+		}
+	}
+
+	// New entry - buffer in memory
+	encoded, err := json.Marshal(s)
 	if err != nil {
-		if os.IsExist(err) {
-			return fmt.Errorf("file already exists: %s", fullPath)
-		}
-		return fmt.Errorf("failed to create file: %w", err)
-	}
-	defer file.Close()
-
-	if err := writeStreamInfoToFile(file, s); err != nil {
-		return fmt.Errorf("failed to write StreamInfo to file: %w", err)
+		return fmt.Errorf("failed to marshal StreamInfo: %w", err)
 	}
 
-	m.caches[shardIndex][sanitizedTitle] = fullPath
+	m.buffers[shardIndex][sanitizedTitle] = encoded
+	m.indexes[shardIndex][sanitizedTitle] = true
+
+	// Flush buffer if reaching memory limit
+	if len(m.buffers[shardIndex]) >= 250 { // ~1MB per shard buffer
+		return m.flushShard(shardIndex)
+	}
+
 	return nil
 }
 
@@ -117,56 +105,177 @@ func (m *SortingManager) Close() {
 	os.RemoveAll(basePath)
 }
 
-func (m *SortingManager) GetSortedEntries(callback func(*StreamInfo)) error {
-	basePath := config.GetSortDirPath()
-
-	if _, err := os.Stat(basePath); os.IsNotExist(err) {
-		return fmt.Errorf("sorting directory does not exist: %s", basePath)
-	}
-
-	entries, err := os.ReadDir(basePath)
+func (m *SortingManager) handleExisting(shardIndex uint64, title string, s *StreamInfo) error {
+	// Read existing entries
+	entries, err := m.readShard(shardIndex)
 	if err != nil {
-		return fmt.Errorf("failed to read sorting directory: %w", err)
+		return err
 	}
 
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+	// Find and merge existing entry
+	if existing, exists := entries[title]; exists {
+		merged := mergeStreamInfoAttributes(existing, s)
+		entries[title] = merged
+	} else {
+		entries[title] = s
+	}
+
+	// Write back merged entries
+	return m.writeShard(shardIndex, entries)
+}
+
+func (m *SortingManager) flushShard(shardIndex uint64) error {
+	if len(m.buffers[shardIndex]) == 0 {
+		return nil
+	}
+
+	// Read existing entries if any
+	entries, _ := m.readShard(shardIndex)
+
+	// Merge buffered entries
+	for title, data := range m.buffers[shardIndex] {
+		var s StreamInfo
+		if err := json.Unmarshal(data, &s); err != nil {
 			continue
 		}
+		entries[title] = &s
+	}
 
-		filePath := filepath.Join(basePath, entry.Name())
-		streamInfo, err := readStreamInfoFromFile(filePath)
-		if err != nil {
-			logger.Default.Errorf("Failed to read StreamInfo from file %s: %v", filePath, err)
-			continue
+	// Write merged entries
+	if err := m.writeShard(shardIndex, entries); err != nil {
+		return err
+	}
+
+	// Clear buffer
+	m.buffers[shardIndex] = make(map[string][]byte)
+	return nil
+}
+
+func (m *SortingManager) readShard(shardIndex uint64) (map[string]*StreamInfo, error) {
+	shardFile := filepath.Join(m.basePath, fmt.Sprintf(shardFileTemplate, shardIndex))
+	entries := make(map[string]*StreamInfo)
+
+	file, err := os.Open(shardFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return entries, nil
 		}
+		return nil, err
+	}
+	defer file.Close()
 
-		// Pass the entry to the callback
-		callback(streamInfo)
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&entries); err != nil {
+		return nil, fmt.Errorf("failed to decode shard: %w", err)
+	}
+
+	return entries, nil
+}
+
+func (m *SortingManager) writeShard(shardIndex uint64, entries map[string]*StreamInfo) error {
+	shardFile := filepath.Join(m.basePath, fmt.Sprintf(shardFileTemplate, shardIndex))
+
+	file, err := os.Create(shardFile)
+	if err != nil {
+		return fmt.Errorf("failed to create shard file: %w", err)
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	if err := encoder.Encode(entries); err != nil {
+		return fmt.Errorf("failed to encode shard: %w", err)
 	}
 
 	return nil
 }
 
-func mergeStreamInfo(existingFile string, newStream *StreamInfo) error {
-	existingStream, err := readStreamInfoFromFile(existingFile)
+func (m *SortingManager) loadShard(shardIndex uint64) error {
+	entries, err := m.readShard(shardIndex)
 	if err != nil {
-		return fmt.Errorf("failed to read existing StreamInfo: %w", err)
+		return err
 	}
 
-	mergedStream := mergeStreamInfoAttributes(existingStream, newStream)
-
-	file, err := os.OpenFile(existingFile, os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open existing file for writing: %w", err)
+	for title := range entries {
+		m.indexes[shardIndex][title] = true
 	}
-	defer file.Close()
+	return nil
+}
 
-	if err := writeStreamInfoToFile(file, mergedStream); err != nil {
-		return fmt.Errorf("failed to write merged StreamInfo to file: %w", err)
+func (m *SortingManager) GetSortedEntries(callback func(*StreamInfo)) error {
+	// First flush any buffered entries
+	for shardIndex := uint64(0); shardIndex < mutexShards; shardIndex++ {
+		m.muxes[shardIndex].Lock()
+		if err := m.flushShard(shardIndex); err != nil {
+			m.muxes[shardIndex].Unlock()
+			return fmt.Errorf("failed to flush shard %d: %w", shardIndex, err)
+		}
+		m.muxes[shardIndex].Unlock()
+	}
+
+	// Collect all entries from all shards
+	type shardEntry struct {
+		key   string
+		value *StreamInfo
+	}
+	entries := make([]shardEntry, 0, 1_000_000) // Preallocate for 1M entries
+
+	// Read and parse all shard files
+	for shardIndex := uint64(0); shardIndex < mutexShards; shardIndex++ {
+		shardFile := filepath.Join(m.basePath, fmt.Sprintf(shardFileTemplate, shardIndex))
+
+		file, err := os.Open(shardFile)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("failed to open shard %d: %w", shardIndex, err)
+		}
+
+		var shardData map[string]*StreamInfo
+		if err := json.NewDecoder(file).Decode(&shardData); err != nil {
+			file.Close()
+			return fmt.Errorf("failed to decode shard %d: %w", shardIndex, err)
+		}
+		file.Close()
+
+		// Convert map to sortable slice
+		for _, stream := range shardData {
+			entries = append(entries, shardEntry{
+				key:   getSortKey(stream, m.sortingKey, m.sortingDir),
+				value: stream,
+			})
+		}
+	}
+
+	// Sort the entries
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].key < entries[j].key
+	})
+
+	// Execute callback in sorted order
+	for _, entry := range entries {
+		callback(entry.value)
 	}
 
 	return nil
+}
+
+// Helper to replicate the filename-based sorting logic
+func getSortKey(s *StreamInfo, sortingKey, direction string) string {
+	switch sortingKey {
+	case "tvg-id":
+		return normalizeNumericField(s.TvgID, 10, direction)
+	case "tvg-chno", "channel-id", "channel-number":
+		return normalizeNumericField(s.TvgChNo, 10, direction)
+	case "tvg-group", "group-title":
+		return normalizeStringField(s.Group, direction)
+	case "tvg-type":
+		return normalizeStringField(s.TvgType, direction)
+	case "source":
+		return normalizeNumericField(s.SourceM3U, 5, direction)
+	default: // Title
+		return normalizeStringField(s.Title, direction)
+	}
 }
 
 func mergeStreamInfoAttributes(base, new *StreamInfo) *StreamInfo {
@@ -208,30 +317,6 @@ func mergeStreamInfoAttributes(base, new *StreamInfo) *StreamInfo {
 	}
 
 	return base
-}
-
-func readStreamInfoFromFile(filename string) (*StreamInfo, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
-
-	var stream StreamInfo
-	if err := json.NewDecoder(file).Decode(&stream); err != nil {
-		return nil, fmt.Errorf("failed to decode StreamInfo: %w", err)
-	}
-
-	return &stream, nil
-}
-
-func writeStreamInfoToFile(file *os.File, stream *StreamInfo) error {
-	writer := bufio.NewWriter(file)
-	encoder := json.NewEncoder(writer)
-	if err := encoder.Encode(stream); err != nil {
-		return err
-	}
-	return writer.Flush()
 }
 
 func normalizeNumericField(value string, width int, direction string) string {
