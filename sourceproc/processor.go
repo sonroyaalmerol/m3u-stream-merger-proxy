@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -108,33 +109,53 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 		p.revalidatingDone = make(chan struct{})
 	}
 
-	errors := make(chan error, 100)
 	results := streamDownloadM3USources()
-	streamCh := make(chan *StreamInfo, 100)
-
 	baseURL := utils.DetermineBaseURL(r)
+
+	// Increase channel buffer sizes
+	errors := make(chan error, 1000)         // Increased error buffer
+	streamCh := make(chan *StreamInfo, 1000) // Larger stream buffer
 
 	go func() {
 		defer close(errors)
 		defer p.cleanup()
 
-		var wg sync.WaitGroup
+		var wgProducers sync.WaitGroup
 		for result := range results {
-			wg.Add(1)
+			wgProducers.Add(1)
 			go func(res *SourceDownloaderResult) {
-				defer wg.Done()
+				defer wgProducers.Done()
 				p.handleDownloaded(res, streamCh)
 			}(result)
 		}
 
+		// Close streamCh after all producers finish
 		go func() {
-			wg.Wait()
+			wgProducers.Wait()
 			close(streamCh)
 		}()
 
-		for stream := range streamCh {
-			errors <- p.addStream(stream)
+		// Worker pool to process streams concurrently
+		numWorkers := runtime.NumCPU() * 2 // Adjust multiplier based on I/O vs CPU bound
+		var wgWorkers sync.WaitGroup
+		wgWorkers.Add(numWorkers)
+
+		for i := 0; i < numWorkers; i++ {
+			go func() {
+				defer wgWorkers.Done()
+				for stream := range streamCh {
+					if err := p.addStream(stream); err != nil {
+						select {
+						case errors <- err:
+						default:
+							logger.Default.Errorf("Error channel full, dropping error: %v", err)
+						}
+					}
+				}
+			}()
 		}
+
+		wgWorkers.Wait() // Wait for all streams to be processed
 
 		p.compileM3U(baseURL)
 	}()
