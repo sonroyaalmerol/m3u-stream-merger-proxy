@@ -9,9 +9,15 @@ import (
 	"m3u-stream-merger/utils"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"golang.org/x/crypto/sha3"
+)
+
+var (
+	// attributeRegex matches M3U attributes in the format key="value"
+	attributeRegex = regexp.MustCompile(`([a-zA-Z0-9_-]+)="([^"]*)"`)
 )
 
 // parseLine parses a single M3U line into a StreamInfo
