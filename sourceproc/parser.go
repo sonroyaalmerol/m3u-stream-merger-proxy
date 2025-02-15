@@ -103,54 +103,6 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 	return stream
 }
 
-// mergeURLs merges URLs from source into target StreamInfo
-func mergeURLs(target, source *StreamInfo) {
-	target.Lock()
-	defer target.Unlock()
-	source.RLock()
-	defer source.RUnlock()
-
-	for idx, innerMap := range source.URLs {
-		if target.URLs[idx] == nil {
-			target.URLs[idx] = make(map[string]string)
-		}
-		for hashKey, url := range innerMap {
-			if _, exists := target.URLs[idx][hashKey]; !exists {
-				target.URLs[idx][hashKey] = url
-			}
-		}
-	}
-}
-
-// mergeAttributes merges attributes from source into target StreamInfo.
-// If the target does not already have an attribute set, the value from the
-// source will be assigned.
-func mergeAttributes(target, source *StreamInfo) {
-	target.Lock()
-	defer target.Unlock()
-	source.RLock()
-	defer source.RUnlock()
-
-	if target.TvgID == "" {
-		target.TvgID = source.TvgID
-	}
-	if target.TvgChNo == "" {
-		target.TvgChNo = source.TvgChNo
-	}
-	if target.Title == "" {
-		target.Title = source.Title
-	}
-	if target.TvgType == "" {
-		target.TvgType = source.TvgType
-	}
-	if target.Group == "" {
-		target.Group = source.Group
-	}
-	if target.LogoURL == "" {
-		target.LogoURL = source.LogoURL
-	}
-}
-
 // formatStreamEntry formats a stream entry for M3U output
 func formatStreamEntry(baseURL string, stream *StreamInfo) string {
 	var entry strings.Builder

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
-	sourceproc "m3u-stream-merger/source_processor"
+	"m3u-stream-merger/sourceproc"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
 	"net/http"

@@ -1,6 +1,7 @@
 package sourceproc
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -27,10 +28,10 @@ func setupTestEnvironment(t *testing.T) func() {
 	testDataLock.Lock()
 	defer testDataLock.Unlock()
 
-	tempDir, err := os.MkdirTemp("", "m3u-test-*")
-	require.NoError(t, err)
-
 	originalConfig := config.GetConfig()
+
+	tempDir, err := os.MkdirTemp("", fmt.Sprintf("%d-m3u-test-*", time.Now().Unix()))
+	require.NoError(t, err)
 
 	testConfig := &config.Config{
 		DataPath: filepath.Join(tempDir, "data"),
@@ -101,11 +102,6 @@ http://example.com/vevo
 		testDataLock.Lock()
 		defer testDataLock.Unlock()
 
-		if cache := M3uCache.cache.Load(); cache != nil {
-			cache.processedStreams.clear()
-		}
-		M3uCache.cache.Store(nil)
-
 		config.SetConfig(originalConfig)
 		utils.ResetCaches()
 
@@ -115,24 +111,6 @@ http://example.com/vevo
 		os.Unsetenv("M3U_URL_2")
 		os.Unsetenv("M3U_URL_3")
 	}
-}
-
-func waitForCache(t *testing.T, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		cache := M3uCache.cache.Load()
-		if cache != nil && !cache.IsProcessing() {
-			// Check if cache file exists and has content
-			if _, err := os.Stat(config.GetM3UCachePath()); err == nil {
-				content, err := os.ReadFile(config.GetM3UCachePath())
-				if err == nil && len(content) > 0 && strings.Contains(string(content), "EXTINF") {
-					return
-				}
-			}
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	t.Fatal("Cache did not complete processing within timeout")
 }
 
 type testStreamInfo struct {
@@ -168,29 +146,19 @@ func parseM3UContent(content string) []testStreamInfo {
 }
 
 func TestRevalidatingGetM3U(t *testing.T) {
-	cleanup := setupTestEnvironment(t)
-	defer cleanup()
-
 	// Subtests for RevalidatingGetM3U.
 	tests := []struct {
 		name          string
-		force         bool
 		sortingKey    string
 		sortingDir    string
 		setup         func(t *testing.T)
 		validateOrder func(t *testing.T, streams []testStreamInfo)
 	}{
 		{
-			name:       "initial generation with default sorting",
-			force:      false,
+			name:       "default sorting",
 			sortingKey: "",
 			sortingDir: "asc",
 			setup: func(t *testing.T) {
-				// Clear any existing cache before running this test.
-				if cache := M3uCache.cache.Load(); cache != nil {
-					cache.processedStreams.clear()
-				}
-				M3uCache.cache.Store(nil)
 			},
 			validateOrder: func(t *testing.T, streams []testStreamInfo) {
 				// Verify all streams are present.
@@ -207,19 +175,13 @@ func TestRevalidatingGetM3U(t *testing.T) {
 			},
 		},
 		{
-			name:       "force regeneration with tvg-chno sorting",
-			force:      true,
+			name:       "tvg-chno sorting",
 			sortingKey: "tvg-chno",
 			sortingDir: "asc",
 			setup: func(t *testing.T) {
 				// Set the sorting environment variables.
 				os.Setenv("SORTING_KEY", "tvg-chno")
 				os.Setenv("SORTING_DIRECTION", "asc")
-				// Clear the global cache so a new M3UManager is generated.
-				if cache := M3uCache.cache.Load(); cache != nil {
-					cache.processedStreams.clear()
-				}
-				M3uCache.cache.Store(nil)
 			},
 			validateOrder: func(t *testing.T, streams []testStreamInfo) {
 				// Verify that channel numbers are in ascending order.
@@ -243,18 +205,12 @@ func TestRevalidatingGetM3U(t *testing.T) {
 		},
 		{
 			name:       "group sorting",
-			force:      true,
 			sortingKey: "tvg-group",
 			sortingDir: "asc",
 			setup: func(t *testing.T) {
 				// Set group sorting to ascending.
 				os.Setenv("SORTING_KEY", "tvg-group")
 				os.Setenv("SORTING_DIRECTION", "asc")
-				// Clear the global cache.
-				if cache := M3uCache.cache.Load(); cache != nil {
-					cache.processedStreams.clear()
-				}
-				M3uCache.cache.Store(nil)
 			},
 			validateOrder: func(t *testing.T, streams []testStreamInfo) {
 				// Check that the groups are sorted alphabetically.
@@ -272,17 +228,22 @@ func TestRevalidatingGetM3U(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			cleanup := setupTestEnvironment(t)
+			defer cleanup()
+
 			tt.setup(t)
 
-			// Generate a new cache (force regeneration if needed).
-			req := httptest.NewRequest(http.MethodGet, "http://example.com", nil)
-			RevalidatingGetM3U(req, tt.force)
+			processor := NewProcessor()
 
-			// Wait for the cache processing to complete.
-			waitForCache(t, 5*time.Second)
+			req := httptest.NewRequest(http.MethodGet, "http://example.com", nil)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			err := processor.Run(ctx, req)
+			require.NoError(t, err)
 
 			// Read the generated M3U file.
-			content, err := os.ReadFile(config.GetM3UCachePath())
+			content, err := os.ReadFile(processor.GetResultPath())
 			require.NoError(t, err)
 			streams := parseM3UContent(string(content))
 
@@ -298,23 +259,22 @@ func TestConcurrentAccess(t *testing.T) {
 	const numGoroutines = 10
 	done := make(chan bool, numGoroutines)
 
+	processor := NewProcessor()
+
 	// First request to initialize cache
 	req := httptest.NewRequest(http.MethodGet, "http://example.com", nil)
-	RevalidatingGetM3U(req, true)
-
-	// Wait for initial cache to complete
-	waitForCache(t, 5*time.Second)
-
-	// Read initial content to compare later
-	initialContent, err := os.ReadFile(config.GetM3UCachePath())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := processor.Run(ctx, req)
 	require.NoError(t, err)
 
 	// Make concurrent requests
-	startTime := time.Now()
 	for i := 0; i < numGoroutines; i++ {
 		go func() {
-			req := httptest.NewRequest(http.MethodGet, "http://example.com", nil)
-			result := RevalidatingGetM3U(req, false)
+			content, err := os.ReadFile(processor.GetResultPath())
+			require.NoError(t, err)
+			result := string(content)
+
 			assert.Contains(t, result, "#EXTM3U")
 			assert.Contains(t, result, "CNN US") // Check at least one channel
 			done <- true
@@ -330,20 +290,9 @@ func TestConcurrentAccess(t *testing.T) {
 			t.Fatal("Timeout waiting for goroutine")
 		}
 	}
-
-	// Verify final content matches initial content (no corruption)
-	finalContent, err := os.ReadFile(config.GetM3UCachePath())
-	require.NoError(t, err)
-	assert.Equal(t, string(initialContent), string(finalContent),
-		"Cache content should not change during concurrent reads")
-
-	assert.Less(t, time.Since(startTime), 5*time.Second)
 }
 
 func TestSortingVariations(t *testing.T) {
-	cleanup := setupTestEnvironment(t)
-	defer cleanup()
-
 	sortingTests := []struct {
 		name      string
 		key       string
@@ -384,25 +333,23 @@ func TestSortingVariations(t *testing.T) {
 
 	for _, tt := range sortingTests {
 		t.Run(tt.name, func(t *testing.T) {
+			cleanup := setupTestEnvironment(t)
+			defer cleanup()
+
 			// Set sorting environment variables.
 			os.Setenv("SORTING_KEY", tt.key)
 			os.Setenv("SORTING_DIRECTION", tt.direction)
 
-			// Clear the global cache to force a new M3UManager creation.
-			if cache := M3uCache.cache.Load(); cache != nil {
-				cache.processedStreams.clear()
-			}
-			M3uCache.cache.Store(nil)
-
-			// Generate new cache.
 			req := httptest.NewRequest(http.MethodGet, "http://example.com", nil)
-			RevalidatingGetM3U(req, true)
+			processor := NewProcessor()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 
-			// Wait for cache processing to be completed.
-			waitForCache(t, 5*time.Second)
+			err := processor.Run(ctx, req)
+			require.NoError(t, err)
 
-			// Read the final cache file and validate its content.
-			content, err := os.ReadFile(config.GetM3UCachePath())
+			content, err := os.ReadFile(processor.GetResultPath())
+
 			require.NoError(t, err)
 			tt.validate(t, string(content))
 		})
@@ -435,10 +382,10 @@ func TestMergeAttributesToM3UFile(t *testing.T) {
 	s5 := parseLine(m3u5, &LineDetails{Content: url5, LineNum: 5}, "M3U_Test")
 	require.NotNil(t, s5, "Failed to parse source 5")
 
-	mergeAttributes(s1, s2) // sets tvg-id and tvg-type
-	mergeAttributes(s1, s3) // sets group (group-title)
-	mergeAttributes(s1, s4) // sets tvg-logo
-	mergeAttributes(s1, s5) // should not override tvg-id as it's already set
+	s1 = mergeStreamInfoAttributes(s1, s2)
+	s1 = mergeStreamInfoAttributes(s1, s3)
+	s1 = mergeStreamInfoAttributes(s1, s4)
+	s1 = mergeStreamInfoAttributes(s1, s5)
 
 	baseURL := "http://dummy" // base URL for stream generation
 	entry := formatStreamEntry(baseURL, s1)

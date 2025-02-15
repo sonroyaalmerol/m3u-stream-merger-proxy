@@ -16,8 +16,11 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	m3uHandler := handlers.NewM3UHTTPHandler(logger.Default, "")
+	streamHandler := handlers.NewStreamHTTPHandler(handlers.NewDefaultProxyInstance(), logger.Default)
+
 	logger.Default.Log("Starting updater...")
-	_, err := updater.Initialize(ctx, logger.Default)
+	_, err := updater.Initialize(ctx, logger.Default, m3uHandler)
 	if err != nil {
 		logger.Default.Fatalf("Error initializing updater: %v", err)
 	}
@@ -30,9 +33,6 @@ func main() {
 			logger.Default.Fatalf("error loading location '%s': %v\n", tz, err)
 		}
 	}
-
-	m3uHandler := handlers.NewM3UHTTPHandler(logger.Default)
-	streamHandler := handlers.NewStreamHTTPHandler(handlers.NewDefaultProxyInstance(), logger.Default)
 
 	logger.Default.Log("Setting up HTTP handlers...")
 	// HTTP handlers
