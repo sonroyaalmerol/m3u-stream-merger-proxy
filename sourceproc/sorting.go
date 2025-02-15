@@ -1,6 +1,7 @@
 package sourceproc
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"m3u-stream-merger/config"
@@ -10,10 +11,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/cespare/xxhash"
 )
 
+const mutexShards = 4096
+
 type SortingManager struct {
-	muxes      map[string]*sync.Mutex
+	muxes      []*sync.Mutex // Sharded mutexes
 	sortingKey string
 	sortingDir string
 }
@@ -26,13 +31,17 @@ func newSortingManager() *SortingManager {
 		logger.Default.Error(err.Error())
 	}
 
+	muxes := make([]*sync.Mutex, mutexShards)
+	for i := range muxes {
+		muxes[i] = &sync.Mutex{}
+	}
+
 	return &SortingManager{
-		muxes:      make(map[string]*sync.Mutex),
+		muxes:      muxes,
 		sortingKey: sortingKey,
 		sortingDir: sortingDir,
 	}
 }
-
 func (m *SortingManager) AddToSorter(s *StreamInfo) error {
 	basePath := config.GetSortDirPath()
 
@@ -67,13 +76,9 @@ func (m *SortingManager) AddToSorter(s *StreamInfo) error {
 	}
 
 	fullPath := filepath.Join(basePath, filename)
-
-	if m.muxes[s.Title] == nil {
-		m.muxes[s.Title] = &sync.Mutex{}
-	}
-
-	m.muxes[s.Title].Lock()
-	defer m.muxes[s.Title].Unlock()
+	mutex := m.getMutex(s.Title)
+	mutex.Lock()
+	defer mutex.Unlock()
 
 	existingFiles, err := filepath.Glob(filepath.Join(basePath, fmt.Sprintf("*_%s_*.json", title)))
 	if err != nil {
@@ -102,6 +107,11 @@ func (m *SortingManager) AddToSorter(s *StreamInfo) error {
 	}
 
 	return nil
+}
+
+func (m *SortingManager) getMutex(title string) *sync.Mutex {
+	hash := xxhash.Sum64String(title)
+	return m.muxes[hash%mutexShards]
 }
 
 func (m *SortingManager) Close() {
@@ -218,12 +228,12 @@ func readStreamInfoFromFile(filename string) (*StreamInfo, error) {
 }
 
 func writeStreamInfoToFile(file *os.File, stream *StreamInfo) error {
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ") // Pretty-print JSON for readability
+	writer := bufio.NewWriter(file)
+	encoder := json.NewEncoder(writer)
 	if err := encoder.Encode(stream); err != nil {
-		return fmt.Errorf("failed to encode StreamInfo: %w", err)
+		return err
 	}
-	return nil
+	return writer.Flush()
 }
 
 func normalizeNumericField(value string, width int, direction string) string {
