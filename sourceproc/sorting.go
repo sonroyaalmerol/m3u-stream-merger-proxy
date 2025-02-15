@@ -18,7 +18,8 @@ import (
 const mutexShards = 4096
 
 type SortingManager struct {
-	muxes      []*sync.Mutex // Sharded mutexes
+	muxes      []*sync.Mutex       // Sharded mutexes
+	caches     []map[string]string // Sharded caches mapping sanitized titles to filenames
 	sortingKey string
 	sortingDir string
 }
@@ -26,22 +27,27 @@ type SortingManager struct {
 func newSortingManager() *SortingManager {
 	sortingKey := os.Getenv("SORTING_KEY")
 	sortingDir := strings.ToLower(os.Getenv("SORTING_DIRECTION"))
-	err := os.MkdirAll(filepath.Dir(config.GetSortDirPath()), 0755)
+	basePath := config.GetSortDirPath()
+	err := os.MkdirAll(basePath, 0755) // Create basePath once here
 	if err != nil {
 		logger.Default.Error(err.Error())
 	}
 
 	muxes := make([]*sync.Mutex, mutexShards)
+	caches := make([]map[string]string, mutexShards)
 	for i := range muxes {
 		muxes[i] = &sync.Mutex{}
+		caches[i] = make(map[string]string)
 	}
 
 	return &SortingManager{
 		muxes:      muxes,
+		caches:     caches,
 		sortingKey: sortingKey,
 		sortingDir: sortingDir,
 	}
 }
+
 func (m *SortingManager) AddToSorter(s *StreamInfo) error {
 	basePath := config.GetSortDirPath()
 
@@ -67,32 +73,28 @@ func (m *SortingManager) AddToSorter(s *StreamInfo) error {
 	group := sanitizeField(s.Group)
 	tvgType := sanitizeField(s.TvgType)
 	title := sanitizeField(s.Title)
+	sanitizedTitle := sanitizeField(s.Title)
 
 	filename := fmt.Sprintf("%s_%s_%s_%s_%s_%s_%s.json",
 		primaryField, group, tvgType, sourceM3U, sourceIndex, title, m.sortingKey)
 
-	if err := os.MkdirAll(basePath, 0755); err != nil {
-		return fmt.Errorf("failed to create base path: %w", err)
-	}
-
 	fullPath := filepath.Join(basePath, filename)
-	mutex := m.getMutex(s.Title)
+
+	hash := xxhash.Sum64String(s.Title)
+	shardIndex := hash % mutexShards
+	mutex := m.muxes[shardIndex]
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	existingFiles, err := filepath.Glob(filepath.Join(basePath, fmt.Sprintf("*_%s_*.json", title)))
-	if err != nil {
-		return fmt.Errorf("failed to search for existing files: %w", err)
-	}
-
-	if len(existingFiles) > 0 {
-		existingFile := existingFiles[0]
+	// Check cache first
+	if existingFile, exists := m.caches[shardIndex][sanitizedTitle]; exists {
 		if err := mergeStreamInfo(existingFile, s); err != nil {
 			return fmt.Errorf("failed to merge StreamInfo: %w", err)
 		}
 		return nil
 	}
 
+	// Create new file and update cache
 	file, err := os.OpenFile(fullPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 	if err != nil {
 		if os.IsExist(err) {
@@ -106,6 +108,7 @@ func (m *SortingManager) AddToSorter(s *StreamInfo) error {
 		return fmt.Errorf("failed to write StreamInfo to file: %w", err)
 	}
 
+	m.caches[shardIndex][sanitizedTitle] = fullPath
 	return nil
 }
 
