@@ -58,6 +58,8 @@ func (p *M3UProcessor) Wait(ctx context.Context) error {
 		return ctx.Err()
 	}
 
+	p.clearOldResults()
+
 	return nil
 }
 
@@ -70,7 +72,7 @@ func (p *M3UProcessor) GetCount() int {
 	return int(p.streamCount.Load())
 }
 
-func (p *M3UProcessor) ClearOldResults() {
+func (p *M3UProcessor) clearOldResults() {
 	err := config.ClearOldProcessedM3U(p.file.Name())
 	if err != nil {
 		logger.Default.Error(err.Error())
