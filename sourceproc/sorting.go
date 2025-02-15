@@ -220,7 +220,7 @@ func writeStreamInfoToFile(file *os.File, stream *StreamInfo) error {
 func normalizeNumericField(value string, width int, direction string) string {
 	num, err := strconv.Atoi(value)
 	if err != nil {
-		return value
+		return sanitizeField(value)
 	}
 	if direction == "desc" {
 		maxValue := int64(1<<31 - 1) // Use a large constant (e.g., max int32)
@@ -233,7 +233,7 @@ func normalizeStringField(value, direction string) string {
 	if direction == "desc" {
 		return reverseLexicographical(value)
 	}
-	return value
+	return sanitizeField(value)
 }
 
 func reverseLexicographical(value string) string {
