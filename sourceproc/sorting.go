@@ -21,8 +21,10 @@ type SortingManager struct {
 func newSortingManager() *SortingManager {
 	sortingKey := os.Getenv("SORTING_KEY")
 	sortingDir := strings.ToLower(os.Getenv("SORTING_DIRECTION"))
-	basePath := config.GetSortDirPath()
-	_ = os.MkdirAll(basePath, os.ModeDir)
+	err := os.MkdirAll(filepath.Dir(config.GetSortDirPath()), 0755)
+	if err != nil {
+		logger.Default.Error(err.Error())
+	}
 
 	return &SortingManager{
 		muxes:      make(map[string]*sync.Mutex),
