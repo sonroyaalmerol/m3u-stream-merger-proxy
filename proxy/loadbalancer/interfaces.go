@@ -1,7 +1,7 @@
 package loadbalancer
 
 import (
-	sourceproc "m3u-stream-merger/source_processor"
+	"m3u-stream-merger/sourceproc"
 	"net/http"
 )
 

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,27 +15,8 @@ import (
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/handlers"
 	"m3u-stream-merger/logger"
-	sourceproc "m3u-stream-merger/source_processor"
-	"m3u-stream-merger/utils"
+	"m3u-stream-merger/sourceproc"
 )
-
-func waitForCache(t *testing.T, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		cache := sourceproc.GetCache().Load()
-		if cache != nil && !cache.IsProcessing() {
-			// Check if cache file exists and has content
-			if _, err := os.Stat(config.GetM3UCachePath()); err == nil {
-				content, err := os.ReadFile(config.GetM3UCachePath())
-				if err == nil && len(content) > 0 && strings.Contains(string(content), "EXTINF") {
-					return
-				}
-			}
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	t.Fatal("Cache did not complete processing within timeout")
-}
 
 func TestStreamHTTPHandler(t *testing.T) {
 	// Create temp directory for test data
@@ -68,9 +51,6 @@ func TestStreamHTTPHandler(t *testing.T) {
 
 	// Initialize handlers with test configuration
 	t.Log("Initializing handlers with test configuration")
-	m3uHandler := handlers.NewM3UHTTPHandler(logger.Default)
-	cachePath := config.GetM3UCachePath()
-
 	streamHandler := handlers.NewStreamHTTPHandler(
 		handlers.NewDefaultProxyInstance(),
 		logger.Default,
@@ -86,9 +66,15 @@ func TestStreamHTTPHandler(t *testing.T) {
 	t.Log("Testing M3U playlist generation")
 	m3uReq := httptest.NewRequest(http.MethodGet, "/playlist.m3u", nil)
 	m3uW := httptest.NewRecorder()
-	m3uHandler.ServeHTTP(m3uW, m3uReq)
 
-	waitForCache(t, 5*time.Second)
+	processor := sourceproc.NewProcessor()
+	err = processor.Run(context.Background(), m3uReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m3uHandler := handlers.NewM3UHTTPHandler(logger.Default, processor.GetResultPath())
+
+	m3uHandler.ServeHTTP(m3uW, m3uReq)
 
 	m3uReq = httptest.NewRequest(http.MethodGet, "/playlist.m3u", nil)
 	m3uW = httptest.NewRecorder()
@@ -100,13 +86,12 @@ func TestStreamHTTPHandler(t *testing.T) {
 
 	// Get streams and test each one
 	t.Log("Retrieving streams from store")
-	streams := sourceproc.GetCurrentStreams()
-	t.Logf("Found %d streams", len(streams))
-	if len(streams) == 0 {
+	t.Logf("Found %d streams", processor.GetCount())
+	if processor.GetCount() == 0 {
 		t.Error("No streams found in store")
 		// Log cache contents for debugging
-		if cacheContents, err := os.ReadFile(cachePath); err == nil {
-			t.Log("Cache contents:", string(cacheContents))
+		if contents, err := os.ReadFile(processor.GetResultPath()); err == nil {
+			t.Log("Processed contents:", string(contents))
 		} else {
 			t.Log("Failed to read cache file:", err)
 		}
@@ -115,105 +100,83 @@ func TestStreamHTTPHandler(t *testing.T) {
 	// Track if at least one stream passes
 	var streamPassed bool
 
-	for _, stream := range streams {
+	file, err := os.Open(processor.GetResultPath())
+	if err != nil {
+		t.Error(err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+
+	for scanner.Scan() {
 		success := true // Track success for this stream
-		t.Run(stream.Title, func(t *testing.T) {
-			t.Logf("Testing stream: %s", stream.Title)
-			t.Logf("Stream URLs: %v", stream.URLs)
+		line := scanner.Text()
+		if isUrl := strings.HasPrefix(line, "http"); isUrl {
+			t.Run(line, func(t *testing.T) {
+				req := httptest.NewRequest(http.MethodGet, line, nil)
+				w := httptest.NewRecorder()
 
-			genStreamUrl := strings.TrimSpace(sourceproc.GenerateStreamURL("", stream))
-			t.Logf("Generated stream URL: %s", genStreamUrl)
+				// Create a channel to coordinate test completion
+				done := make(chan struct{})
 
-			req := httptest.NewRequest(http.MethodGet, genStreamUrl, nil)
-			w := httptest.NewRecorder()
+				// Start the stream handler in a goroutine
+				go func() {
+					streamHandler.ServeHTTP(w, req)
+					close(done)
+				}()
 
-			// Create a channel to coordinate test completion
-			done := make(chan struct{})
+				// Read and compare streams for a set duration
+				testDuration := 2 * time.Second
+				timer := time.NewTimer(testDuration)
 
-			// Start the stream handler in a goroutine
-			go func() {
-				streamHandler.ServeHTTP(w, req)
-				close(done)
-			}()
+				buffer2 := make([]byte, 32*1024)
 
-			// Fetch original stream for comparison
-			firstKey := ""
-			for key := range stream.URLs["1"] {
-				firstKey = key
-				break
-			}
-			originalURL := stream.URLs["1"][firstKey]
-			t.Logf("Fetching original stream from: %s", originalURL)
+				var totalBytes2 int64
 
-			originalURLSplit := strings.SplitN(originalURL, ":::", 2)
-
-			res, err := utils.HTTPClient.Get(originalURLSplit[1])
-			if err != nil {
-				t.Logf("Failed to fetch original stream: %v", err)
-				success = false
-				return
-			}
-			defer res.Body.Close()
-
-			// Read and compare streams for a set duration
-			testDuration := 2 * time.Second
-			timer := time.NewTimer(testDuration)
-
-			buffer1 := make([]byte, 32*1024)
-			buffer2 := make([]byte, 32*1024)
-
-			var totalBytes1, totalBytes2 int64
-
-			for {
-				select {
-				case <-timer.C:
-					t.Logf("Test completed after %v", testDuration)
-					t.Logf("Total bytes read - Original: %d, Response: %d", totalBytes1, totalBytes2)
-					if totalBytes1 == 0 || totalBytes2 == 0 {
-						t.Logf("No data received from one or both streams")
-						success = false
-					}
-					return
-				default:
-					// Read from original stream
-					n1, err1 := res.Body.Read(buffer1)
-					if err1 != nil && err1 != io.EOF {
-						t.Logf("Error reading original stream: %v", err1)
-						success = false
+				for {
+					select {
+					case <-timer.C:
+						t.Logf("Test completed after %v", testDuration)
+						t.Logf("Total bytes read: %d", totalBytes2)
+						if totalBytes2 == 0 {
+							t.Logf("No data received from one or both streams")
+							success = false
+						}
 						return
-					}
+					default:
+						// Read from response stream
+						n2, err2 := w.Body.Read(buffer2)
+						if err2 != nil && err2 != io.EOF {
+							t.Logf("Error reading response stream: %v", err2)
+							success = false
+							return
+						}
 
-					// Read from response stream
-					n2, err2 := w.Body.Read(buffer2)
-					if err2 != nil && err2 != io.EOF {
-						t.Logf("Error reading response stream: %v", err2)
-						success = false
-						return
-					}
+						if n2 > 0 {
+							totalBytes2 += int64(n2)
+						}
 
-					// Update totals
-					if n1 > 0 {
-						totalBytes1 += int64(n1)
-					}
-					if n2 > 0 {
-						totalBytes2 += int64(n2)
-					}
+						// Verify data is being received
+						if n2 > 0 {
+							t.Logf("Received data: %d bytes", n2)
+						}
 
-					// Verify data is being received
-					if n1 > 0 || n2 > 0 {
-						t.Logf("Received data - Original: %d bytes, Response: %d bytes", n1, n2)
+						// Small delay to prevent tight loop
+						time.Sleep(10 * time.Millisecond)
 					}
-
-					// Small delay to prevent tight loop
-					time.Sleep(10 * time.Millisecond)
 				}
-			}
-		})
+			})
 
-		if success {
-			streamPassed = true
-			break // Exit after first successful stream
+			if success {
+				streamPassed = true
+				break // Exit after first successful stream
+			}
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		t.Error(err)
 	}
 
 	// Only fail if no streams passed
