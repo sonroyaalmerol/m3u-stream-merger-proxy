@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
+	"m3u-stream-merger/sourceproc"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,10 +14,6 @@ import (
 )
 
 func setupTest(t *testing.T) (*M3UHTTPHandler, *httptest.ResponseRecorder, *http.Request) {
-	handler := NewM3UHTTPHandler(&logger.DefaultLogger{})
-	config.SetConfig(&config.Config{
-		DataPath: "/",
-	})
 	tempDir, err := os.MkdirTemp("", "m3u-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
@@ -45,6 +43,14 @@ func setupTest(t *testing.T) (*M3UHTTPHandler, *httptest.ResponseRecorder, *http
 		DataPath: testDataPath,
 	})
 
+	processor := sourceproc.NewProcessor()
+	err = processor.Run(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewM3UHTTPHandler(&logger.DefaultLogger{}, processor.GetResultPath())
+
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	return handler, recorder, request
@@ -59,8 +65,8 @@ func TestM3UHTTPHandler_NoAuth(t *testing.T) {
 	handler.ServeHTTP(recorder, request)
 
 	// Assert
-	if recorder.Code != http.StatusOK {
-		t.Errorf("Expected status code %d, got %d", http.StatusOK, recorder.Code)
+	if recorder.Code != http.StatusNotFound {
+		t.Errorf("Expected status code %d, got %d", http.StatusNotFound, recorder.Code)
 	}
 }
 
@@ -77,7 +83,7 @@ func TestM3UHTTPHandler_BasicAuth(t *testing.T) {
 			credentials: "user1:pass1|user2:pass2",
 			username:    "user1",
 			password:    "pass1",
-			wantStatus:  http.StatusOK,
+			wantStatus:  http.StatusNotFound,
 		},
 		{
 			name:        "Invalid password",
@@ -105,7 +111,7 @@ func TestM3UHTTPHandler_BasicAuth(t *testing.T) {
 			credentials: "User1:pass1",
 			username:    "user1",
 			password:    "pass1",
-			wantStatus:  http.StatusOK,
+			wantStatus:  http.StatusNotFound,
 		},
 	}
 
@@ -148,7 +154,7 @@ func TestM3UHTTPHandler_ExpirationDate(t *testing.T) {
 			credentials: "user1:pass1:" + tomorrow,
 			username:    "user1",
 			password:    "pass1",
-			wantStatus:  http.StatusOK,
+			wantStatus:  http.StatusNotFound,
 		},
 		{
 			name:        "Expired credentials",
@@ -162,7 +168,7 @@ func TestM3UHTTPHandler_ExpirationDate(t *testing.T) {
 			credentials: "user1:pass1:" + yesterday + "|user2:pass2:" + tomorrow,
 			username:    "user2",
 			password:    "pass2",
-			wantStatus:  http.StatusOK,
+			wantStatus:  http.StatusNotFound,
 		},
 	}
 

@@ -2,8 +2,10 @@ package updater
 
 import (
 	"context"
+	"m3u-stream-merger/config"
+	"m3u-stream-merger/handlers"
 	"m3u-stream-merger/logger"
-	sourceproc "m3u-stream-merger/source_processor"
+	"m3u-stream-merger/sourceproc"
 	"os"
 	"strings"
 	"sync"
@@ -13,15 +15,17 @@ import (
 
 type Updater struct {
 	sync.Mutex
-	ctx    context.Context
-	Cron   *cron.Cron
-	logger logger.Logger
+	ctx        context.Context
+	Cron       *cron.Cron
+	logger     logger.Logger
+	m3uHandler *handlers.M3UHTTPHandler
 }
 
-func Initialize(ctx context.Context, logger logger.Logger) (*Updater, error) {
+func Initialize(ctx context.Context, logger logger.Logger, m3uHandler *handlers.M3UHTTPHandler) (*Updater, error) {
 	updateInstance := &Updater{
-		ctx:    ctx,
-		logger: logger,
+		ctx:        ctx,
+		logger:     logger,
+		m3uHandler: m3uHandler,
 	}
 
 	clearOnBoot := os.Getenv("CLEAR_ON_BOOT")
@@ -31,7 +35,12 @@ func Initialize(ctx context.Context, logger logger.Logger) (*Updater, error) {
 
 	if clearOnBoot == "true" {
 		updateInstance.logger.Log("CLEAR_ON_BOOT enabled. Clearing current cache.")
-		sourceproc.ClearCache()
+		sourceproc.ClearProcessedM3Us()
+	} else {
+		latestM3u, err := config.GetLatestProcessedM3UPath()
+		if err == nil {
+			m3uHandler.SetProcessedPath(latestM3u)
+		}
 	}
 
 	cronSched := os.Getenv("SYNC_CRON")
@@ -71,12 +80,12 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 	instance.Lock()
 	defer instance.Unlock()
 
+	processor := sourceproc.NewProcessor()
 	select {
 	case <-ctx.Done():
 		return
 	default:
 		instance.logger.Log("Background process: Updating sources...")
-		sourceproc.ClearCache()
 
 		cacheOnSync := os.Getenv("CACHE_ON_SYNC")
 		if len(strings.TrimSpace(cacheOnSync)) == 0 {
@@ -85,11 +94,14 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 
 		instance.logger.Log("Background process: Building merged M3U...")
 		if cacheOnSync == "true" {
-			if _, ok := os.LookupEnv("BASE_URL"); !ok {
-				instance.logger.Log("BASE_URL is required for CACHE_ON_SYNC to work.")
-			}
 			instance.logger.Log("CACHE_ON_SYNC enabled. Building cache.")
-			_ = sourceproc.RevalidatingGetM3U(nil, true)
+			if _, ok := os.LookupEnv("BASE_URL"); !ok {
+				instance.logger.Error("BASE_URL is required for CACHE_ON_SYNC to work.")
+				return
+			}
+			if err := processor.Run(ctx, nil); err == nil {
+				instance.m3uHandler.SetProcessedPath(processor.GetResultPath())
+			}
 		}
 	}
 }

@@ -3,7 +3,6 @@ package buffer
 import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy/stream/config"
-	sourceproc "m3u-stream-merger/source_processor"
 	"m3u-stream-merger/store"
 	"sync"
 	"sync/atomic"
@@ -39,21 +38,21 @@ func NewStreamRegistry(config *config.StreamConfig, cm *store.ConcurrencyManager
 
 func (r *StreamRegistry) GetOrCreateCoordinator(streamID string) *StreamCoordinator {
 	coordId := streamID
-	if !r.Unrestrict {
-		streamInfo, err := sourceproc.DecodeSlug(streamID)
-		if err != nil {
-			r.logger.Logf("Invalid m3uID for GetOrCreateCoordinator from %s", streamID)
-			return nil
-		}
+	// if !r.Unrestrict {
+	// 	streamInfo, err := sourceproc.DecodeSlug(streamID)
+	// 	if err != nil {
+	// 		r.logger.Logf("Invalid m3uID for GetOrCreateCoordinator from %s", streamID)
+	// 		return nil
+	// 	}
 
-		existingStreams := sourceproc.GetCurrentStreams()
+	// 	existingStreams := sourceproc.GetCurrentStreams()
 
-		if _, ok := existingStreams[streamInfo.Title]; !ok {
-			r.logger.Logf("Invalid m3uID for GetOrCreateCoordinator from %s", streamID)
-			return nil
-		}
-		coordId = streamInfo.Title
-	}
+	// 	if _, ok := existingStreams[streamInfo.Title]; !ok {
+	// 		r.logger.Logf("Invalid m3uID for GetOrCreateCoordinator from %s", streamID)
+	// 		return nil
+	// 	}
+	// 	coordId = streamInfo.Title
+	// }
 
 	if coord, ok := r.coordinators.Load(coordId); ok {
 		return coord.(*StreamCoordinator)

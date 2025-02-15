@@ -7,19 +7,22 @@ import (
 	"time"
 
 	"m3u-stream-merger/logger"
-	sourceproc "m3u-stream-merger/source_processor"
 )
 
 type M3UHTTPHandler struct {
-	logger logger.Logger
-	Cache  *sourceproc.M3UCache
+	logger        logger.Logger
+	processedPath string
 }
 
-func NewM3UHTTPHandler(logger logger.Logger) *M3UHTTPHandler {
+func NewM3UHTTPHandler(logger logger.Logger, processedPath string) *M3UHTTPHandler {
 	return &M3UHTTPHandler{
-		logger: logger,
-		Cache:  sourceproc.M3uCache,
+		logger:        logger,
+		processedPath: processedPath,
 	}
+}
+
+func (h *M3UHTTPHandler) SetProcessedPath(path string) {
+	h.processedPath = path
 }
 
 func (h *M3UHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -30,11 +33,12 @@ func (h *M3UHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/plain")
-	content := sourceproc.RevalidatingGetM3U(r, false)
-	if _, err := w.Write([]byte(content)); err != nil {
-		h.logger.Debugf("Error writing http response: %v", err)
+	if h.processedPath == "" {
+		http.Error(w, "No processed M3U found.", http.StatusNotFound)
+		return
 	}
+
+	http.ServeFile(w, r, h.processedPath)
 }
 
 func (h *M3UHTTPHandler) handleAuth(r *http.Request) bool {
