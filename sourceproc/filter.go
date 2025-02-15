@@ -96,7 +96,8 @@ func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
 func loadStreamURLs(stream *StreamInfo, m3uIndex string) error {
 	safeTitle := base64.StdEncoding.EncodeToString([]byte(stream.Title))
 	fileName := fmt.Sprintf("%s_%s*", safeTitle, m3uIndex)
-	globPattern := filepath.Join(config.GetStreamsDirPath(), fileName)
+	// Search across all shard directories
+	globPattern := filepath.Join(config.GetStreamsDirPath(), "*", fileName)
 
 	fileMatches, err := filepath.Glob(globPattern)
 	if err != nil {
@@ -106,6 +107,7 @@ func loadStreamURLs(stream *StreamInfo, m3uIndex string) error {
 	stream.URLs[m3uIndex] = make(map[string]string)
 
 	for _, fileMatch := range fileMatches {
+		// Extract filename from path (works with sharded structure)
 		fileNameSplit := filepath.Base(fileMatch)
 		parts := strings.Split(fileNameSplit, "|")
 		if len(parts) != 2 {
