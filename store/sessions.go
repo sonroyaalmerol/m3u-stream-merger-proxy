@@ -9,11 +9,10 @@ import (
 )
 
 type Session struct {
-	ID             string
-	CreatedAt      time.Time
-	TestedIndexes  []string
-	InvalidIndexes []string
-	Mutex          sync.RWMutex
+	ID            string
+	CreatedAt     time.Time
+	TestedIndexes []string
+	Mutex         sync.RWMutex
 }
 
 var sessionStore = struct {
@@ -33,10 +32,9 @@ func GetOrCreateSession(r *http.Request) *Session {
 	}
 
 	session = &Session{
-		ID:             fingerprint,
-		CreatedAt:      time.Now(),
-		TestedIndexes:  []string{},
-		InvalidIndexes: []string{},
+		ID:            fingerprint,
+		CreatedAt:     time.Now(),
+		TestedIndexes: []string{},
 	}
 
 	sessionStore.Lock()
@@ -71,21 +69,4 @@ func (s *Session) GetTestedIndexes() []string {
 	defer sessionStore.RUnlock()
 
 	return s.TestedIndexes
-}
-
-func (s *Session) AddInvalidIndex(index string) {
-	s.InvalidIndexes = append(s.InvalidIndexes, index)
-
-	logger.Default.Debugf("Adding invalid index for session - %s: %v", s.ID, s.InvalidIndexes)
-
-	sessionStore.Lock()
-	sessionStore.sessions[s.ID] = s
-	sessionStore.Unlock()
-}
-
-func (s *Session) GetInvalidIndexes() []string {
-	sessionStore.RLock()
-	defer sessionStore.RUnlock()
-
-	return s.InvalidIndexes
 }

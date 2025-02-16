@@ -135,7 +135,8 @@ func (h *StreamHTTPHandler) handleExitCode(code int,
 
 	switch code {
 	case proxy.StatusIncompatible:
-		session.AddInvalidIndex(lbResult.Index + "|" + lbResult.SubIndex)
+		h.logger.Errorf("Finished handling M3U8 %s request but failed to parse contents.",
+			r.Method, r.RemoteAddr)
 		fallthrough
 	case proxy.StatusEOF:
 		fallthrough
