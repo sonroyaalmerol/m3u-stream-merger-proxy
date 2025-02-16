@@ -194,7 +194,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 				}
 
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, sClient *client.StreamClient, exitStatus chan<- int) {
-					sClient.WriteHeader(lbRes.Response.StatusCode)
+					_ = sClient.WriteHeader(lbRes.Response.StatusCode)
 				}
 
 				return manager
@@ -217,7 +217,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 				}
 
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, sClient *client.StreamClient, exitStatus chan<- int) {
-					sClient.WriteHeader(lbRes.Response.StatusCode)
+					_ = sClient.WriteHeader(lbRes.Response.StatusCode)
 				}
 
 				manager.getRegistryFunc = func() *buffer.StreamRegistry {
@@ -240,7 +240,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 				}
 
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, sClient *client.StreamClient, exitStatus chan<- int) {
-					sClient.WriteHeader(lbRes.Response.StatusCode)
+					_ = sClient.WriteHeader(lbRes.Response.StatusCode)
 				}
 
 				manager.getCmFunc = func() *store.ConcurrencyManager {
@@ -312,7 +312,7 @@ func TestStreamHTTPHandler_DisconnectionConcurrency(t *testing.T) {
 				}
 
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, sClient *client.StreamClient, exitStatus chan<- int) {
-					sClient.WriteHeader(lbRes.Response.StatusCode)
+					_ = sClient.WriteHeader(lbRes.Response.StatusCode)
 					// Randomly decide between normal completion, client disconnect, or EOF
 					time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond)
 					outcomes := []int{
@@ -356,7 +356,7 @@ func TestStreamHTTPHandler_DisconnectionConcurrency(t *testing.T) {
 				}
 
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, sClient *client.StreamClient, exitStatus chan<- int) {
-					sClient.WriteHeader(lbRes.Response.StatusCode)
+					_ = sClient.WriteHeader(lbRes.Response.StatusCode)
 					streamWG.Done()
 					streamWG.Wait()                        // Wait for all streams to be ready
 					exitStatus <- proxy.StatusClientClosed // All disconnect at once
@@ -396,7 +396,7 @@ func TestStreamHTTPHandler_DisconnectionConcurrency(t *testing.T) {
 				}
 
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, sClient *client.StreamClient, exitStatus chan<- int) {
-					sClient.WriteHeader(lbRes.Response.StatusCode)
+					_ = sClient.WriteHeader(lbRes.Response.StatusCode)
 					time.Sleep(time.Duration(rand.Intn(50)) * time.Millisecond)
 
 					// Mix of different completion statuses including retry scenarios
@@ -451,7 +451,7 @@ func TestStreamHTTPHandler_DisconnectionConcurrency(t *testing.T) {
 				}
 
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, sClient *client.StreamClient, exitStatus chan<- int) {
-					sClient.WriteHeader(lbRes.Response.StatusCode)
+					_ = sClient.WriteHeader(lbRes.Response.StatusCode)
 					// Very short-lived connections
 					time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
 					exitStatus <- proxy.StatusClientClosed
