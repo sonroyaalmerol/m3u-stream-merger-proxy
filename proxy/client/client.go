@@ -66,6 +66,10 @@ func (sc *StreamClient) WriteHeader(statusCode int) error {
 	return nil
 }
 
+func (sc *StreamClient) GetWriter() http.ResponseWriter {
+	return sc.writer
+}
+
 func (sc *StreamClient) IsWritable() bool {
 	return sc.writer != nil
 }

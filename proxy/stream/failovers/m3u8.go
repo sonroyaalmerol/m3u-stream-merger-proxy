@@ -32,7 +32,7 @@ func (p *M3U8Processor) ProcessM3U8Stream(
 	streamClient.SetHeader("Content-Type", contentType)
 	for reader.Scan() {
 		line := reader.Text()
-		if err := p.processLine(line, streamClient, base); err != nil {
+		if err := p.processLine(lbResult, line, streamClient, base); err != nil {
 			return fmt.Errorf("process line error: %w", err)
 		}
 	}
@@ -41,6 +41,7 @@ func (p *M3U8Processor) ProcessM3U8Stream(
 }
 
 func (p *M3U8Processor) processLine(
+	lbResult *loadbalancer.LoadBalancerResult,
 	line string,
 	streamClient *client.StreamClient,
 	baseURL *url.URL,
@@ -53,10 +54,11 @@ func (p *M3U8Processor) processLine(
 		return p.writeLine(streamClient, line)
 	}
 
-	return p.processURL(line, streamClient, baseURL)
+	return p.processURL(lbResult, line, streamClient, baseURL)
 }
 
 func (p *M3U8Processor) processURL(
+	lbResult *loadbalancer.LoadBalancerResult,
 	line string,
 	streamClient *client.StreamClient,
 	baseURL *url.URL,
@@ -71,7 +73,12 @@ func (p *M3U8Processor) processURL(
 		u = baseURL.ResolveReference(u)
 	}
 
-	return p.writeLine(streamClient, u.String())
+	segment := M3U8Segment{
+		URL:       u.String(),
+		SourceM3U: lbResult.Index + "|" + lbResult.SubIndex,
+	}
+
+	return p.writeLine(streamClient, generateSegmentURL(&segment))
 }
 
 func (p *M3U8Processor) writeLine(streamClient *client.StreamClient, line string) error {

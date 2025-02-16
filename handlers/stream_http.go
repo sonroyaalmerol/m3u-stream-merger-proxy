@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"path"
 	"strings"
@@ -10,6 +12,8 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/client"
+	"m3u-stream-merger/proxy/stream/failovers"
+	"m3u-stream-merger/utils"
 )
 
 type StreamHTTPHandler struct {
@@ -28,6 +32,12 @@ func (h *StreamHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	streamClient := client.NewStreamClient(w, r)
 
 	h.handleStream(r.Context(), streamClient)
+}
+
+func (h *StreamHTTPHandler) ServeSegmentHTTP(w http.ResponseWriter, r *http.Request) {
+	streamClient := client.NewStreamClient(w, r)
+
+	h.handleSegmentStream(streamClient)
 }
 
 func (h *StreamHTTPHandler) extractStreamURL(urlPath string) string {
@@ -119,5 +129,49 @@ func (h *StreamHTTPHandler) handleExitCode(code int, r *http.Request) bool {
 		h.logger.Logf("Unable to write to client. Assuming stream has been closed: %s",
 			r.RemoteAddr)
 		return true
+	}
+}
+
+func (h *StreamHTTPHandler) handleSegmentStream(streamClient *client.StreamClient) {
+	r := streamClient.Request
+
+	h.logger.Logf("Received request from %s for URL: %s", r.RemoteAddr, r.URL.Path)
+
+	streamId := h.extractStreamURL(r.URL.Path)
+	if streamId == "" {
+		h.logger.Logf("Invalid m3uID for request from %s: %s", r.RemoteAddr, r.URL.Path)
+		return
+	}
+
+	segment, err := failovers.ParseSegmentId(streamId)
+	if err != nil {
+		h.logger.Errorf("Segment parsing error %s: %s", r.RemoteAddr, r.URL.Path)
+		streamClient.WriteHeader(http.StatusInternalServerError)
+		streamClient.Write([]byte(fmt.Sprintf("Segment parsing error: %v", err)))
+		return
+	}
+
+	resp, err := utils.HTTPClient.Get(segment.URL)
+	if err != nil {
+		h.logger.Errorf("Failed to fetch URL: %v", err)
+		streamClient.WriteHeader(http.StatusInternalServerError)
+		streamClient.Write([]byte(fmt.Sprintf("Failed to fetch URL: %v", err)))
+		return
+	}
+	defer resp.Body.Close()
+
+	// Copy all headers from the remote response.
+	for key, values := range resp.Header {
+		for _, value := range values {
+			streamClient.Header().Add(key, value)
+		}
+	}
+
+	// Write the status code from the remote response.
+	streamClient.WriteHeader(resp.StatusCode)
+
+	// Stream the body of the remote response to the client.
+	if _, err = io.Copy(streamClient.GetWriter(), resp.Body); err != nil {
+		h.logger.Logf("Error copying response body: %v", err)
 	}
 }
