@@ -131,6 +131,8 @@ func (h *StreamHTTPHandler) writeHeaders(w http.ResponseWriter, resp *http.Respo
 func (h *StreamHTTPHandler) handleExitCode(code int,
 	lbResult *loadbalancer.LoadBalancerResult, r *http.Request,
 	session *store.Session) bool {
+	index := lbResult.Index + "|" + lbResult.SubIndex
+
 	switch code {
 	case proxy.StatusIncompatible:
 		session.AddInvalidIndex(lbResult.Index + "|" + lbResult.SubIndex)
@@ -138,7 +140,6 @@ func (h *StreamHTTPHandler) handleExitCode(code int,
 	case proxy.StatusEOF:
 		fallthrough
 	case proxy.StatusServerError:
-		index := lbResult.Index + "|" + lbResult.SubIndex
 		session.SetTestedIndexes(append(session.GetTestedIndexes(), index))
 		h.logger.Logf("Retrying other servers...")
 		return false

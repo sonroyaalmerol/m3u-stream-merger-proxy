@@ -2,6 +2,7 @@ package buffer
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -73,8 +74,22 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 				c.writeError(fmt.Errorf("stream timeout: no new segments"), proxy.StatusEOF)
 				return
 			}
-			m3uPlaylist, err := io.ReadAll(lbResult.Response.Body)
+
+			// Copy response body for fallback
+			httpRequestBody := &bytes.Buffer{}
+			_, err := io.Copy(httpRequestBody, lbResult.Response.Body)
+			if err != nil {
+				c.writeError(err, proxy.StatusServerError)
+				return
+			}
+
 			lbResult.Response.Body.Close()
+
+			byteClone := bytes.Clone(httpRequestBody.Bytes())
+			requestBodyClone := bytes.NewBuffer(byteClone)
+
+			lbResult.Response.Body = io.NopCloser(httpRequestBody)
+			m3uPlaylist, err := io.ReadAll(requestBodyClone)
 			if err != nil {
 				c.writeError(err, proxy.StatusServerError)
 				return
@@ -178,7 +193,7 @@ func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string
 	c.logger.Debugf("Detected segment content type: %s", contentType)
 
 	if !safeConcatTypes[strings.ToLower(contentType)] {
-		c.WasInvalid.Store(true)
+		c.GetWriterLBResult().IsInvalid.Store(true)
 		c.logger.Errorf("%s cannot be safely concatenated and is not supported by this proxy.", contentType)
 		return fmt.Errorf("content type %s cannot be safely concatenated", contentType)
 	}

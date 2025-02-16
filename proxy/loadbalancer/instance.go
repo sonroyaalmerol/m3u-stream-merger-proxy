@@ -13,6 +13,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -74,10 +75,11 @@ func NewLoadBalancerInstance(
 }
 
 type LoadBalancerResult struct {
-	Response *http.Response
-	URL      string
-	Index    string
-	SubIndex string
+	Response  *http.Response
+	URL       string
+	Index     string
+	SubIndex  string
+	IsInvalid atomic.Bool
 }
 
 func (instance *LoadBalancerInstance) Balance(ctx context.Context, req *http.Request, session *store.Session) (*LoadBalancerResult, error) {

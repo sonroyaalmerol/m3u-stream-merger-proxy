@@ -87,7 +87,6 @@ type StreamCoordinator struct {
 
 	LBResultOnWrite atomic.Pointer[loadbalancer.LoadBalancerResult]
 
-	WasInvalid    atomic.Bool
 	WrittenHeader atomic.Bool
 
 	// writeSeq is an atomic counter to track the order of chunks.
