@@ -72,6 +72,7 @@ func (instance *StreamInstance) ProxyStream(
 
 	if lbResult.IsInvalid.Load() && utils.IsAnM3U8Media(lbResult.Response) {
 		instance.logger.Logf("Source is known to have an incompatible media type for an M3U8. Trying a fallback passthrough method.")
+		instance.logger.Logf("Passthrough method will not have any shared buffer or concurrency check support.")
 
 		if err := instance.failoverProc.ProcessM3U8Stream(lbResult, w); err != nil {
 			instance.logger.Logf("Stream is invalid. Retrying other servers...")
