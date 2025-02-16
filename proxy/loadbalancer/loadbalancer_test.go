@@ -539,7 +539,6 @@ func TestSessionStatePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	streamId = instance.GetStreamId(req)
 
 	if result3.Index != "2" {
 		t.Errorf("Expected index 2, got %s", result3.Index)

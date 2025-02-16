@@ -93,7 +93,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 				}
 
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, sClient *client.StreamClient, exitStatus chan<- int) {
-					sClient.WriteHeader(lbRes.Response.StatusCode)
+					_ = sClient.WriteHeader(lbRes.Response.StatusCode)
 					exitStatus <- proxy.StatusM3U8Parsed // Normal completion
 				}
 
@@ -127,7 +127,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 
 				firstCall := true
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, sClient *client.StreamClient, exitStatus chan<- int) {
-					sClient.WriteHeader(lbRes.Response.StatusCode)
+					_ = sClient.WriteHeader(lbRes.Response.StatusCode)
 					if firstCall {
 						firstCall = false
 						exitStatus <- proxy.StatusM3U8ParseError // Trigger retry
@@ -161,7 +161,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 
 				manager.proxyStreamFunc = func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, sClient *client.StreamClient, exitStatus chan<- int) {
 					// Simulate a long operation that gets cancelled
-					sClient.WriteHeader(lbRes.Response.StatusCode)
+					_ = sClient.WriteHeader(lbRes.Response.StatusCode)
 					select {
 					case <-ctx.Done():
 						exitStatus <- proxy.StatusClientClosed

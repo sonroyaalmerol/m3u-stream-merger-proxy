@@ -72,7 +72,7 @@ func (sc *StreamClient) IsWritable() bool {
 
 func (sc *StreamClient) Write(data []byte) (int, error) {
 	if !sc.HeadersSent {
-		sc.WriteHeader(http.StatusOK)
+		_ = sc.WriteHeader(http.StatusOK)
 	}
 	return sc.writer.Write(data)
 }
