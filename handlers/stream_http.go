@@ -115,8 +115,10 @@ func (h *StreamHTTPHandler) writeHeaders(w http.ResponseWriter, resp *http.Respo
 
 	isM3u8 := utils.IsAnM3U8Media(resp)
 
+	includeContentLength := resp.StatusCode == 206
+
 	for k, v := range resp.Header {
-		if strings.ToLower(k) == "content-length" || (strings.ToLower(k) == "content-type" && isM3u8) {
+		if (strings.ToLower(k) == "content-length" && !includeContentLength) || (strings.ToLower(k) == "content-type" && isM3u8) {
 			continue
 		}
 		for _, val := range v {
