@@ -11,6 +11,7 @@ import (
 	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/proxy/stream/config"
 	"m3u-stream-merger/store"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -74,6 +75,10 @@ type StreamCoordinator struct {
 	WriterCtxMu  sync.Mutex
 	WriterActive atomic.Bool
 
+	WriterRespHeader atomic.Pointer[http.Header]
+	respHeaderSet    chan struct{}
+	m3uHeaderSet     atomic.Bool
+
 	LastError atomic.Value
 	logger    logger.Logger
 	config    *config.StreamConfig
@@ -86,8 +91,6 @@ type StreamCoordinator struct {
 	state int32
 
 	LBResultOnWrite atomic.Pointer[loadbalancer.LoadBalancerResult]
-
-	WrittenHeader atomic.Bool
 
 	// writeSeq is an atomic counter to track the order of chunks.
 	writeSeq int64
@@ -119,13 +122,14 @@ func NewStreamCoordinator(streamID string, config *config.StreamConfig, cm *stor
 	}
 
 	coord := &StreamCoordinator{
-		Buffer:     r,
-		WriterChan: make(chan struct{}, 1),
-		logger:     logger,
-		config:     config,
-		cm:         cm,
-		streamID:   streamID,
-		broadcast:  make(chan struct{}),
+		Buffer:        r,
+		WriterChan:    make(chan struct{}, 1),
+		logger:        logger,
+		config:        config,
+		cm:            cm,
+		streamID:      streamID,
+		broadcast:     make(chan struct{}),
+		respHeaderSet: make(chan struct{}),
 	}
 	atomic.StoreInt32(&coord.state, stateActive)
 	coord.LastError.Store((*ChunkData)(nil))
@@ -133,6 +137,13 @@ func NewStreamCoordinator(streamID string, config *config.StreamConfig, cm *stor
 	logger.Debugf("StreamCoordinator initialized with buffer size: %d, chunk size: %d",
 		config.SharedBufferSize, config.ChunkSize)
 	return coord
+}
+
+func (c *StreamCoordinator) WaitHeaders(ctx context.Context) {
+	select {
+	case <-c.respHeaderSet:
+	case <-ctx.Done():
+	}
 }
 
 // GetWriterLBResult returns the load balancer result for the current writer call.
@@ -170,6 +181,7 @@ func (c *StreamCoordinator) UnregisterClient() {
 		default:
 			c.logger.Debug("Writer channel already has shutdown signal")
 		}
+		c.WriterRespHeader.Store(nil)
 		c.ClearBuffer()
 		c.notifySubscribers()
 	}

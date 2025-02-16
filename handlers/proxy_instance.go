@@ -7,6 +7,7 @@ import (
 
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
+	"m3u-stream-merger/proxy/client"
 	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/proxy/stream"
 	"m3u-stream-merger/proxy/stream/buffer"
@@ -17,9 +18,9 @@ import (
 type ProxyInstance interface {
 	GetConcurrencyManager() *store.ConcurrencyManager
 	GetStreamRegistry() *buffer.StreamRegistry
-	LoadBalancer(ctx context.Context, req *http.Request, session *store.Session) (*loadbalancer.LoadBalancerResult, error)
+	LoadBalancer(ctx context.Context, req *http.Request) (*loadbalancer.LoadBalancerResult, error)
 	ProxyStream(ctx context.Context, coordinator *buffer.StreamCoordinator,
-		lbResult *loadbalancer.LoadBalancerResult, r *http.Request, w http.ResponseWriter,
+		lbResult *loadbalancer.LoadBalancerResult, sClient *client.StreamClient,
 		exitStatus chan<- int)
 }
 
@@ -43,15 +44,13 @@ func NewDefaultProxyInstance() *DefaultProxyInstance {
 	}
 }
 
-func (sm *DefaultProxyInstance) LoadBalancer(ctx context.Context, req *http.Request,
-	session *store.Session) (*loadbalancer.LoadBalancerResult, error) {
-	instance := loadbalancer.NewLoadBalancerInstance(sm.cm, sm.lbConfig,
-		loadbalancer.WithLogger(sm.logger))
-	return instance.Balance(ctx, req, session)
+func (sm *DefaultProxyInstance) LoadBalancer(ctx context.Context, req *http.Request) (*loadbalancer.LoadBalancerResult, error) {
+	instance := loadbalancer.NewLoadBalancerInstance(sm.cm, sm.lbConfig, loadbalancer.WithLogger(sm.logger))
+	return instance.Balance(ctx, req)
 }
 
 func (sm *DefaultProxyInstance) ProxyStream(ctx context.Context, coordinator *buffer.StreamCoordinator,
-	lbResult *loadbalancer.LoadBalancerResult, r *http.Request, w http.ResponseWriter,
+	lbResult *loadbalancer.LoadBalancerResult, streamClient *client.StreamClient,
 	exitStatus chan<- int) {
 	instance, err := stream.NewStreamInstance(sm.cm, sm.streamConfig,
 		stream.WithLogger(sm.logger))
@@ -60,7 +59,7 @@ func (sm *DefaultProxyInstance) ProxyStream(ctx context.Context, coordinator *bu
 		exitStatus <- proxy.StatusServerError
 		return
 	}
-	instance.ProxyStream(ctx, coordinator, lbResult, r, w, exitStatus)
+	instance.ProxyStream(ctx, coordinator, lbResult, streamClient, exitStatus)
 }
 
 func (sm *DefaultProxyInstance) GetConcurrencyManager() *store.ConcurrencyManager {

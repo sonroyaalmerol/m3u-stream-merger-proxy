@@ -6,6 +6,7 @@ import (
 	"io"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
+	"m3u-stream-merger/proxy/client"
 	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/proxy/stream/buffer"
 	"m3u-stream-merger/proxy/stream/config"
@@ -38,9 +39,12 @@ type StreamResult struct {
 func (h *StreamHandler) HandleVOD(
 	ctx context.Context,
 	lbResult *loadbalancer.LoadBalancerResult,
-	writer ResponseWriter,
-	remoteAddr string,
+	streamClient *client.StreamClient,
 ) StreamResult {
+	remoteAddr := ""
+	if streamClient.Request != nil {
+		remoteAddr = streamClient.Request.RemoteAddr
+	}
 	h.logger.Logf("VOD request detected from: %s", remoteAddr)
 	h.logger.Warn("VODs do not support shared buffer.")
 
@@ -71,13 +75,11 @@ func (h *StreamHandler) HandleVOD(
 			case result.err != nil:
 				return StreamResult{0, fmt.Errorf("Server error for VOD: %s", remoteAddr), proxy.StatusServerError}
 			case result.err == nil:
-				if _, err := writer.Write(buffer[:result.n]); err != nil {
+				if _, err := streamClient.Write(buffer[:result.n]); err != nil {
 					return StreamResult{0, fmt.Errorf("Server error for VOD: %s", remoteAddr), proxy.StatusClientClosed}
 				}
 
-				if flusher, ok := writer.(http.Flusher); ok {
-					flusher.Flush()
-				}
+				streamClient.Flush()
 			}
 		}
 	}
@@ -86,9 +88,12 @@ func (h *StreamHandler) HandleVOD(
 func (h *StreamHandler) HandleStream(
 	ctx context.Context,
 	lbResult *loadbalancer.LoadBalancerResult,
-	writer ResponseWriter,
-	remoteAddr string,
+	streamClient *client.StreamClient,
 ) StreamResult {
+	remoteAddr := ""
+	if streamClient.Request != nil {
+		remoteAddr = streamClient.Request.RemoteAddr
+	}
 	if h.coordinator == nil {
 		h.logger.Error("handleBufferedStream: coordinator is nil")
 		return StreamResult{0, fmt.Errorf("coordinator is nil"), proxy.StatusServerError}
@@ -119,9 +124,8 @@ func (h *StreamHandler) HandleStream(
 				h.coordinator.InitializationMu.Unlock()
 			}()
 			if utils.IsAnM3U8Media(lbResult.Response) {
-				h.coordinator.StartHLSWriter(h.coordinator.WriterCtx, lbResult, writer)
+				h.coordinator.StartHLSWriter(h.coordinator.WriterCtx, lbResult)
 			} else {
-				writer.WriteHeader(lbResult.Response.StatusCode)
 				h.coordinator.StartMediaWriter(h.coordinator.WriterCtx, lbResult)
 			}
 		}()
@@ -183,6 +187,18 @@ func (h *StreamHandler) HandleStream(
 		}
 	}()
 
+	respHeaders := h.coordinator.WriterRespHeader.Load()
+	if respHeaders == nil {
+		respHeaders = &http.Header{}
+	}
+
+	if lbResult.IsInvalid.Load() {
+		contentType := respHeaders.Get("Content-Type")
+		return StreamResult{0, fmt.Errorf("%s cannot be safely concatenated and is not supported by this proxy.", contentType), proxy.StatusIncompatible}
+	}
+
+	streamClient.ResponseHeaders = *respHeaders
+
 	for {
 		select {
 		case <-readerCtx.Done():
@@ -208,13 +224,16 @@ func (h *StreamHandler) HandleStream(
 
 					if chunk != nil && chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
 						// Protect against nil writer
-						if writer == nil {
+						if !streamClient.IsWritable() {
 							h.logger.Error("Writer is nil")
 							return StreamResult{bytesWritten, fmt.Errorf("writer is nil"), proxy.StatusServerError}
 						}
 
+						// ensure headers are set for reader
+						h.coordinator.WaitHeaders(readerCtx)
+
 						// Use a separate function for writing to handle panics
-						n, err := h.safeWrite(writer, chunk.Buffer.Bytes())
+						n, err := h.safeWrite(streamClient, chunk.Buffer.Bytes())
 						if err != nil {
 							// Clean up remaining chunks
 							for _, c := range chunks {
@@ -226,11 +245,9 @@ func (h *StreamHandler) HandleStream(
 						}
 						bytesWritten += int64(n)
 
-						if flusher, ok := writer.(StreamFlusher); ok {
-							// Protect against panic in flush
-							if err := h.safeFlush(flusher); err != nil {
-								return StreamResult{bytesWritten, err, proxy.StatusClientClosed}
-							}
+						// Protect against panic in flush
+						if err := h.safeFlush(streamClient); err != nil {
+							return StreamResult{bytesWritten, err, proxy.StatusClientClosed}
 						}
 					}
 					if chunk != nil {
@@ -241,9 +258,7 @@ func (h *StreamHandler) HandleStream(
 
 			// Handle any error chunk
 			if errChunk != nil {
-				if flusher, ok := writer.(StreamFlusher); ok {
-					h.safeFlush(flusher)
-				}
+				h.safeFlush(streamClient)
 				return StreamResult{bytesWritten, errChunk.Error, errChunk.Status}
 			}
 
@@ -261,7 +276,7 @@ func (h *StreamHandler) HandleStream(
 }
 
 // safeWrite attempts to write to the writer and recovers from panics
-func (h *StreamHandler) safeWrite(writer ResponseWriter, data []byte) (n int, err error) {
+func (h *StreamHandler) safeWrite(streamClient *client.StreamClient, data []byte) (n int, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			h.logger.Errorf("Panic in write: %v", r)
@@ -269,17 +284,17 @@ func (h *StreamHandler) safeWrite(writer ResponseWriter, data []byte) (n int, er
 		}
 	}()
 
-	return writer.Write(data)
+	return streamClient.Write(data)
 }
 
 // safeFlush attempts to flush the writer and recovers from panics
-func (h *StreamHandler) safeFlush(flusher StreamFlusher) error {
+func (h *StreamHandler) safeFlush(streamClient *client.StreamClient) error {
 	defer func() {
 		if r := recover(); r != nil {
 			h.logger.Errorf("Panic in flush: %v", r)
 		}
 	}()
 
-	flusher.Flush()
+	streamClient.Flush()
 	return nil
 }

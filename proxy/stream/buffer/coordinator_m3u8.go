@@ -37,7 +37,7 @@ type PlaylistMetadata struct {
 	IsMaster       bool
 }
 
-func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadbalancer.LoadBalancerResult, writer http.ResponseWriter) {
+func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadbalancer.LoadBalancerResult) {
 	defer func() {
 		c.LBResultOnWrite.Store(nil)
 		if r := recover(); r != nil {
@@ -47,6 +47,9 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 	}()
 
 	c.LBResultOnWrite.Store(lbResult)
+	c.WriterRespHeader.Store(nil)
+	c.respHeaderSet = make(chan struct{})
+	c.m3uHeaderSet.Store(false)
 	c.logger.Debug("StartHLSWriter: Beginning read loop")
 
 	c.cm.UpdateConcurrency(lbResult.Index, true)
@@ -127,7 +130,7 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 
 			if metadata.IsEndlist {
 				// Process remaining segments before ending
-				err = c.processSegments(ctx, metadata.Segments, writer)
+				err = c.processSegments(ctx, metadata.Segments)
 				if err != nil {
 					if err == ErrContentTypeM3U {
 						c.writeError(err, proxy.StatusIncompatible)
@@ -143,7 +146,7 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 				lastChangeTime = time.Now()
 				lastMediaSeq = metadata.MediaSequence
 
-				if err := c.processSegments(ctx, metadata.Segments, writer); err != nil {
+				if err := c.processSegments(ctx, metadata.Segments); err != nil {
 					if ctx.Err() != nil {
 						c.writeError(err, proxy.StatusServerError)
 						return
@@ -160,13 +163,13 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 	}
 }
 
-func (c *StreamCoordinator) processSegments(ctx context.Context, segments []string, writer http.ResponseWriter) error {
+func (c *StreamCoordinator) processSegments(ctx context.Context, segments []string) error {
 	for _, segment := range segments {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			if err := c.streamSegment(ctx, segment, writer); err != nil {
+			if err := c.streamSegment(ctx, segment); err != nil {
 				if err != io.EOF {
 					return err
 				}
@@ -176,7 +179,7 @@ func (c *StreamCoordinator) processSegments(ctx context.Context, segments []stri
 	return nil
 }
 
-func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string, writer http.ResponseWriter) error {
+func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string) error {
 	req, err := http.NewRequest("GET", segmentURL, nil)
 	if err != nil {
 		return fmt.Errorf("Error creating request to segment: %v", err)
@@ -198,14 +201,15 @@ func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string
 
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
-		contentType = "video/MP2T" // Default to MPEG-TS if we can't detect
+		resp.Header.Set("Content-Type", "video/MP2T")
 	}
 	c.logger.Debugf("Detected segment content type: %s", contentType)
 
 	if safeConcatTypes[strings.ToLower(contentType)] {
-		if !c.WrittenHeader.Load() {
-			writer.Header().Add("Content-Type", contentType)
-			c.WrittenHeader.Store(true)
+		if c.m3uHeaderSet.CompareAndSwap(false, true) {
+			c.WriterRespHeader.Store(&resp.Header)
+			c.GetWriterLBResult().IsInvalid.Store(false)
+			close(c.respHeaderSet)
 		}
 
 		return c.readAndWriteStream(ctx, resp.Body, func(b []byte) error {
@@ -219,8 +223,11 @@ func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string
 		})
 	}
 
-	c.GetWriterLBResult().IsInvalid.Store(true)
-	c.logger.Errorf("%s cannot be safely concatenated and is not supported by this proxy.", contentType)
+	if c.m3uHeaderSet.CompareAndSwap(false, true) {
+		c.WriterRespHeader.Store(&resp.Header)
+		c.GetWriterLBResult().IsInvalid.Store(true)
+		close(c.respHeaderSet)
+	}
 	return ErrContentTypeM3U
 }
 

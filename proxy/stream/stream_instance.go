@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
+	"m3u-stream-merger/proxy/client"
 	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/proxy/stream/buffer"
 	"m3u-stream-merger/proxy/stream/config"
 	"m3u-stream-merger/proxy/stream/failovers"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
-	"net/http"
 	"strings"
 )
 
@@ -61,20 +61,19 @@ func (instance *StreamInstance) ProxyStream(
 	ctx context.Context,
 	coordinator *buffer.StreamCoordinator,
 	lbResult *loadbalancer.LoadBalancerResult,
-	r *http.Request,
-	w http.ResponseWriter,
+	streamClient *client.StreamClient,
 	statusChan chan<- int,
 ) {
 	handler := NewStreamHandler(instance.config, coordinator, instance.logger)
 
 	var result StreamResult
 	if lbResult.Response.StatusCode == 206 || strings.HasSuffix(lbResult.URL, ".mp4") {
-		result = handler.HandleVOD(ctx, lbResult, w, r.RemoteAddr)
+		result = handler.HandleVOD(ctx, lbResult, streamClient)
 		if result.Error != nil {
 			instance.logger.Logf("Stream handler status: %v", result.Error)
 		}
 	} else {
-		result = handler.HandleStream(ctx, lbResult, w, r.RemoteAddr)
+		result = handler.HandleStream(ctx, lbResult, streamClient)
 		if result.Error != nil {
 			instance.logger.Logf("Stream handler status: %v", result.Error)
 		}
@@ -84,7 +83,7 @@ func (instance *StreamInstance) ProxyStream(
 		instance.logger.Logf("Source is known to have an incompatible media type for an M3U8. Trying a fallback passthrough method.")
 		instance.logger.Logf("Passthrough method will not have any shared buffer or concurrency check support.")
 
-		if err := instance.failoverProc.ProcessM3U8Stream(lbResult, w); err != nil {
+		if err := instance.failoverProc.ProcessM3U8Stream(lbResult, streamClient); err != nil {
 			instance.logger.Logf("Stream is invalid. Retrying other servers...")
 			statusChan <- proxy.StatusIncompatible
 			return

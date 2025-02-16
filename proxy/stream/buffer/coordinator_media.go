@@ -20,10 +20,16 @@ func (c *StreamCoordinator) StartMediaWriter(ctx context.Context, lbResult *load
 	defer lbResult.Response.Body.Close()
 
 	c.LBResultOnWrite.Store(lbResult)
+	c.WriterRespHeader.Store(nil)
+	c.respHeaderSet = make(chan struct{})
+
 	c.logger.Debug("StartMediaWriter: Beginning read loop")
 
 	c.cm.UpdateConcurrency(lbResult.Index, true)
 	defer c.cm.UpdateConcurrency(lbResult.Index, false)
+
+	c.WriterRespHeader.Store(&lbResult.Response.Header)
+	close(c.respHeaderSet)
 
 	err := c.readAndWriteStream(ctx, lbResult.Response.Body, func(b []byte) error {
 		chunk := newChunkData()

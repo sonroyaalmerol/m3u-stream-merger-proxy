@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"path"
 	"strings"
@@ -9,8 +10,7 @@ import (
 
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
-	"m3u-stream-merger/proxy/loadbalancer"
-	"m3u-stream-merger/store"
+	"m3u-stream-merger/proxy/client"
 	"m3u-stream-merger/utils"
 )
 
@@ -29,7 +29,9 @@ func NewStreamHTTPHandler(manager ProxyInstance, logger logger.Logger) *StreamHT
 func (h *StreamHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := h.handleStream(r.Context(), w, r); err != nil {
 		h.logger.Logf("Error handling stream: %v", err)
-		_, _ = w.Write([]byte{})
+		if err.Error() != "invalid m3uID: not found" {
+			_, _ = w.Write([]byte{})
+		}
 	}
 }
 
@@ -45,17 +47,18 @@ func (h *StreamHTTPHandler) extractStreamURL(urlPath string) string {
 func (h *StreamHTTPHandler) handleStream(ctx context.Context, w http.ResponseWriter,
 	r *http.Request) error {
 	h.logger.Logf("Received request from %s for URL: %s", r.RemoteAddr, r.URL.Path)
+
 	streamURL := h.extractStreamURL(r.URL.Path)
 	if streamURL == "" {
 		h.logger.Logf("Invalid m3uID for request from %s: %s",
 			r.RemoteAddr, r.URL.Path)
 		http.NotFound(w, r)
+		return fmt.Errorf("invalid m3uID: not found")
 	}
 
-	session := store.GetOrCreateSession(r)
-	firstWrite := true
-
 	coordinator := h.manager.GetStreamRegistry().GetOrCreateCoordinator(streamURL)
+
+	streamClient := client.NewStreamClient(w, r)
 
 	for {
 		lbResult := coordinator.GetWriterLBResult()
@@ -63,7 +66,7 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, w http.ResponseWri
 		if lbResult == nil {
 			h.logger.Logf("No existing shared buffer found for %s", streamURL)
 			h.logger.Logf("Client %s executing load balancer.", r.RemoteAddr)
-			lbResult, err = h.manager.LoadBalancer(ctx, r, session)
+			lbResult, err = h.manager.LoadBalancer(ctx, r)
 			if err != nil {
 				return err
 			}
@@ -71,20 +74,13 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, w http.ResponseWri
 			h.logger.Logf("Existing shared buffer found for %s", streamURL)
 		}
 
-		resp := lbResult.Response
-		if err := h.writeHeaders(w, resp, firstWrite); err != nil {
-			return err
-		}
-		firstWrite = false
-
 		exitStatus := make(chan int)
 		h.logger.Logf("Proxying %s to %s", r.RemoteAddr, lbResult.URL)
 
 		proxyCtx, cancel := context.WithCancel(ctx)
 		go func() {
 			defer cancel()
-			h.manager.ProxyStream(proxyCtx, coordinator, lbResult, r, w,
-				exitStatus)
+			h.manager.ProxyStream(proxyCtx, coordinator, lbResult, streamClient, exitStatus)
 		}()
 
 		select {
@@ -92,7 +88,7 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, w http.ResponseWri
 			h.logger.Logf("Client has closed the stream: %s", r.RemoteAddr)
 			return nil
 		case code := <-exitStatus:
-			if h.handleExitCode(code, lbResult, r, session) {
+			if h.handleExitCode(code, r) {
 				return nil
 			}
 			// Otherwise, retry with a new lbResult.
@@ -107,34 +103,35 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, w http.ResponseWri
 	}
 }
 
-func (h *StreamHTTPHandler) writeHeaders(w http.ResponseWriter, resp *http.Response,
-	firstWrite bool) error {
+func (h *StreamHTTPHandler) WriteHeaders(w http.ResponseWriter, resp *http.Response, firstWrite bool) error {
 	if !firstWrite {
 		return nil
 	}
 
-	isM3u8 := utils.IsAnM3U8Media(resp)
-
-	includeContentLength := resp.StatusCode == 206
-
-	for k, v := range resp.Header {
-		if (strings.ToLower(k) == "content-length" && !includeContentLength) || (strings.ToLower(k) == "content-type" && isM3u8) {
-			continue
-		}
-		for _, val := range v {
-			w.Header().Set(k, val)
-		}
+	// Validate status code
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		return fmt.Errorf("unsupported status code: %d", resp.StatusCode)
 	}
 
-	h.logger.Debugf("Headers set for response: %v", w.Header())
+	isM3u8 := utils.IsAnM3U8Media(resp)
+	includeContentLength := resp.StatusCode == http.StatusPartialContent
+
+	// Copy headers
+	for k, v := range resp.Header {
+		if (strings.EqualFold(k, "Content-Length") && !includeContentLength) || (strings.EqualFold(k, "Content-Type") && isM3u8) {
+			continue
+		}
+		w.Header()[k] = v
+	}
+
+	// Set the status code
+	w.WriteHeader(resp.StatusCode)
+
+	h.logger.Debugf("Headers set for response: %v with status %d", w.Header(), resp.StatusCode)
 	return nil
 }
 
-func (h *StreamHTTPHandler) handleExitCode(code int,
-	lbResult *loadbalancer.LoadBalancerResult, r *http.Request,
-	session *store.Session) bool {
-	index := lbResult.Index + "|" + lbResult.SubIndex
-
+func (h *StreamHTTPHandler) handleExitCode(code int, r *http.Request) bool {
 	switch code {
 	case proxy.StatusIncompatible:
 		h.logger.Errorf("Finished handling M3U8 %s request but failed to parse contents.",
@@ -143,7 +140,6 @@ func (h *StreamHTTPHandler) handleExitCode(code int,
 	case proxy.StatusEOF:
 		fallthrough
 	case proxy.StatusServerError:
-		session.SetTestedIndexes(append(session.GetTestedIndexes(), index))
 		h.logger.Logf("Retrying other servers...")
 		return false
 	case proxy.StatusM3U8Parsed:

@@ -8,6 +8,7 @@ import (
 	"io"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
+	"m3u-stream-merger/proxy/client"
 	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/proxy/stream/buffer"
 	"m3u-stream-merger/proxy/stream/config"
@@ -208,7 +209,9 @@ func TestM3U8StreamHandler_HandleStream(t *testing.T) {
 			writer := &mockResponseWriter{err: tt.writeError}
 			lbRes := loadbalancer.LoadBalancerResult{Response: resp, Index: "1"}
 
-			result := handler.HandleStream(ctx, &lbRes, writer, "test-addr")
+			streamClient := client.NewStreamClient(writer, req)
+
+			result := handler.HandleStream(ctx, &lbRes, streamClient)
 
 			if result.Status != tt.expectedResult.Status {
 				t.Errorf("HandleStream() status = %v, want %v", result.Status, tt.expectedResult.Status)
@@ -289,7 +292,8 @@ func TestStreamHandler_HandleStream(t *testing.T) {
 			writer := &mockResponseWriter{err: tt.writeError}
 			lbRes := loadbalancer.LoadBalancerResult{Response: resp, Index: "1"}
 
-			result := handler.HandleStream(ctx, &lbRes, writer, "test-addr")
+			streamClient := client.NewStreamClient(writer, nil)
+			result := handler.HandleStream(ctx, &lbRes, streamClient)
 
 			if result.Status != tt.expectedResult.Status {
 				t.Errorf("HandleStream() status = %v, want %v", result.Status, tt.expectedResult.Status)
@@ -389,8 +393,10 @@ func TestStreamInstance_ProxyStream(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
+			streamClient := client.NewStreamClient(writer, req)
+
 			lbRes := loadbalancer.LoadBalancerResult{Response: resp, Index: "1"}
-			instance.ProxyStream(ctx, coordinator, &lbRes, req, writer, statusChan)
+			instance.ProxyStream(ctx, coordinator, &lbRes, streamClient, statusChan)
 
 			select {
 			case status := <-statusChan:
