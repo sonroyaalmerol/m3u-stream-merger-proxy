@@ -69,14 +69,11 @@ func (instance *StreamInstance) ProxyStream(
 	var result StreamResult
 	if lbResult.Response.StatusCode == 206 || strings.HasSuffix(lbResult.URL, ".mp4") {
 		result = handler.HandleVOD(ctx, lbResult, streamClient)
-		if result.Error != nil {
-			instance.logger.Logf("Stream handler status: %v", result.Error)
-		}
 	} else {
 		result = handler.HandleStream(ctx, lbResult, streamClient)
-		if result.Error != nil {
-			instance.logger.Logf("Stream handler status: %v", result.Error)
-		}
+	}
+	if result.Error != nil {
+		instance.logger.Logf("Stream handler status: %v", result.Error)
 	}
 
 	if result.Status == proxy.StatusIncompatible && utils.IsAnM3U8Media(lbResult.Response) {
@@ -84,7 +81,6 @@ func (instance *StreamInstance) ProxyStream(
 		instance.logger.Logf("Passthrough method will not have any shared buffer or concurrency check support.")
 
 		if err := instance.failoverProc.ProcessM3U8Stream(lbResult, streamClient); err != nil {
-			instance.logger.Logf("Stream is invalid. Retrying other servers...")
 			statusChan <- proxy.StatusIncompatible
 			return
 		}
