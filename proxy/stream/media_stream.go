@@ -190,18 +190,6 @@ func (h *StreamHandler) HandleStream(
 		}
 	}()
 
-	respHeaders := h.coordinator.WriterRespHeader.Load()
-	if respHeaders == nil {
-		respHeaders = &http.Header{}
-	}
-
-	if lbResult.IsInvalid.Load() {
-		contentType := respHeaders.Get("Content-Type")
-		return StreamResult{0, fmt.Errorf("%s cannot be safely concatenated and is not supported by this proxy.", contentType), proxy.StatusIncompatible}
-	}
-
-	streamClient.ResponseHeaders = *respHeaders
-
 	for {
 		select {
 		case <-readerCtx.Done():
@@ -234,6 +222,17 @@ func (h *StreamHandler) HandleStream(
 
 						// ensure headers are set for reader
 						h.coordinator.WaitHeaders(readerCtx)
+						respHeaders := h.coordinator.WriterRespHeader.Load()
+						if respHeaders == nil {
+							respHeaders = &http.Header{}
+						}
+
+						if lbResult.IsInvalid.Load() {
+							contentType := respHeaders.Get("Content-Type")
+							return StreamResult{0, fmt.Errorf("%s cannot be safely concatenated and is not supported by this proxy.", contentType), proxy.StatusIncompatible}
+						}
+
+						streamClient.ResponseHeaders = *respHeaders
 
 						// Use a separate function for writing to handle panics
 						n, err := h.safeWrite(streamClient, chunk.Buffer.Bytes())
