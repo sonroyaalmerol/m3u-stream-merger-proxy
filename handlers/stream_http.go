@@ -11,7 +11,6 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/client"
-	"m3u-stream-merger/utils"
 )
 
 type StreamHTTPHandler struct {
@@ -101,34 +100,6 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, w http.ResponseWri
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
-}
-
-func (h *StreamHTTPHandler) WriteHeaders(w http.ResponseWriter, resp *http.Response, firstWrite bool) error {
-	if !firstWrite {
-		return nil
-	}
-
-	// Validate status code
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		return fmt.Errorf("unsupported status code: %d", resp.StatusCode)
-	}
-
-	isM3u8 := utils.IsAnM3U8Media(resp)
-	includeContentLength := resp.StatusCode == http.StatusPartialContent
-
-	// Copy headers
-	for k, v := range resp.Header {
-		if (strings.EqualFold(k, "Content-Length") && !includeContentLength) || (strings.EqualFold(k, "Content-Type") && isM3u8) {
-			continue
-		}
-		w.Header()[k] = v
-	}
-
-	// Set the status code
-	w.WriteHeader(resp.StatusCode)
-
-	h.logger.Debugf("Headers set for response: %v with status %d", w.Header(), resp.StatusCode)
-	return nil
 }
 
 func (h *StreamHTTPHandler) handleExitCode(code int, r *http.Request) bool {
