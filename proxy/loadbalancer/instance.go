@@ -278,7 +278,7 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 			continue
 		}
 
-		if resp.StatusCode <= 299 && resp.StatusCode >= 200 {
+		if resp.StatusCode > 299 || resp.StatusCode < 200 {
 			instance.logger.Errorf("Non-200 status code received: %d for %s %s", resp.StatusCode, method, url)
 			markTested(session, id)
 			continue
