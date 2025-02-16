@@ -9,7 +9,6 @@ import (
 	"os"
 	"path"
 	"strings"
-	"sync"
 	"time"
 
 	"m3u-stream-merger/logger"
@@ -20,18 +19,14 @@ import (
 )
 
 type StreamHTTPHandler struct {
-	manager               ProxyInstance
-	logger                logger.Logger
-	segmentCallDetectors  map[string]*failovers.SegmentCallDetector
-	segmentCallDetectorMu sync.RWMutex
-	knownInvalidM3U       sync.Map // map[string]struct{}
+	manager ProxyInstance
+	logger  logger.Logger
 }
 
 func NewStreamHTTPHandler(manager ProxyInstance, logger logger.Logger) *StreamHTTPHandler {
 	return &StreamHTTPHandler{
-		manager:              manager,
-		logger:               logger,
-		segmentCallDetectors: make(map[string]*failovers.SegmentCallDetector),
+		manager: manager,
+		logger:  logger,
 	}
 }
 
@@ -160,33 +155,6 @@ func (h *StreamHTTPHandler) handleSegmentStream(streamClient *client.StreamClien
 		_, _ = streamClient.Write([]byte(fmt.Sprintf("Segment parsing error: %v", err)))
 		return
 	}
-
-	segmentSource := segment.SourceM3U
-
-	h.segmentCallDetectorMu.RLock()
-	detector, exists := h.segmentCallDetectors[segmentSource]
-	h.segmentCallDetectorMu.RUnlock()
-
-	if !exists {
-		newDetector := failovers.NewSegmentCallDetector(
-			r.Context(),
-			h.manager.GetConcurrencyManager(),
-			segmentSource,
-			5*time.Second,
-		)
-
-		h.segmentCallDetectorMu.Lock()
-		// Use a final check to ensure that no detector exists.
-		if d, ok := h.segmentCallDetectors[segmentSource]; !ok {
-			h.segmentCallDetectors[segmentSource] = newDetector
-			detector = newDetector
-		} else {
-			detector = d
-		}
-		h.segmentCallDetectorMu.Unlock()
-	}
-
-	detector.SegmentCall()
 
 	resp, err := utils.HTTPClient.Get(segment.URL)
 	if err != nil {
