@@ -146,16 +146,16 @@ func (h *StreamHTTPHandler) handleSegmentStream(streamClient *client.StreamClien
 	segment, err := failovers.ParseSegmentId(streamId)
 	if err != nil {
 		h.logger.Errorf("Segment parsing error %s: %s", r.RemoteAddr, r.URL.Path)
-		streamClient.WriteHeader(http.StatusInternalServerError)
-		streamClient.Write([]byte(fmt.Sprintf("Segment parsing error: %v", err)))
+		_ = streamClient.WriteHeader(http.StatusInternalServerError)
+		_, _ = streamClient.Write([]byte(fmt.Sprintf("Segment parsing error: %v", err)))
 		return
 	}
 
 	resp, err := utils.HTTPClient.Get(segment.URL)
 	if err != nil {
 		h.logger.Errorf("Failed to fetch URL: %v", err)
-		streamClient.WriteHeader(http.StatusInternalServerError)
-		streamClient.Write([]byte(fmt.Sprintf("Failed to fetch URL: %v", err)))
+		_ = streamClient.WriteHeader(http.StatusInternalServerError)
+		_, _ = streamClient.Write([]byte(fmt.Sprintf("Failed to fetch URL: %v", err)))
 		return
 	}
 	defer resp.Body.Close()
@@ -168,7 +168,7 @@ func (h *StreamHTTPHandler) handleSegmentStream(streamClient *client.StreamClien
 	}
 
 	// Write the status code from the remote response.
-	streamClient.WriteHeader(resp.StatusCode)
+	_ = streamClient.WriteHeader(resp.StatusCode)
 
 	// Stream the body of the remote response to the client.
 	if _, err = io.Copy(streamClient.GetWriter(), resp.Body); err != nil {
