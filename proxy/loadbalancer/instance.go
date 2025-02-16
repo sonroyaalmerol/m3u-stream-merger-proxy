@@ -14,7 +14,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -79,11 +78,10 @@ func NewLoadBalancerInstance(
 }
 
 type LoadBalancerResult struct {
-	Response  *http.Response
-	URL       string
-	Index     string
-	SubIndex  string
-	IsInvalid atomic.Bool
+	Response *http.Response
+	URL      string
+	Index    string
+	SubIndex string
 }
 
 func (instance *LoadBalancerInstance) GetStreamId(req *http.Request) string {
@@ -122,7 +120,7 @@ func (instance *LoadBalancerInstance) Balance(ctx context.Context, req *http.Req
 	for lap := 0; lap < instance.config.MaxRetries || instance.config.MaxRetries == 0; lap++ {
 		instance.logger.Debugf("Stream attempt %d out of %d", lap+1, instance.config.MaxRetries)
 
-		result, err := instance.tryAllStreams(ctx, req.Method,  streamId)
+		result, err := instance.tryAllStreams(ctx, req.Method, streamId)
 		if err == nil {
 			return result, nil
 		}

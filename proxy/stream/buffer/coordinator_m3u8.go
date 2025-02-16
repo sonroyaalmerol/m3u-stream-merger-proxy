@@ -19,15 +19,6 @@ import (
 	"time"
 )
 
-var safeConcatTypes = map[string]bool{
-	"video/mp2t": true,
-	"video/mpeg": true,
-	"audio/aac":  true, // AAC in ADTS format can be concatenated
-	"audio/mpeg": true, // MP3 can be concatenated
-}
-
-var ErrContentTypeM3U = errors.New("content type is incompatible with proxy")
-
 type PlaylistMetadata struct {
 	TargetDuration float64
 	MediaSequence  int64
@@ -132,10 +123,6 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 				// Process remaining segments before ending
 				err = c.processSegments(ctx, metadata.Segments)
 				if err != nil {
-					if err == ErrContentTypeM3U {
-						c.writeError(err, proxy.StatusIncompatible)
-						return
-					}
 					c.logger.Errorf("Error processing segments: %v", err)
 				}
 				c.writeError(io.EOF, proxy.StatusEOF)
@@ -149,10 +136,6 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 				if err := c.processSegments(ctx, metadata.Segments); err != nil {
 					if ctx.Err() != nil {
 						c.writeError(err, proxy.StatusServerError)
-						return
-					}
-					if err == ErrContentTypeM3U {
-						c.writeError(err, proxy.StatusIncompatible)
 						return
 					}
 					lastErr = err
@@ -203,32 +186,22 @@ func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string
 	if contentType == "" {
 		resp.Header.Set("Content-Type", "video/MP2T")
 	}
-	c.logger.Debugf("Detected segment content type: %s", contentType)
-
-	if safeConcatTypes[strings.ToLower(contentType)] {
-		if c.m3uHeaderSet.CompareAndSwap(false, true) {
-			c.WriterRespHeader.Store(&resp.Header)
-			c.GetWriterLBResult().IsInvalid.Store(false)
-			close(c.respHeaderSet)
-		}
-
-		return c.readAndWriteStream(ctx, resp.Body, func(b []byte) error {
-			chunk := newChunkData()
-			_, _ = chunk.Buffer.Write(b)
-			chunk.Timestamp = time.Now()
-			if !c.Write(chunk) {
-				chunk.Reset()
-			}
-			return nil
-		})
-	}
 
 	if c.m3uHeaderSet.CompareAndSwap(false, true) {
 		c.WriterRespHeader.Store(&resp.Header)
-		c.GetWriterLBResult().IsInvalid.Store(true)
 		close(c.respHeaderSet)
 	}
-	return ErrContentTypeM3U
+
+	return c.readAndWriteStream(ctx, resp.Body, func(b []byte) error {
+		chunk := newChunkData()
+		_, _ = chunk.Buffer.Write(b)
+		chunk.Timestamp = time.Now()
+		if !c.Write(chunk) {
+			chunk.Reset()
+		}
+		return nil
+	})
+
 }
 
 func (c *StreamCoordinator) parsePlaylist(mediaURL string, content string) (*PlaylistMetadata, error) {

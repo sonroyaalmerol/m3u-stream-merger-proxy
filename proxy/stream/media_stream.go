@@ -12,9 +12,17 @@ import (
 	"m3u-stream-merger/proxy/stream/config"
 	"m3u-stream-merger/utils"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 )
+
+var safeConcatTypes = map[string]bool{
+	"video/mp2t": true,
+	"video/mpeg": true,
+	"audio/aac":  true, // AAC in ADTS format can be concatenated
+	"audio/mpeg": true, // MP3 can be concatenated
+}
 
 type StreamHandler struct {
 	config      *config.StreamConfig
@@ -227,11 +235,10 @@ func (h *StreamHandler) HandleStream(
 							respHeaders = &http.Header{}
 						}
 
-						if lbResult.IsInvalid.Load() {
-							contentType := respHeaders.Get("Content-Type")
-							return StreamResult{0, fmt.Errorf("%s cannot be safely concatenated and is not supported by this proxy.", contentType), proxy.StatusIncompatible}
+						contentType := respHeaders.Get("Content-Type")
+						if !safeConcatTypes[strings.ToLower(contentType)] && utils.IsAnM3U8Media(lbResult.Response) {
+							return StreamResult{bytesWritten, fmt.Errorf("%s cannot be safely concatenated and is not supported by this proxy.", contentType), proxy.StatusIncompatible}
 						}
-
 						streamClient.ResponseHeaders = *respHeaders
 
 						// Use a separate function for writing to handle panics
