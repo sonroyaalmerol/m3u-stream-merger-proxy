@@ -26,6 +26,8 @@ var safeConcatTypes = map[string]bool{
 	"audio/mpeg": true, // MP3 can be concatenated
 }
 
+var ErrContentTypeM3U = errors.New("content type is incompatible with proxy")
+
 type PlaylistMetadata struct {
 	TargetDuration float64
 	MediaSequence  int64
@@ -127,6 +129,10 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 				// Process remaining segments before ending
 				err = c.processSegments(ctx, metadata.Segments, writer)
 				if err != nil {
+					if err == ErrContentTypeM3U {
+						c.writeError(err, proxy.StatusIncompatible)
+						return
+					}
 					c.logger.Errorf("Error processing segments: %v", err)
 				}
 				c.writeError(io.EOF, proxy.StatusEOF)
@@ -140,6 +146,10 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 				if err := c.processSegments(ctx, metadata.Segments, writer); err != nil {
 					if ctx.Err() != nil {
 						c.writeError(err, proxy.StatusServerError)
+						return
+					}
+					if err == ErrContentTypeM3U {
+						c.writeError(err, proxy.StatusIncompatible)
 						return
 					}
 					lastErr = err
@@ -192,27 +202,27 @@ func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string
 	}
 	c.logger.Debugf("Detected segment content type: %s", contentType)
 
-	if !safeConcatTypes[strings.ToLower(contentType)] {
-		c.GetWriterLBResult().IsInvalid.Store(true)
-		c.logger.Errorf("%s cannot be safely concatenated and is not supported by this proxy.", contentType)
-		return fmt.Errorf("content type %s cannot be safely concatenated", contentType)
-	}
-
-	if !c.WrittenHeader.Load() {
-		writer.Header().Add("Content-Type", contentType)
-		writer.WriteHeader(resp.StatusCode)
-		c.WrittenHeader.Store(true)
-	}
-
-	return c.readAndWriteStream(ctx, resp.Body, func(b []byte) error {
-		chunk := newChunkData()
-		_, _ = chunk.Buffer.Write(b)
-		chunk.Timestamp = time.Now()
-		if !c.Write(chunk) {
-			chunk.Reset()
+	if safeConcatTypes[strings.ToLower(contentType)] {
+		if !c.WrittenHeader.Load() {
+			writer.Header().Add("Content-Type", contentType)
+			writer.WriteHeader(resp.StatusCode)
+			c.WrittenHeader.Store(true)
 		}
-		return nil
-	})
+
+		return c.readAndWriteStream(ctx, resp.Body, func(b []byte) error {
+			chunk := newChunkData()
+			_, _ = chunk.Buffer.Write(b)
+			chunk.Timestamp = time.Now()
+			if !c.Write(chunk) {
+				chunk.Reset()
+			}
+			return nil
+		})
+	}
+
+	c.GetWriterLBResult().IsInvalid.Store(true)
+	c.logger.Errorf("%s cannot be safely concatenated and is not supported by this proxy.", contentType)
+	return ErrContentTypeM3U
 }
 
 func (c *StreamCoordinator) parsePlaylist(mediaURL string, content string) (*PlaylistMetadata, error) {
