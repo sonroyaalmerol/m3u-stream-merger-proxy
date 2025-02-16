@@ -188,6 +188,7 @@ func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string
 	}
 
 	if c.m3uHeaderSet.CompareAndSwap(false, true) {
+		resp.Header.Del("Content-Length")
 		c.WriterRespHeader.Store(&resp.Header)
 		close(c.respHeaderSet)
 	}
