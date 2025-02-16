@@ -30,6 +30,7 @@ func (p *M3U8Processor) ProcessM3U8Stream(
 	contentType := lbResult.Response.Header.Get("Content-Type")
 
 	writer.Header().Add("Content-Type", contentType)
+	writer.WriteHeader(lbResult.Response.StatusCode)
 	for reader.Scan() {
 		line := reader.Text()
 		if err := p.processLine(line, writer, base); err != nil {
