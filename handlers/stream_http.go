@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"path"
 	"strings"
@@ -26,12 +25,9 @@ func NewStreamHTTPHandler(manager ProxyInstance, logger logger.Logger) *StreamHT
 }
 
 func (h *StreamHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if err := h.handleStream(r.Context(), w, r); err != nil {
-		h.logger.Logf("Error handling stream: %v", err)
-		if err.Error() != "invalid m3uID: not found" {
-			_, _ = w.Write([]byte{})
-		}
-	}
+	streamClient := client.NewStreamClient(w, r)
+
+	h.handleStream(r.Context(), streamClient)
 }
 
 func (h *StreamHTTPHandler) extractStreamURL(urlPath string) string {
@@ -43,21 +39,18 @@ func (h *StreamHTTPHandler) extractStreamURL(urlPath string) string {
 	return strings.TrimPrefix(parts[0], "/")
 }
 
-func (h *StreamHTTPHandler) handleStream(ctx context.Context, w http.ResponseWriter,
-	r *http.Request) error {
+func (h *StreamHTTPHandler) handleStream(ctx context.Context, streamClient *client.StreamClient) {
+	r := streamClient.Request
+
 	h.logger.Logf("Received request from %s for URL: %s", r.RemoteAddr, r.URL.Path)
 
 	streamURL := h.extractStreamURL(r.URL.Path)
 	if streamURL == "" {
-		h.logger.Logf("Invalid m3uID for request from %s: %s",
-			r.RemoteAddr, r.URL.Path)
-		http.NotFound(w, r)
-		return fmt.Errorf("invalid m3uID: not found")
+		h.logger.Logf("Invalid m3uID for request from %s: %s", r.RemoteAddr, r.URL.Path)
+		return
 	}
 
 	coordinator := h.manager.GetStreamRegistry().GetOrCreateCoordinator(streamURL)
-
-	streamClient := client.NewStreamClient(w, r)
 
 	for {
 		lbResult := coordinator.GetWriterLBResult()
@@ -67,7 +60,8 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, w http.ResponseWri
 			h.logger.Logf("Client %s executing load balancer.", r.RemoteAddr)
 			lbResult, err = h.manager.LoadBalancer(ctx, r)
 			if err != nil {
-				return err
+				h.logger.Logf("Load balancer error (%s): %v", r.URL.Path, err)
+				return
 			}
 		} else {
 			h.logger.Logf("Existing shared buffer found for %s", streamURL)
@@ -85,10 +79,10 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, w http.ResponseWri
 		select {
 		case <-ctx.Done():
 			h.logger.Logf("Client has closed the stream: %s", r.RemoteAddr)
-			return nil
+			return
 		case code := <-exitStatus:
 			if h.handleExitCode(code, r) {
-				return nil
+				return
 			}
 			// Otherwise, retry with a new lbResult.
 		}
@@ -96,7 +90,7 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, w http.ResponseWri
 		select {
 		case <-ctx.Done():
 			h.logger.Logf("Client has closed the stream: %s", r.RemoteAddr)
-			return nil
+			return
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
