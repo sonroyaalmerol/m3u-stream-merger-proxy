@@ -67,6 +67,7 @@ func (h *StreamHandler) HandleVOD(
 	streamClient.ResponseHeaders = lbResult.Response.Header
 	_ = streamClient.WriteHeader(lbResult.Response.StatusCode)
 
+	var bytesWritten int64
 	for {
 		go func() {
 			n, err := lbResult.Response.Body.Read(buffer)
@@ -78,16 +79,18 @@ func (h *StreamHandler) HandleVOD(
 
 		select {
 		case <-ctx.Done():
-			return StreamResult{0, fmt.Errorf("Context canceled for VOD: %s", remoteAddr), proxy.StatusClientClosed}
+			return StreamResult{bytesWritten, fmt.Errorf("Context canceled for VOD: %s", remoteAddr), proxy.StatusClientClosed}
 		case result := <-readChan:
+			bytesWritten += int64(result.n)
+
 			switch {
 			case result.err == io.EOF:
-				return StreamResult{0, fmt.Errorf("EOF reached for VOD: %s", remoteAddr), proxy.StatusEOF}
+				return StreamResult{bytesWritten, fmt.Errorf("EOF reached for VOD: %s", remoteAddr), proxy.StatusEOF}
 			case result.err != nil:
-				return StreamResult{0, fmt.Errorf("Server error for VOD: %s", remoteAddr), proxy.StatusServerError}
+				return StreamResult{bytesWritten, fmt.Errorf("Server error for VOD: %s", remoteAddr), proxy.StatusServerError}
 			case result.err == nil:
 				if _, err := streamClient.Write(buffer[:result.n]); err != nil {
-					return StreamResult{0, fmt.Errorf("Server error for VOD: %s", remoteAddr), proxy.StatusClientClosed}
+					return StreamResult{bytesWritten, fmt.Errorf("Server error for VOD: %s", remoteAddr), proxy.StatusClientClosed}
 				}
 
 				streamClient.Flush()
