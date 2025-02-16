@@ -205,7 +205,6 @@ func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string
 	if safeConcatTypes[strings.ToLower(contentType)] {
 		if !c.WrittenHeader.Load() {
 			writer.Header().Add("Content-Type", contentType)
-			writer.WriteHeader(resp.StatusCode)
 			c.WrittenHeader.Store(true)
 		}
 
