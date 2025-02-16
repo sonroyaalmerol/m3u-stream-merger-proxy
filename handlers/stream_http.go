@@ -166,8 +166,7 @@ func (h *StreamHTTPHandler) handleSegmentStream(streamClient *client.StreamClien
 	detector, exists := h.segmentCallDetectors[segmentSource]
 	h.segmentCallDetectorMu.RUnlock()
 
-	// If no detector or the existing one isn’t active, create a new one.
-	if !exists || !detector.IsActive() {
+	if !exists {
 		newDetector := failovers.NewSegmentCallDetector(
 			r.Context(),
 			h.manager.GetConcurrencyManager(),
@@ -176,7 +175,8 @@ func (h *StreamHTTPHandler) handleSegmentStream(streamClient *client.StreamClien
 		)
 
 		h.segmentCallDetectorMu.Lock()
-		if d, ok := h.segmentCallDetectors[segmentSource]; !ok || !d.IsActive() {
+		// Use a final check to ensure that no detector exists.
+		if d, ok := h.segmentCallDetectors[segmentSource]; !ok {
 			h.segmentCallDetectors[segmentSource] = newDetector
 			detector = newDetector
 		} else {

@@ -3,6 +3,7 @@ package failovers
 import (
 	"context"
 	"m3u-stream-merger/store"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -53,13 +54,15 @@ func (pd *SegmentCallDetector) updateConcurrencyState() {
 	active := time.Since(pd.lastSegmentCall) <= pd.timeout
 	pd.mu.Unlock()
 
+	index := strings.Split(pd.m3uIndex, "|")[0]
+
 	if active {
 		if pd.activeConcurrency.CompareAndSwap(false, true) {
-			pd.concurrencyMgr.UpdateConcurrency(pd.m3uIndex, true)
+			pd.concurrencyMgr.UpdateConcurrency(index, true)
 		}
 	} else {
 		if pd.activeConcurrency.CompareAndSwap(true, false) {
-			pd.concurrencyMgr.UpdateConcurrency(pd.m3uIndex, false)
+			pd.concurrencyMgr.UpdateConcurrency(index, false)
 		}
 	}
 }
