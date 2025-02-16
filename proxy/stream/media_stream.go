@@ -56,6 +56,9 @@ func (h *StreamHandler) HandleVOD(
 
 	defer lbResult.Response.Body.Close()
 
+	streamClient.ResponseHeaders = lbResult.Response.Header
+	streamClient.WriteHeader(lbResult.Response.StatusCode)
+
 	for {
 		go func() {
 			n, err := lbResult.Response.Body.Read(buffer)
