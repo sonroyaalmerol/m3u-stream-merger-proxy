@@ -12,6 +12,7 @@ import (
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
 	"net/http"
+	"strings"
 )
 
 type StreamInstance struct {
@@ -65,9 +66,18 @@ func (instance *StreamInstance) ProxyStream(
 	statusChan chan<- int,
 ) {
 	handler := NewStreamHandler(instance.config, coordinator, instance.logger)
-	result := handler.HandleStream(ctx, lbResult, w, r.RemoteAddr)
-	if result.Error != nil {
-		instance.logger.Logf("Stream handler status: %v", result.Error)
+
+	var result StreamResult
+	if lbResult.Response.StatusCode == 206 || strings.HasSuffix(lbResult.URL, ".mp4") {
+		result = handler.HandleVOD(ctx, lbResult, w, r.RemoteAddr)
+		if result.Error != nil {
+			instance.logger.Logf("Stream handler status: %v", result.Error)
+		}
+	} else {
+		result = handler.HandleStream(ctx, lbResult, w, r.RemoteAddr)
+		if result.Error != nil {
+			instance.logger.Logf("Stream handler status: %v", result.Error)
+		}
 	}
 
 	if lbResult.IsInvalid.Load() && utils.IsAnM3U8Media(lbResult.Response) {

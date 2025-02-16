@@ -3,12 +3,14 @@ package stream
 import (
 	"context"
 	"fmt"
+	"io"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/proxy/stream/buffer"
 	"m3u-stream-merger/proxy/stream/config"
 	"m3u-stream-merger/utils"
+	"net/http"
 	"sync/atomic"
 	"time"
 )
@@ -31,6 +33,54 @@ type StreamResult struct {
 	BytesWritten int64
 	Error        error
 	Status       int
+}
+
+func (h *StreamHandler) HandleVOD(
+	ctx context.Context,
+	lbResult *loadbalancer.LoadBalancerResult,
+	writer ResponseWriter,
+	remoteAddr string,
+) StreamResult {
+	h.logger.Logf("VOD request detected from: %s", remoteAddr)
+	h.logger.Warn("VODs do not support shared buffer.")
+
+	buffer := make([]byte, h.config.ChunkSize*h.config.SharedBufferSize)
+	readChan := make(chan struct {
+		n   int
+		err error
+	}, 1)
+
+	defer lbResult.Response.Body.Close()
+
+	for {
+		go func() {
+			n, err := lbResult.Response.Body.Read(buffer)
+			readChan <- struct {
+				n   int
+				err error
+			}{n, err}
+		}()
+
+		select {
+		case <-ctx.Done():
+			return StreamResult{0, fmt.Errorf("Context canceled for VOD: %s", remoteAddr), proxy.StatusClientClosed}
+		case result := <-readChan:
+			switch {
+			case result.err == io.EOF:
+				return StreamResult{0, fmt.Errorf("EOF reached for VOD: %s", remoteAddr), proxy.StatusEOF}
+			case result.err != nil:
+				return StreamResult{0, fmt.Errorf("Server error for VOD: %s", remoteAddr), proxy.StatusServerError}
+			case result.err == nil:
+				if _, err := writer.Write(buffer[:result.n]); err != nil {
+					return StreamResult{0, fmt.Errorf("Server error for VOD: %s", remoteAddr), proxy.StatusClientClosed}
+				}
+
+				if flusher, ok := writer.(http.Flusher); ok {
+					flusher.Flush()
+				}
+			}
+		}
+	}
 }
 
 func (h *StreamHandler) HandleStream(
