@@ -24,6 +24,7 @@ type StreamHTTPHandler struct {
 	logger                logger.Logger
 	segmentCallDetectors  map[string]*failovers.SegmentCallDetector
 	segmentCallDetectorMu sync.RWMutex
+	knownInvalidM3U       sync.Map // map[string]struct{}
 }
 
 func NewStreamHTTPHandler(manager ProxyInstance, logger logger.Logger) *StreamHTTPHandler {
