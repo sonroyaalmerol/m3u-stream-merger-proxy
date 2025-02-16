@@ -44,7 +44,7 @@ type StreamResult struct {
 	Status       int
 }
 
-func (h *StreamHandler) HandleVOD(
+func (h *StreamHandler) HandleDirectStream(
 	ctx context.Context,
 	lbResult *loadbalancer.LoadBalancerResult,
 	streamClient *client.StreamClient,
@@ -53,9 +53,6 @@ func (h *StreamHandler) HandleVOD(
 	if streamClient.Request != nil {
 		remoteAddr = streamClient.Request.RemoteAddr
 	}
-	h.logger.Logf("VOD request detected from: %s", remoteAddr)
-	h.logger.Warn("VODs do not support shared buffer.")
-
 	buffer := make([]byte, h.config.ChunkSize*h.config.SharedBufferSize)
 	readChan := make(chan struct {
 		n   int
@@ -79,18 +76,18 @@ func (h *StreamHandler) HandleVOD(
 
 		select {
 		case <-ctx.Done():
-			return StreamResult{bytesWritten, fmt.Errorf("Context canceled for VOD: %s", remoteAddr), proxy.StatusClientClosed}
+			return StreamResult{bytesWritten, fmt.Errorf("Context canceled for stream: %s", remoteAddr), proxy.StatusClientClosed}
 		case result := <-readChan:
 			bytesWritten += int64(result.n)
 
 			switch {
 			case result.err == io.EOF:
-				return StreamResult{bytesWritten, fmt.Errorf("EOF reached for VOD: %s", remoteAddr), proxy.StatusEOF}
+				return StreamResult{bytesWritten, fmt.Errorf("EOF reached for stream: %s", remoteAddr), proxy.StatusEOF}
 			case result.err != nil:
-				return StreamResult{bytesWritten, fmt.Errorf("Server error for VOD: %s", remoteAddr), proxy.StatusServerError}
+				return StreamResult{bytesWritten, fmt.Errorf("Server error for stream: %s", remoteAddr), proxy.StatusServerError}
 			case result.err == nil:
 				if _, err := streamClient.Write(buffer[:result.n]); err != nil {
-					return StreamResult{bytesWritten, fmt.Errorf("Server error for VOD: %s", remoteAddr), proxy.StatusClientClosed}
+					return StreamResult{bytesWritten, fmt.Errorf("Server error for stream: %s", remoteAddr), proxy.StatusClientClosed}
 				}
 
 				streamClient.Flush()

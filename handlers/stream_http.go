@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"m3u-stream-merger/logger"
@@ -17,14 +20,17 @@ import (
 )
 
 type StreamHTTPHandler struct {
-	manager ProxyInstance
-	logger  logger.Logger
+	manager               ProxyInstance
+	logger                logger.Logger
+	segmentCallDetectors  map[string]*failovers.SegmentCallDetector
+	segmentCallDetectorMu sync.RWMutex
 }
 
 func NewStreamHTTPHandler(manager ProxyInstance, logger logger.Logger) *StreamHTTPHandler {
 	return &StreamHTTPHandler{
-		manager: manager,
-		logger:  logger,
+		manager:              manager,
+		logger:               logger,
+		segmentCallDetectors: make(map[string]*failovers.SegmentCallDetector),
 	}
 }
 
@@ -135,21 +141,51 @@ func (h *StreamHTTPHandler) handleExitCode(code int, r *http.Request) bool {
 func (h *StreamHTTPHandler) handleSegmentStream(streamClient *client.StreamClient) {
 	r := streamClient.Request
 
-	h.logger.Logf("Received request from %s for URL: %s", r.RemoteAddr, r.URL.Path)
+	h.logger.Debugf("Received request from %s for URL: %s",
+		r.RemoteAddr, r.URL.Path)
 
 	streamId := h.extractStreamURL(r.URL.Path)
 	if streamId == "" {
-		h.logger.Logf("Invalid m3uID for request from %s: %s", r.RemoteAddr, r.URL.Path)
+		h.logger.Errorf("Invalid m3uID for request from %s: %s",
+			r.RemoteAddr, r.URL.Path)
 		return
 	}
 
 	segment, err := failovers.ParseSegmentId(streamId)
 	if err != nil {
-		h.logger.Errorf("Segment parsing error %s: %s", r.RemoteAddr, r.URL.Path)
+		h.logger.Errorf("Segment parsing error %s: %s",
+			r.RemoteAddr, r.URL.Path)
 		_ = streamClient.WriteHeader(http.StatusInternalServerError)
 		_, _ = streamClient.Write([]byte(fmt.Sprintf("Segment parsing error: %v", err)))
 		return
 	}
+
+	segmentSource := segment.SourceM3U
+
+	h.segmentCallDetectorMu.RLock()
+	detector, exists := h.segmentCallDetectors[segmentSource]
+	h.segmentCallDetectorMu.RUnlock()
+
+	// If no detector or the existing one isn’t active, create a new one.
+	if !exists || !detector.IsActive() {
+		newDetector := failovers.NewSegmentCallDetector(
+			r.Context(),
+			h.manager.GetConcurrencyManager(),
+			segmentSource,
+			5*time.Second,
+		)
+
+		h.segmentCallDetectorMu.Lock()
+		if d, ok := h.segmentCallDetectors[segmentSource]; !ok || !d.IsActive() {
+			h.segmentCallDetectors[segmentSource] = newDetector
+			detector = newDetector
+		} else {
+			detector = d
+		}
+		h.segmentCallDetectorMu.Unlock()
+	}
+
+	detector.SegmentCall()
 
 	resp, err := utils.HTTPClient.Get(segment.URL)
 	if err != nil {
@@ -160,18 +196,39 @@ func (h *StreamHTTPHandler) handleSegmentStream(streamClient *client.StreamClien
 	}
 	defer resp.Body.Close()
 
-	// Copy all headers from the remote response.
 	for key, values := range resp.Header {
 		for _, value := range values {
 			streamClient.Header().Add(key, value)
 		}
 	}
 
-	// Write the status code from the remote response.
 	_ = streamClient.WriteHeader(resp.StatusCode)
 
-	// Stream the body of the remote response to the client.
 	if _, err = io.Copy(streamClient.GetWriter(), resp.Body); err != nil {
-		h.logger.Logf("Error copying response body: %v", err)
+		if isBrokenPipe(err) {
+			h.logger.Debugf("Client disconnected (broken pipe): %v", err)
+		} else {
+			h.logger.Errorf("Error copying response body: %v", err)
+		}
 	}
+}
+
+func isBrokenPipe(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if opErr, ok := err.(*net.OpError); ok {
+		if sysErr, ok := opErr.Err.(*os.SyscallError); ok {
+			errMsg := sysErr.Err.Error()
+			return strings.Contains(errMsg, "broken pipe") ||
+				strings.Contains(errMsg, "connection reset by peer")
+		}
+		errMsg := opErr.Err.Error()
+		return strings.Contains(errMsg, "broken pipe") ||
+			strings.Contains(errMsg, "connection reset by peer")
+	}
+
+	return strings.Contains(err.Error(), "broken pipe") ||
+		strings.Contains(err.Error(), "connection reset by peer")
 }
