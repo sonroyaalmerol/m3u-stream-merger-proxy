@@ -96,7 +96,6 @@ func (instance *StreamInstance) ProxyStream(
 		}
 
 		if err := instance.failoverProc.ProcessM3U8Stream(lbResult, streamClient); err != nil {
-			instance.warned.Delete(lbResult.URL)
 			statusChan <- proxy.StatusIncompatible
 			return
 		}
