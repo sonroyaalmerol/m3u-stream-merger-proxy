@@ -42,6 +42,9 @@ func main() {
 	http.HandleFunc("/p/", func(w http.ResponseWriter, r *http.Request) {
 		streamHandler.ServeHTTP(w, r)
 	})
+	http.HandleFunc("/segment/", func(w http.ResponseWriter, r *http.Request) {
+		streamHandler.ServeSegmentHTTP(w, r)
+	})
 
 	// Start the server
 	logger.Default.Logf("Server is running on port %s...", os.Getenv("PORT"))

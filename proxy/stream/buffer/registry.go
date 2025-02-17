@@ -1,7 +1,8 @@
-package stream
+package buffer
 
 import (
 	"m3u-stream-merger/logger"
+	"m3u-stream-merger/proxy/stream/config"
 	"m3u-stream-merger/store"
 	"sync"
 	"sync/atomic"
@@ -11,7 +12,7 @@ import (
 type StreamRegistry struct {
 	coordinators  sync.Map
 	logger        logger.Logger
-	config        *StreamConfig
+	config        *config.StreamConfig
 	cleanupTicker *time.Ticker
 	cm            *store.ConcurrencyManager
 	done          chan struct{}
@@ -19,7 +20,7 @@ type StreamRegistry struct {
 	Unrestrict bool
 }
 
-func NewStreamRegistry(config *StreamConfig, cm *store.ConcurrencyManager, logger logger.Logger, cleanupInterval time.Duration) *StreamRegistry {
+func NewStreamRegistry(config *config.StreamConfig, cm *store.ConcurrencyManager, logger logger.Logger, cleanupInterval time.Duration) *StreamRegistry {
 	registry := &StreamRegistry{
 		logger: logger,
 		config: config,
@@ -90,7 +91,7 @@ func (r *StreamRegistry) cleanup() {
 		streamID := key.(string)
 		coord := value.(*StreamCoordinator)
 
-		if atomic.LoadInt32(&coord.clientCount) == 0 {
+		if atomic.LoadInt32(&coord.ClientCount) == 0 {
 			r.logger.Logf("Removing inactive coordinator for stream: %s", streamID)
 			r.RemoveCoordinator(streamID)
 		}

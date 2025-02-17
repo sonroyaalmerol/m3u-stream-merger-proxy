@@ -26,10 +26,20 @@ func GetStreamBySlug(slug string) (*StreamInfo, error) {
 func GenerateStreamURL(baseUrl string, stream *StreamInfo) string {
 	subPaths := make(chan string, len(stream.URLs))
 	var wg sync.WaitGroup
+	var err error
+
+	extension := ""
 
 	// Process URLs concurrently
 	for _, innerMap := range stream.URLs {
 		for _, srcUrl := range innerMap {
+			if extension == "" {
+				extension, err = utils.GetFileExtensionFromUrl(srcUrl)
+				if err != nil {
+					extension = ""
+				}
+			}
+
 			wg.Add(1)
 			go func(url string) {
 				defer wg.Done()
@@ -46,13 +56,24 @@ func GenerateStreamURL(baseUrl string, stream *StreamInfo) string {
 		close(subPaths)
 	}()
 
+	finalUrl := ""
+
 	// Use the first valid subPath
 	for subPath := range subPaths {
-		return fmt.Sprintf("%s/p/%s/%s", baseUrl, subPath, EncodeSlug(stream))
+		finalUrl = fmt.Sprintf("%s/p/%s/%s", baseUrl, subPath, EncodeSlug(stream))
+		break
 	}
 
 	// Fallback to default path
-	return fmt.Sprintf("%s/p/stream/%s", baseUrl, EncodeSlug(stream))
+	if finalUrl == "" {
+		finalUrl = fmt.Sprintf("%s/p/stream/%s", baseUrl, EncodeSlug(stream))
+	}
+
+	if strings.Contains(extension, ".m3u") {
+		extension = ""
+	}
+
+	return finalUrl + extension
 }
 
 func SortStreamSubUrls(urls map[string]string) []string {

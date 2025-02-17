@@ -1,19 +1,22 @@
 package stream
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
+	"m3u-stream-merger/proxy/client"
 	"m3u-stream-merger/proxy/loadbalancer"
+	"m3u-stream-merger/proxy/stream/buffer"
+	"m3u-stream-merger/proxy/stream/config"
 	"m3u-stream-merger/store"
-	"m3u-stream-merger/utils"
 	"net/http"
-	"net/url"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -23,6 +26,7 @@ type mockResponseWriter struct {
 	statusCode  int
 	headersSent http.Header
 	err         error
+	mu          sync.Mutex
 }
 
 func (m *mockResponseWriter) Header() http.Header {
@@ -36,6 +40,8 @@ func (m *mockResponseWriter) Write(data []byte) (int, error) {
 	if m.err != nil {
 		return 0, m.err
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.written = append(m.written, data...)
 	return len(data), nil
 }
@@ -44,61 +50,179 @@ func (m *mockResponseWriter) WriteHeader(statusCode int) {
 	m.statusCode = statusCode
 }
 
-// Test M3U8Processor
-func TestM3U8Processor_ProcessM3U8Stream(t *testing.T) {
+func (m *mockResponseWriter) Flush() {
+	// Mock implementation
+}
+
+type mockHLSServer struct {
+	server        *httptest.Server
+	mediaPlaylist string
+	segments      map[string][]byte
+	logger        logger.Logger
+}
+
+func newMockHLSServer() *mockHLSServer {
+	m := &mockHLSServer{
+		segments: make(map[string][]byte),
+		logger:   logger.Default,
+	}
+
+	m.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check for request context cancellation
+		done := make(chan struct{})
+		go func() {
+			<-r.Context().Done()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			m.logger.Debug("Request context cancelled")
+			return
+		default:
+			m.handleRequest(w, r)
+		}
+	}))
+
+	return m
+}
+
+func (m *mockHLSServer) handleRequest(w http.ResponseWriter, r *http.Request) {
+	m.logger.Debugf("Mock server received request: %s", r.URL.Path)
+
+	switch {
+	case strings.HasSuffix(r.URL.Path, ".m3u8"):
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		_, _ = w.Write([]byte(m.mediaPlaylist))
+
+	case strings.HasSuffix(r.URL.Path, ".ts"):
+		segmentKey := r.URL.Path
+		if !strings.HasPrefix(segmentKey, "/") {
+			segmentKey = "/" + segmentKey
+		}
+		if data, ok := m.segments[segmentKey]; ok {
+			w.Header().Set("Content-Type", "video/MP2T")
+			_, _ = w.Write(data)
+		} else {
+			m.logger.Errorf("Segment not found: %s", segmentKey)
+			w.WriteHeader(http.StatusNotFound)
+		}
+
+	default:
+		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+func (m *mockHLSServer) Close() {
+	if m.server != nil {
+		m.server.Close()
+	}
+}
+
+func TestM3U8StreamHandler_HandleStream(t *testing.T) {
+	segment1Data := []byte("TESTSEGMNT1!")
+	segment2Data := []byte("TESTSEGMNT2!")
+
 	tests := []struct {
-		name     string
-		input    string
-		baseURL  string
-		wantErr  bool
-		expected string
+		name           string
+		config         *config.StreamConfig
+		setupMock      func(*mockHLSServer)
+		writeError     error
+		expectedResult StreamResult
 	}{
 		{
-			name:     "process absolute URLs",
-			input:    "#EXTM3U\nhttp://example.com/stream.ts",
-			baseURL:  "http://base.com/",
-			wantErr:  false,
-			expected: "#EXTM3U\nhttp://example.com/stream.ts\n",
+			name: "successful media playlist",
+			config: &config.StreamConfig{
+				TimeoutSeconds:   5,
+				ChunkSize:        1024,
+				SharedBufferSize: 5,
+			},
+			setupMock: func(m *mockHLSServer) {
+				m.mediaPlaylist = `#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:10
+#EXTINF:10.0,
+/segment1.ts
+#EXTINF:10.0,
+/segment2.ts
+#EXT-X-ENDLIST`
+				m.segments["/segment1.ts"] = segment1Data
+				m.segments["/segment2.ts"] = segment2Data
+			},
+			writeError: nil,
+			expectedResult: StreamResult{
+				BytesWritten: 24, // Two segments of exactly 12 bytes each
+				Error:        io.EOF,
+				Status:       proxy.StatusEOF,
+			},
 		},
 		{
-			name:     "handle newline variations",
-			input:    "#EXTM3U\nstream1.ts\nstream2.ts\n",
-			baseURL:  "http://base.com/",
-			wantErr:  false,
-			expected: "#EXTM3U\nhttp://base.com/stream1.ts\nhttp://base.com/stream2.ts\n",
-		},
-		{
-			name:     "process relative URLs",
-			input:    "#EXTM3U\n/stream.ts",
-			baseURL:  "http://base.com/path/",
-			wantErr:  false,
-			expected: "#EXTM3U\nhttp://base.com/stream.ts\n",
-		},
-		{
-			name:     "handle empty lines",
-			input:    "#EXTM3U\nhttp://example.com/stream.ts\n",
-			baseURL:  "http://base.com/",
-			wantErr:  false,
-			expected: "#EXTM3U\nhttp://example.com/stream.ts\n",
+			name: "write error during streaming",
+			config: &config.StreamConfig{
+				TimeoutSeconds:   5,
+				ChunkSize:        1024,
+				SharedBufferSize: 5,
+			},
+			setupMock: func(m *mockHLSServer) {
+				m.mediaPlaylist = `#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:10
+#EXTINF:10.0,
+/segment1.ts
+#EXT-X-ENDLIST`
+				m.segments["/segment1.ts"] = segment1Data
+			},
+			writeError: errors.New("write error"),
+			expectedResult: StreamResult{
+				BytesWritten: 0,
+				Error:        errors.New("write error"),
+				Status:       proxy.StatusClientClosed,
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			processor := NewM3U8Processor(logger.Default)
-			writer := &mockResponseWriter{}
-			baseURL, _ := url.Parse(tt.baseURL)
-			reader := bufio.NewScanner(strings.NewReader(tt.input))
+			// Create a context with timeout that's slightly shorter than the test timeout
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+			defer cancel()
 
-			err := processor.ProcessM3U8Stream(reader, writer, baseURL)
+			mockServer := newMockHLSServer()
+			defer mockServer.Close()
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ProcessM3U8Stream() error = %v, wantErr %v", err, tt.wantErr)
-				return
+			tt.setupMock(mockServer)
+
+			cm := store.NewConcurrencyManager()
+			coordinator := buffer.NewStreamCoordinator("test_id", tt.config, cm, logger.Default)
+
+			// Make first request with short timeout
+			reqCtx, reqCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer reqCancel()
+
+			req, _ := http.NewRequestWithContext(reqCtx, "GET", mockServer.server.URL+"/playlist.m3u8", nil)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("Failed to get mock response: %v", err)
 			}
 
-			if !tt.wantErr && string(writer.written) != tt.expected {
-				t.Errorf("ProcessM3U8Stream() got = %v, want %v", string(writer.written), tt.expected)
+			handler := NewStreamHandler(tt.config, coordinator, logger.Default)
+			writer := &mockResponseWriter{err: tt.writeError}
+			lbRes := loadbalancer.LoadBalancerResult{Response: resp, Index: "1"}
+
+			streamClient := client.NewStreamClient(writer, req)
+
+			result := handler.HandleStream(ctx, &lbRes, streamClient)
+
+			if result.Status != tt.expectedResult.Status {
+				t.Errorf("HandleStream() status = %v, want %v", result.Status, tt.expectedResult.Status)
+			}
+			if result.BytesWritten != tt.expectedResult.BytesWritten {
+				t.Errorf("HandleStream() bytesWritten = %v, want %v", result.BytesWritten, tt.expectedResult.BytesWritten)
+			}
+			if tt.expectedResult.Error != nil {
+				if result.Error == nil || !strings.Contains(result.Error.Error(), tt.expectedResult.Error.Error()) {
+					t.Errorf("HandleStream() error = %v, want error containing %v", result.Error, tt.expectedResult.Error)
+				}
 			}
 		})
 	}
@@ -108,7 +232,7 @@ func TestM3U8Processor_ProcessM3U8Stream(t *testing.T) {
 func TestStreamHandler_HandleStream(t *testing.T) {
 	tests := []struct {
 		name           string
-		config         *StreamConfig
+		config         *config.StreamConfig
 		responseBody   string
 		responseStatus int
 		writeError     error
@@ -116,7 +240,7 @@ func TestStreamHandler_HandleStream(t *testing.T) {
 	}{
 		{
 			name: "successful stream",
-			config: &StreamConfig{
+			config: &config.StreamConfig{
 				TimeoutSeconds:   5,
 				ChunkSize:        1024,
 				SharedBufferSize: 5,
@@ -132,7 +256,7 @@ func TestStreamHandler_HandleStream(t *testing.T) {
 		},
 		{
 			name: "write error",
-			config: &StreamConfig{
+			config: &config.StreamConfig{
 				TimeoutSeconds:   5,
 				ChunkSize:        1024,
 				SharedBufferSize: 5,
@@ -150,16 +274,14 @@ func TestStreamHandler_HandleStream(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create context with timeout
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			config := NewDefaultStreamConfig()
+			config := config.NewDefaultStreamConfig()
 			cm := store.NewConcurrencyManager()
-			coordinator := NewStreamCoordinator("test_id", config, cm, logger.Default)
+			coordinator := buffer.NewStreamCoordinator("test_id", config, cm, logger.Default)
 			handler := NewStreamHandler(tt.config, coordinator, logger.Default)
 
-			// Create response with headers to indicate expected EOF
 			resp := &http.Response{
 				StatusCode: tt.responseStatus,
 				Body:       io.NopCloser(strings.NewReader(tt.responseBody)),
@@ -168,12 +290,11 @@ func TestStreamHandler_HandleStream(t *testing.T) {
 			resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(tt.responseBody)))
 
 			writer := &mockResponseWriter{err: tt.writeError}
-
-			// Run handler with context
 			lbRes := loadbalancer.LoadBalancerResult{Response: resp, Index: "1"}
-			result := handler.HandleStream(ctx, &lbRes, writer, "test-addr")
 
-			// Verify results
+			streamClient := client.NewStreamClient(writer, nil)
+			result := handler.HandleStream(ctx, &lbRes, streamClient)
+
 			if result.Status != tt.expectedResult.Status {
 				t.Errorf("HandleStream() status = %v, want %v", result.Status, tt.expectedResult.Status)
 			}
@@ -187,37 +308,57 @@ func TestStreamHandler_HandleStream(t *testing.T) {
 	}
 }
 
-// Test StreamInstance
 func TestStreamInstance_ProxyStream(t *testing.T) {
+	segment1Data := []byte("TESTSEGMNT1!")
+	segment2Data := []byte("TESTSEGMNT2!")
+
 	tests := []struct {
 		name           string
 		method         string
 		contentType    string
-		responseBody   string
+		setupMock      func(*mockHLSServer)
 		expectedStatus int
 	}{
 		{
-			name:           "handle m3u8 stream",
-			method:         http.MethodGet,
-			contentType:    "application/vnd.apple.mpegurl",
-			responseBody:   "#EXTM3U\nhttp://example.com/stream.ts",
-			expectedStatus: proxy.StatusM3U8Parsed,
+			name:        "handle m3u8 stream",
+			method:      http.MethodGet,
+			contentType: "application/vnd.apple.mpegurl",
+			setupMock: func(m *mockHLSServer) {
+				m.mediaPlaylist = fmt.Sprintf(`#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:10
+#EXTINF:10.0,
+%s/segment1.ts
+#EXTINF:10.0,
+%s/segment2.ts
+#EXT-X-ENDLIST`, m.server.URL, m.server.URL)
+
+				m.segments["/segment1.ts"] = segment1Data
+				m.segments["/segment2.ts"] = segment2Data
+			},
+			expectedStatus: proxy.StatusEOF,
 		},
 		{
-			name:           "handle media stream",
-			method:         http.MethodGet,
-			contentType:    "video/MP2T",
-			responseBody:   "media content",
+			name:        "handle media stream",
+			method:      http.MethodGet,
+			contentType: "video/MP2T",
+			setupMock: func(m *mockHLSServer) {
+				m.segments["/media"] = []byte("media content!")
+			},
 			expectedStatus: proxy.StatusEOF,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config := NewDefaultStreamConfig()
-			cm := store.NewConcurrencyManager()
+			mockServer := newMockHLSServer()
+			defer mockServer.Close()
 
-			coordinator := NewStreamCoordinator("test_id", config, cm, logger.Default)
+			tt.setupMock(mockServer)
+
+			config := config.NewDefaultStreamConfig()
+			cm := store.NewConcurrencyManager()
+			coordinator := buffer.NewStreamCoordinator("test_id", config, cm, logger.Default)
 
 			instance, err := NewStreamInstance(cm, config,
 				WithLogger(logger.Default))
@@ -225,69 +366,45 @@ func TestStreamInstance_ProxyStream(t *testing.T) {
 				t.Fatalf("Failed to create StreamInstance: %v", err)
 			}
 
-			req, _ := http.NewRequest(tt.method, "http://example.com", nil)
+			path := "/playlist.m3u8"
+			if tt.contentType == "video/MP2T" {
+				path = "/media"
+			}
+
+			req, _ := http.NewRequest(tt.method, mockServer.server.URL+path, nil)
 			resp := &http.Response{
 				StatusCode: http.StatusOK,
 				Header:     make(http.Header),
-				Body:       io.NopCloser(strings.NewReader(tt.responseBody)),
 				Request:    req,
 			}
 			resp.Header.Set("Content-Type", tt.contentType)
 
+			if tt.contentType == "video/MP2T" {
+				resp.Body = io.NopCloser(bytes.NewReader(mockServer.segments["/media"]))
+			} else {
+				resp, err = http.Get(mockServer.server.URL + path)
+				if err != nil {
+					t.Fatalf("Failed to get mock response: %v", err)
+				}
+			}
+
 			writer := &mockResponseWriter{}
 			statusChan := make(chan int, 1)
-			ctx := context.Background()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			streamClient := client.NewStreamClient(writer, req)
 
 			lbRes := loadbalancer.LoadBalancerResult{Response: resp, Index: "1"}
-			instance.ProxyStream(ctx, coordinator, &lbRes, req, writer, statusChan)
+			instance.ProxyStream(ctx, coordinator, &lbRes, streamClient, statusChan)
 
-			status := <-statusChan
-			if status != tt.expectedStatus {
-				t.Errorf("ProxyStream() status = %v, want %v", status, tt.expectedStatus)
-			}
-		})
-	}
-}
-
-// Test IsEOFExpected
-func TestIsEOFExpected(t *testing.T) {
-	tests := []struct {
-		name        string
-		contentType string
-		contentLen  int64
-		expectEOF   bool
-	}{
-		{
-			name:        "m3u8 content",
-			contentType: "application/vnd.apple.mpegurl",
-			contentLen:  -1,
-			expectEOF:   true,
-		},
-		{
-			name:        "media content with length",
-			contentType: "application/x-mpegurl",
-			contentLen:  1000,
-			expectEOF:   true,
-		},
-		{
-			name:        "media content without length",
-			contentType: "video/MP2T",
-			contentLen:  -1,
-			expectEOF:   false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			resp := &http.Response{
-				Header:        make(http.Header),
-				ContentLength: tt.contentLen,
-			}
-			resp.Header.Set("Content-Type", tt.contentType)
-
-			result := utils.EOFIsExpected(resp)
-			if result != tt.expectEOF {
-				t.Errorf("IsEOFExpected() = %v, want %v", result, tt.expectEOF)
+			select {
+			case status := <-statusChan:
+				if status != tt.expectedStatus {
+					t.Errorf("ProxyStream() status = %v, want %v", status, tt.expectedStatus)
+				}
+			case <-time.After(5 * time.Second):
+				t.Error("ProxyStream() timed out waiting for status")
 			}
 		})
 	}

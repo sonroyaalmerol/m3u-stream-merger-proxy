@@ -1,4 +1,4 @@
-package stream
+package buffer
 
 import (
 	"container/ring"
@@ -9,7 +9,9 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/loadbalancer"
+	"m3u-stream-merger/proxy/stream/config"
 	"m3u-stream-merger/store"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,7 +44,7 @@ func newChunkData() *ChunkData {
 
 // Reset resets the chunk. It returns the underlying buffer
 // to the pool, obtains a new one, and clears all metadata.
-// Once Reset is called the caller must not use the old buffer.
+// Once Reset is called the caller Must not use the old buffer.
 func (c *ChunkData) Reset() {
 	if c.Buffer != nil {
 		c.Buffer.Reset()
@@ -62,30 +64,33 @@ const (
 	stateClosed
 )
 
-// StreamCoordinator coordinates the ring-buffer used for streaming.
 type StreamCoordinator struct {
-	buffer        *ring.Ring
-	mu            sync.RWMutex
-	broadcast     chan struct{}
-	clientCount   int32
-	writerStarted bool
-	writerCtx     context.Context
-	writerCancel  context.CancelFunc
-	writerChan    chan struct{}
-	writerCtxMu   sync.Mutex
+	Buffer       *ring.Ring
+	Mu           sync.RWMutex
+	broadcast    chan struct{}
+	ClientCount  int32
+	WriterCtx    context.Context
+	WriterCancel context.CancelFunc
+	WriterChan   chan struct{}
+	WriterCtxMu  sync.Mutex
+	WriterActive atomic.Bool
 
-	lastError atomic.Value
+	WriterRespHeader atomic.Pointer[http.Header]
+	respHeaderSet    chan struct{}
+	m3uHeaderSet     atomic.Bool
+
+	LastError atomic.Value
 	logger    logger.Logger
-	config    *StreamConfig
+	config    *config.StreamConfig
 	cm        *store.ConcurrencyManager
 	streamID  string
 
-	initializationMu sync.Mutex
+	InitializationMu sync.Mutex
 
 	// state represents active, draining, or closed.
 	state int32
 
-	lbResultOnWrite atomic.Pointer[loadbalancer.LoadBalancerResult]
+	LBResultOnWrite atomic.Pointer[loadbalancer.LoadBalancerResult]
 
 	// writeSeq is an atomic counter to track the order of chunks.
 	writeSeq int64
@@ -93,28 +98,22 @@ type StreamCoordinator struct {
 
 // subscribe returns the current broadcast channel.
 func (c *StreamCoordinator) subscribe() <-chan struct{} {
-	c.mu.RLock()
+	c.Mu.RLock()
 	ch := c.broadcast
-	c.mu.RUnlock()
+	c.Mu.RUnlock()
 	return ch
 }
 
 // notifySubscribers closes the current broadcast channel and
 // creates a new one so waiting clients can be notified.
 func (c *StreamCoordinator) notifySubscribers() {
-	c.mu.Lock()
+	c.Mu.Lock()
 	close(c.broadcast)
 	c.broadcast = make(chan struct{})
-	c.mu.Unlock()
+	c.Mu.Unlock()
 }
 
-// NewStreamCoordinator initializes a new StreamCoordinator.
-func NewStreamCoordinator(
-	streamID string,
-	config *StreamConfig,
-	cm *store.ConcurrencyManager,
-	logger logger.Logger,
-) *StreamCoordinator {
+func NewStreamCoordinator(streamID string, config *config.StreamConfig, cm *store.ConcurrencyManager, logger logger.Logger) *StreamCoordinator {
 	logger.Debug("Initializing new StreamCoordinator")
 	r := ring.New(config.SharedBufferSize)
 	for i := 0; i < config.SharedBufferSize; i++ {
@@ -123,25 +122,33 @@ func NewStreamCoordinator(
 	}
 
 	coord := &StreamCoordinator{
-		buffer:     r,
-		writerChan: make(chan struct{}, 1),
-		logger:     logger,
-		config:     config,
-		cm:         cm,
-		streamID:   streamID,
-		broadcast:  make(chan struct{}),
+		Buffer:        r,
+		WriterChan:    make(chan struct{}, 1),
+		logger:        logger,
+		config:        config,
+		cm:            cm,
+		streamID:      streamID,
+		broadcast:     make(chan struct{}),
+		respHeaderSet: make(chan struct{}),
 	}
 	atomic.StoreInt32(&coord.state, stateActive)
-	coord.lastError.Store((*ChunkData)(nil))
+	coord.LastError.Store((*ChunkData)(nil))
 
 	logger.Debugf("StreamCoordinator initialized with buffer size: %d, chunk size: %d",
 		config.SharedBufferSize, config.ChunkSize)
 	return coord
 }
 
+func (c *StreamCoordinator) WaitHeaders(ctx context.Context) {
+	select {
+	case <-c.respHeaderSet:
+	case <-ctx.Done():
+	}
+}
+
 // GetWriterLBResult returns the load balancer result for the current writer call.
 func (c *StreamCoordinator) GetWriterLBResult() *loadbalancer.LoadBalancerResult {
-	return c.lbResultOnWrite.Load()
+	return c.LBResultOnWrite.Load()
 }
 
 // RegisterClient registers a new client and returns an error if the stream
@@ -150,38 +157,38 @@ func (c *StreamCoordinator) RegisterClient() error {
 	state := atomic.LoadInt32(&c.state)
 
 	// If stream is closed but there are no clients, allow reset
-	if state != stateActive && atomic.LoadInt32(&c.clientCount) == 0 {
+	if state != stateActive && atomic.LoadInt32(&c.ClientCount) == 0 {
 		c.logger.Debug("Resetting closed stream to active state")
 		atomic.StoreInt32(&c.state, stateActive)
 	}
 
-	count := atomic.AddInt32(&c.clientCount, 1)
+	count := atomic.AddInt32(&c.ClientCount, 1)
 	c.logger.Debugf("Client registered. Total clients: %d", count)
 	return nil
 }
 
 // UnregisterClient unregisters a client and cleans up resources if it was the last.
 func (c *StreamCoordinator) UnregisterClient() {
-	count := atomic.AddInt32(&c.clientCount, -1)
+	count := atomic.AddInt32(&c.ClientCount, -1)
 	c.logger.Logf("Client unregistered (%s). Remaining clients: %d", c.streamID, count)
 	if count == 0 {
 		c.logger.Log("Last client unregistered, cleaning up resources")
 		atomic.StoreInt32(&c.state, stateDraining)
 		// Signal the writer to shut down.
 		select {
-		case c.writerChan <- struct{}{}:
+		case c.WriterChan <- struct{}{}:
 			c.logger.Debug("Sent shutdown signal to writer")
 		default:
 			c.logger.Debug("Writer channel already has shutdown signal")
 		}
-		c.clearBuffer()
+		c.WriterRespHeader.Store(nil)
+		c.ClearBuffer()
 		c.notifySubscribers()
 	}
 }
 
-// HasClient returns true if there is at least one client connected.
 func (c *StreamCoordinator) HasClient() bool {
-	return atomic.LoadInt32(&c.clientCount) > 0
+	return atomic.LoadInt32(&c.ClientCount) > 0
 }
 
 // shouldTimeout checks if the time since the last successful read exceeds the timeout.
@@ -198,116 +205,6 @@ func (c *StreamCoordinator) shouldRetry(timeout time.Duration) bool {
 	return c.config.TimeoutSeconds == 0 || timeout > 0
 }
 
-// StartWriter reads from the upstream response and writes chunks into the ring-buffer.
-func (c *StreamCoordinator) StartWriter(
-	ctx context.Context,
-	lbResult *loadbalancer.LoadBalancerResult,
-) {
-	defer func() {
-		c.lbResultOnWrite.Store(nil)
-		if r := recover(); r != nil {
-			c.logger.Errorf("Panic in StartWriter: %v", r)
-			c.writeError(fmt.Errorf("internal server error"), proxy.StatusServerError)
-		}
-	}()
-	defer lbResult.Response.Body.Close()
-
-	c.lbResultOnWrite.Store(lbResult)
-	c.logger.Debug("StartWriter: Beginning read loop")
-
-	buffer := make([]byte, c.config.ChunkSize)
-	timeout := c.getTimeoutDuration()
-	backoff := proxy.NewBackoffStrategy(
-		c.config.InitialBackoff,
-		time.Duration(c.config.TimeoutSeconds-1)*time.Second,
-	)
-
-	c.cm.UpdateConcurrency(lbResult.Index, true)
-	defer c.cm.UpdateConcurrency(lbResult.Index, false)
-
-	lastSuccess := time.Now()
-	lastErr := time.Now()
-	zeroReads := 0
-	done := make(chan struct{}, 1)
-	defer close(done)
-
-	go func() {
-		select {
-		case <-ctx.Done():
-			atomic.StoreInt32(&c.state, stateClosed)
-			c.notifySubscribers()
-		case <-done:
-		}
-	}()
-
-	tempChunk := newChunkData()
-	defer tempChunk.Reset()
-
-	for atomic.LoadInt32(&c.state) == stateActive {
-		select {
-		case <-ctx.Done():
-			c.logger.Debug("StartWriter: Context cancelled")
-			c.writeError(ctx.Err(), proxy.StatusClientClosed)
-			return
-		case <-c.writerChan:
-			c.logger.Debug("StartWriter: Received shutdown signal")
-			c.writeError(io.EOF, proxy.StatusEOF)
-			return
-		default:
-			if c.shouldTimeout(lastSuccess, timeout) {
-				c.writeError(nil, proxy.StatusServerError)
-				return
-			}
-
-			n, err := lbResult.Response.Body.Read(buffer)
-			c.logger.Debugf("StartWriter: Read %d bytes, err: %v", n, err)
-			if n == 0 {
-				zeroReads++
-				if zeroReads > 10 {
-					c.writeError(io.EOF, proxy.StatusEOF)
-					return
-				}
-				time.Sleep(10 * time.Millisecond)
-				continue
-			}
-
-			lastSuccess = time.Now()
-			zeroReads = 0
-
-			if err == io.EOF {
-				if n > 0 {
-					tempChunk.Reset()
-					_, _ = tempChunk.Buffer.Write(buffer[:n])
-					tempChunk.Timestamp = time.Now()
-					c.Write(tempChunk)
-				}
-				c.writeError(io.EOF, proxy.StatusEOF)
-				return
-			}
-
-			if err != nil {
-				if c.shouldRetry(timeout) {
-					backoff.Sleep(ctx)
-					lastErr = time.Now()
-					continue
-				}
-				c.writeError(err, proxy.StatusServerError)
-				return
-			}
-
-			tempChunk.Reset()
-			_, _ = tempChunk.Buffer.Write(buffer[:n])
-			tempChunk.Timestamp = time.Now()
-			c.Write(tempChunk)
-
-			if time.Since(lastErr) >= time.Second {
-				backoff.Reset()
-				lastErr = time.Now()
-			}
-		}
-	}
-}
-
 // Write performs a zero‑copy write via a buffer swap.
 // Regardless of success or failure, the provided chunk is immediately reset,
 // transferring full buffer ownership to the coordinator and returning the old
@@ -318,19 +215,19 @@ func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 		return false
 	}
 
-	c.mu.Lock()
-	// If the stream isn't active, we still must consume (reset) the chunk.
+	c.Mu.Lock()
+	// If the stream isn't active, we still Must consume (reset) the chunk.
 	if atomic.LoadInt32(&c.state) != stateActive {
 		c.logger.Debug("Write: Stream not active")
-		c.mu.Unlock()
+		c.Mu.Unlock()
 		chunk.Reset()
 		return false
 	}
 
-	current, ok := c.buffer.Value.(*ChunkData)
+	current, ok := c.Buffer.Value.(*ChunkData)
 	if !ok || current == nil {
 		c.logger.Debug("Write: Current buffer position is nil")
-		c.mu.Unlock()
+		c.Mu.Unlock()
 		chunk.Reset()
 		return false
 	}
@@ -349,19 +246,18 @@ func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 	current.Status = chunk.Status
 	current.Timestamp = chunk.Timestamp
 
-	// Advance the ring pointer.
-	c.buffer = c.buffer.Next()
+	c.Buffer = c.Buffer.Next()
 	c.logger.Debug("Write: Advanced buffer position")
 
 	// Mark error state if needed.
 	if current.Error != nil || current.Status != 0 {
-		if c.lastError.Load() == nil {
-			c.lastError.Store(current)
+		if c.LastError.Load() == nil {
+			c.LastError.Store(current)
 		}
 		atomic.StoreInt32(&c.state, stateDraining)
 		c.logger.Debugf("Write: Setting error state: err=%v, status=%d", current.Error, current.Status)
 	}
-	c.mu.Unlock()
+	c.Mu.Unlock()
 
 	// Notify waiting subscribers.
 	c.notifySubscribers()
@@ -377,10 +273,10 @@ func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) (
 	[]*ChunkData, *ChunkData, *ring.Ring,
 ) {
-	c.mu.RLock()
+	c.Mu.RLock()
 	if fromPosition == nil {
 		c.logger.Debug("ReadChunks: fromPosition is nil, using current buffer")
-		fromPosition = c.buffer
+		fromPosition = c.Buffer
 	}
 	// Check if the client's pointer is too far behind.
 	if cd, ok := fromPosition.Value.(*ChunkData); ok && cd != nil {
@@ -388,16 +284,16 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) (
 		minSeq := currentWriteSeq - int64(c.config.SharedBufferSize)
 		if cd.seq < minSeq {
 			c.logger.Debug("ReadChunks: Client pointer is stale; resetting to the latest chunk")
-			fromPosition = c.buffer
+			fromPosition = c.Buffer
 		}
 	}
 
 	// Wait if the client has caught up with the writer and the stream is active.
-	for fromPosition == c.buffer && atomic.LoadInt32(&c.state) == stateActive {
-		c.mu.RUnlock()
+	for fromPosition == c.Buffer && atomic.LoadInt32(&c.state) == stateActive {
+		c.Mu.RUnlock()
 		ch := c.subscribe()
 		<-ch
-		c.mu.RLock()
+		c.Mu.RLock()
 	}
 
 	chunks := make([]*ChunkData, 0, c.config.SharedBufferSize)
@@ -405,8 +301,8 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) (
 	var errorFound bool
 	var errorChunk *ChunkData
 
-	// Iterate until we reach the writer's current position.
-	for current != c.buffer {
+	// Iterate until we reach the writer’s current position.
+	for current != c.Buffer {
 		if chunk, ok := current.Value.(*ChunkData); ok && chunk != nil {
 			if chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
 				newChunk := &ChunkData{
@@ -431,13 +327,13 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) (
 			break
 		}
 	}
-	c.mu.RUnlock()
+	c.Mu.RUnlock()
 
 	if errorFound && errorChunk != nil {
 		return chunks, errorChunk, current
 	}
 
-	if lastErr := c.lastError.Load(); lastErr != nil {
+	if lastErr := c.LastError.Load(); lastErr != nil {
 		if errChunk, ok := lastErr.(*ChunkData); ok && errChunk != nil {
 			return chunks, errChunk, current
 		}
@@ -446,11 +342,12 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) (
 	return chunks, nil, current
 }
 
-// clearBuffer resets every chunk in the ring.
-func (c *StreamCoordinator) clearBuffer() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	current := c.buffer
+// ClearBuffer resets every chunk in the ring.
+func (c *StreamCoordinator) ClearBuffer() {
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
+
+	current := c.Buffer
 	for i := 0; i < c.config.SharedBufferSize; i++ {
 		if chunk, ok := current.Value.(*ChunkData); ok {
 			chunk.Reset()
@@ -482,4 +379,71 @@ func (c *StreamCoordinator) writeError(err error, status int) {
 		chunk.Reset()
 	}
 	atomic.StoreInt32(&c.state, stateClosed)
+}
+
+func (c *StreamCoordinator) readAndWriteStream(
+	ctx context.Context,
+	body io.ReadCloser,
+	processChunk func([]byte) error,
+) error {
+	buffer := make([]byte, c.config.ChunkSize)
+	timeout := c.getTimeoutDuration()
+	backoff := proxy.NewBackoffStrategy(c.config.InitialBackoff,
+		time.Duration(c.config.TimeoutSeconds-1)*time.Second)
+
+	lastSuccess := time.Now()
+	lastErr := time.Now()
+	zeroReads := 0
+
+	for atomic.LoadInt32(&c.state) == stateActive {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			if c.shouldTimeout(lastSuccess, timeout) {
+				return fmt.Errorf("stream timeout: no new segments")
+			}
+
+			n, err := body.Read(buffer)
+			c.logger.Debugf("Read %d bytes, err: %v", n, err)
+
+			if n == 0 {
+				zeroReads++
+				if zeroReads > 10 {
+					return io.EOF
+				}
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			lastSuccess = time.Now()
+			zeroReads = 0
+
+			if err == io.EOF && n > 0 {
+				if err = processChunk(buffer[:n]); err != nil {
+					return err
+				}
+				return io.EOF
+			}
+
+			if err != nil {
+				if c.shouldRetry(timeout) {
+					backoff.Sleep(ctx)
+					lastErr = time.Now()
+					continue
+				}
+				return err
+			}
+
+			if err = processChunk(buffer[:n]); err != nil {
+				return err
+			}
+
+			// Reset the backoff if at least one second has passed.
+			if time.Since(lastErr) >= time.Second {
+				backoff.Reset()
+				lastErr = time.Now()
+			}
+		}
+	}
+	return nil
 }

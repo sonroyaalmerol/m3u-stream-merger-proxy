@@ -243,12 +243,8 @@ func TestLoadBalancer(t *testing.T) {
 			instance, client, provider := setupTestInstance(t)
 			tt.setupMocks(client, provider)
 
-			session := &store.Session{
-				TestedIndexes: []string{},
-			}
-
 			ctx := context.Background()
-			result, err := instance.Balance(ctx, newTestRequest(http.MethodGet), session)
+			result, err := instance.Balance(ctx, newTestRequest(http.MethodGet))
 
 			if tt.expectErr {
 				if err == nil {
@@ -324,10 +320,9 @@ func TestLoadBalancerWithHTTPStatusCodes(t *testing.T) {
 			instance, client, _ := setupTestInstance(t)
 			tt.setupMocks(client)
 
-			session := &store.Session{TestedIndexes: []string{}}
 			ctx := context.Background()
 
-			result, err := instance.Balance(ctx, newTestRequest(http.MethodGet), session)
+			result, err := instance.Balance(ctx, newTestRequest(http.MethodGet))
 
 			if tt.expectErr {
 				if err == nil {
@@ -370,10 +365,9 @@ func TestLoadBalancerWithDifferentHTTPMethods(t *testing.T) {
 			}
 			client.mu.Unlock()
 
-			session := &store.Session{TestedIndexes: []string{}}
 			ctx := context.Background()
 
-			result, err := instance.Balance(ctx, newTestRequest(method), session)
+			result, err := instance.Balance(ctx, newTestRequest(method))
 			if err != nil {
 				t.Errorf("LoadBalancer() unexpected error with method %s: %v", method, err)
 				return
@@ -408,12 +402,8 @@ func TestConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 
-			session := &store.Session{
-				TestedIndexes: []string{},
-			}
-
 			ctx := context.Background()
-			result, err := instance.Balance(ctx, newTestRequest(http.MethodGet), session)
+			result, err := instance.Balance(ctx, newTestRequest(http.MethodGet))
 			if err != nil {
 				errors <- fmt.Errorf("goroutine %d error: %v", id, err)
 				return
@@ -513,35 +503,39 @@ func TestSessionStatePersistence(t *testing.T) {
 		StatusCode: 200,
 	}
 
-	session := &store.Session{TestedIndexes: []string{}}
 	ctx := context.Background()
 
 	// First request should try and fail with index 1
-	_, err := instance.Balance(ctx, newTestRequest(http.MethodGet), session)
+	req := newTestRequest(http.MethodGet)
+	_, err := instance.Balance(ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
+	streamId := instance.GetStreamId(req)
 
 	// Verify session state
-	if len(session.TestedIndexes) != 2 {
-		t.Errorf("Expected 2 tested indexes, got %d", len(session.TestedIndexes))
+	if instance.GetNumTestedIndexes(streamId) != 2 {
+		t.Errorf("Expected 2 tested indexes, got %d", instance.GetNumTestedIndexes(streamId))
 	}
 
 	// Second request should use index 2 directly
-	result2, err := instance.Balance(ctx, newTestRequest(http.MethodGet), session)
+	req = newTestRequest(http.MethodGet)
+	result2, err := instance.Balance(ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
+	streamId = instance.GetStreamId(req)
 
 	if result2.Index != "2" {
 		t.Errorf("Expected index 2, got %s", result2.Index)
 	}
 
 	// Clear session state
-	session.TestedIndexes = []string{}
+	instance.clearTested(streamId)
 
 	// Should start over with index 1 but fail and move to index 2
-	result3, err := instance.Balance(ctx, newTestRequest(http.MethodGet), session)
+	req = newTestRequest(http.MethodGet)
+	result3, err := instance.Balance(ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -678,9 +672,8 @@ func TestLoadBalancerConcurrencyPriority(t *testing.T) {
 			t.Log("LoadBalancer instance created")
 
 			// Run balance
-			session := &store.Session{TestedIndexes: []string{}}
 			ctx := context.Background()
-			result, err := instance.Balance(ctx, newTestRequest(http.MethodGet), session)
+			result, err := instance.Balance(ctx, newTestRequest(http.MethodGet))
 			t.Logf("Balance result: %+v, error: %v", result, err)
 			t.Logf("Attempts made: %v", client.attempts)
 			t.Logf("Expected order: %v", tt.expectedOrder)

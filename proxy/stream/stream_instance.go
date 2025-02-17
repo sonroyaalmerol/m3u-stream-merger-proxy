@@ -1,22 +1,25 @@
 package stream
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy"
+	"m3u-stream-merger/proxy/client"
 	"m3u-stream-merger/proxy/loadbalancer"
+	"m3u-stream-merger/proxy/stream/buffer"
+	"m3u-stream-merger/proxy/stream/config"
+	"m3u-stream-merger/proxy/stream/failovers"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
-	"net/http"
-	"net/url"
+	"strings"
 )
 
 type StreamInstance struct {
-	Cm     *store.ConcurrencyManager
-	config *StreamConfig
-	logger logger.Logger
+	Cm           *store.ConcurrencyManager
+	config       *config.StreamConfig
+	logger       logger.Logger
+	failoverProc *failovers.M3U8Processor
 }
 
 type StreamInstanceOption func(*StreamInstance)
@@ -29,7 +32,7 @@ func WithLogger(logger logger.Logger) StreamInstanceOption {
 
 func NewStreamInstance(
 	cm *store.ConcurrencyManager,
-	config *StreamConfig,
+	config *config.StreamConfig,
 	opts ...StreamInstanceOption,
 ) (*StreamInstance, error) {
 	if cm == nil {
@@ -37,8 +40,9 @@ func NewStreamInstance(
 	}
 
 	instance := &StreamInstance{
-		Cm:     cm,
-		config: config,
+		Cm:           cm,
+		config:       config,
+		failoverProc: failovers.NewM3U8Processor(&logger.DefaultLogger{}),
 	}
 
 	// Apply all options
@@ -55,56 +59,51 @@ func NewStreamInstance(
 
 func (instance *StreamInstance) ProxyStream(
 	ctx context.Context,
-	coordinator *StreamCoordinator,
+	coordinator *buffer.StreamCoordinator,
 	lbResult *loadbalancer.LoadBalancerResult,
-	r *http.Request,
-	w http.ResponseWriter,
-	statusChan chan<- int,
-) {
-	if r.Method != http.MethodGet || utils.IsAnM3U8Media(lbResult.Response) {
-		instance.handleM3U8Stream(lbResult.Response, w, statusChan)
-		return
-	}
-
-	instance.handleMediaStream(ctx, coordinator, lbResult, r, w, statusChan)
-}
-
-func (instance *StreamInstance) handleM3U8Stream(
-	resp *http.Response,
-	w http.ResponseWriter,
-	statusChan chan<- int,
-) {
-	scanner := bufio.NewScanner(resp.Body)
-	base, err := url.Parse(resp.Request.URL.String())
-	if err != nil {
-		instance.logger.Errorf("Invalid base URL for M3U8 stream: %v", err)
-		statusChan <- proxy.StatusM3U8ParseError
-		return
-	}
-
-	processor := NewM3U8Processor(instance.logger)
-	if err := processor.ProcessM3U8Stream(scanner, w, base); err != nil {
-		instance.logger.Errorf("Failed to process M3U8 stream: %v", err)
-		statusChan <- proxy.StatusM3U8ParseError
-		return
-	}
-
-	statusChan <- proxy.StatusM3U8Parsed
-}
-
-func (instance *StreamInstance) handleMediaStream(
-	ctx context.Context,
-	coordinator *StreamCoordinator,
-	lbResult *loadbalancer.LoadBalancerResult,
-	r *http.Request,
-	w http.ResponseWriter,
+	streamClient *client.StreamClient,
 	statusChan chan<- int,
 ) {
 	handler := NewStreamHandler(instance.config, coordinator, instance.logger)
-	result := handler.HandleStream(ctx, lbResult, w, r.RemoteAddr)
 
+	var result StreamResult
+	if lbResult.Response.StatusCode == 206 || strings.HasSuffix(lbResult.URL, ".mp4") {
+		handler.logger.Logf("VOD request detected from: %s", streamClient.Request.RemoteAddr)
+		handler.logger.Warn("VODs do not support shared buffer.")
+		result = handler.HandleDirectStream(ctx, lbResult, streamClient)
+	} else {
+		if _, ok := instance.Cm.Invalid.Load(lbResult.URL); !ok {
+			result = handler.HandleStream(ctx, lbResult, streamClient)
+		} else {
+			result = StreamResult{
+				Status: proxy.StatusIncompatible,
+			}
+		}
+	}
 	if result.Error != nil {
-		instance.logger.Logf("Stream handler status: %v", result.Error)
+		if result.Status != proxy.StatusIncompatible {
+			instance.logger.Errorf("Stream handler status: %v", result.Error)
+		}
+	}
+
+	if result.Status == proxy.StatusIncompatible && utils.IsAnM3U8Media(lbResult.Response) {
+		if _, ok := instance.Cm.Invalid.Load(lbResult.URL); !ok {
+			instance.logger.Logf("Source is known to have an incompatible media type for an M3U8. Trying a fallback passthrough method.")
+			instance.logger.Logf("Passthrough method will not have any shared buffer. Concurrency support might be unreliable.")
+			instance.Cm.Invalid.Store(lbResult.URL, struct{}{})
+		}
+
+		if err := instance.failoverProc.ProcessM3U8Stream(lbResult, streamClient); err != nil {
+			statusChan <- proxy.StatusIncompatible
+			return
+		}
+
+		statusChan <- proxy.StatusM3U8Parsed
+		return
+	}
+
+	if utils.IsAnM3U8Media(lbResult.Response) {
+		lbResult.Response.Body.Close()
 	}
 
 	statusChan <- result.Status

@@ -13,17 +13,20 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
 type LoadBalancerInstance struct {
-	Info          *sourceproc.StreamInfo
-	Cm            *store.ConcurrencyManager
-	config        *LBConfig
-	httpClient    HTTPClient
-	logger        logger.Logger
-	indexProvider IndexProvider
-	slugParser    SlugParser
+	Info            *sourceproc.StreamInfo
+	Cm              *store.ConcurrencyManager
+	config          *LBConfig
+	httpClient      HTTPClient
+	logger          logger.Logger
+	indexProvider   IndexProvider
+	slugParser      SlugParser
+	testedIndexes   map[string][]string
+	testedIndexesMu sync.RWMutex
 }
 
 type LoadBalancerInstanceOption func(*LoadBalancerInstance)
@@ -64,6 +67,7 @@ func NewLoadBalancerInstance(
 		logger:        &logger.DefaultLogger{},
 		indexProvider: &DefaultIndexProvider{},
 		slugParser:    &DefaultSlugParser{},
+		testedIndexes: make(map[string][]string),
 	}
 
 	for _, opt := range opts {
@@ -80,12 +84,19 @@ type LoadBalancerResult struct {
 	SubIndex string
 }
 
-func (instance *LoadBalancerInstance) Balance(ctx context.Context, req *http.Request, session *store.Session) (*LoadBalancerResult, error) {
+func (instance *LoadBalancerInstance) GetStreamId(req *http.Request) string {
+	streamId := strings.Split(path.Base(req.URL.Path), ".")[0]
+	if streamId == "" {
+		return ""
+	}
+	streamId = strings.TrimPrefix(streamId, "/")
+
+	return streamId
+}
+
+func (instance *LoadBalancerInstance) Balance(ctx context.Context, req *http.Request) (*LoadBalancerResult, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("context cannot be nil")
-	}
-	if session == nil {
-		return nil, fmt.Errorf("session cannot be nil")
 	}
 	if req == nil {
 		return nil, fmt.Errorf("req cannot be nil")
@@ -97,15 +108,11 @@ func (instance *LoadBalancerInstance) Balance(ctx context.Context, req *http.Req
 		return nil, fmt.Errorf("req.URL cannot be empty")
 	}
 
-	streamUrl := strings.Split(path.Base(req.URL.Path), ".")[0]
-	if streamUrl == "" {
-		return nil, fmt.Errorf("invalid ID for request from %s: %s", req.RemoteAddr, req.URL.Path)
-	}
-	streamUrl = strings.TrimPrefix(streamUrl, "/")
+	streamId := instance.GetStreamId(req)
 
-	err := instance.fetchBackendUrls(streamUrl)
+	err := instance.fetchBackendUrls(streamId)
 	if err != nil {
-		return nil, fmt.Errorf("error fetching sources for: %s", streamUrl)
+		return nil, fmt.Errorf("error fetching sources for: %s", streamId)
 	}
 
 	backoff := proxy.NewBackoffStrategy(time.Duration(instance.config.RetryWait)*time.Second, 0)
@@ -113,7 +120,7 @@ func (instance *LoadBalancerInstance) Balance(ctx context.Context, req *http.Req
 	for lap := 0; lap < instance.config.MaxRetries || instance.config.MaxRetries == 0; lap++ {
 		instance.logger.Debugf("Stream attempt %d out of %d", lap+1, instance.config.MaxRetries)
 
-		result, err := instance.tryAllStreams(ctx, req.Method, session)
+		result, err := instance.tryAllStreams(ctx, req.Method, streamId)
 		if err == nil {
 			return result, nil
 		}
@@ -123,7 +130,7 @@ func (instance *LoadBalancerInstance) Balance(ctx context.Context, req *http.Req
 			return nil, fmt.Errorf("cancelling load balancer")
 		}
 
-		session.SetTestedIndexes([]string{})
+		instance.clearTested(streamId)
 
 		select {
 		case <-time.After(backoff.Next()):
@@ -133,6 +140,10 @@ func (instance *LoadBalancerInstance) Balance(ctx context.Context, req *http.Req
 	}
 
 	return nil, fmt.Errorf("error fetching stream: exhausted all streams")
+}
+
+func (instance *LoadBalancerInstance) GetNumTestedIndexes(streamId string) int {
+	return len(instance.testedIndexes[streamId])
 }
 
 func (instance *LoadBalancerInstance) fetchBackendUrls(streamUrl string) error {
@@ -165,8 +176,8 @@ func (instance *LoadBalancerInstance) fetchBackendUrls(streamUrl string) error {
 	return nil
 }
 
-func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, method string, session *store.Session) (*LoadBalancerResult, error) {
-	instance.logger.Logf("Trying all stream urls for session: %s", session.ID)
+func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, method string, streamId string) (*LoadBalancerResult, error) {
+	instance.logger.Logf("Trying all stream urls for: %s", streamId)
 	if instance.indexProvider == nil {
 		return nil, fmt.Errorf("index provider cannot be nil")
 	}
@@ -203,7 +214,7 @@ func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, method 
 				continue
 			}
 
-			result, err := instance.tryStreamUrls(method, session, index, innerMap)
+			result, err := instance.tryStreamUrls(method, streamId, index, innerMap)
 			if err == nil {
 				return result, nil
 			}
@@ -221,7 +232,7 @@ func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, method 
 
 func (instance *LoadBalancerInstance) tryStreamUrls(
 	method string,
-	session *store.Session,
+	streamId string,
 	index string,
 	urls map[string]string,
 ) (*LoadBalancerResult, error) {
@@ -242,9 +253,9 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 		}
 
 		id := index + "|" + subIndex
-		session.Mutex.RLock()
-		alreadyTested := slices.Contains(session.TestedIndexes, index+"|"+subIndex)
-		session.Mutex.RUnlock()
+		instance.testedIndexesMu.RLock()
+		alreadyTested := slices.Contains(instance.testedIndexes[streamId], index+"|"+subIndex)
+		instance.testedIndexesMu.RUnlock()
 
 		if alreadyTested {
 			instance.logger.Debugf("Skipping M3U_%s|%s: marked as previous stream", index, subIndex)
@@ -259,26 +270,26 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 		req, err := http.NewRequest(method, url, nil)
 		if err != nil {
 			instance.logger.Errorf("Error creating request: %s", err.Error())
-			markTested(session, id)
+			instance.markTested(streamId, id)
 			continue
 		}
 
 		resp, err := instance.httpClient.Do(req)
 		if err != nil {
 			instance.logger.Errorf("Error fetching stream: %s", err.Error())
-			markTested(session, id)
+			instance.markTested(streamId, id)
 			continue
 		}
 
 		if resp == nil {
 			instance.logger.Errorf("Received nil response from HTTP client")
-			markTested(session, id)
+			instance.markTested(streamId, id)
 			continue
 		}
 
 		if resp.StatusCode != http.StatusOK {
 			instance.logger.Errorf("Non-200 status code received: %d for %s %s", resp.StatusCode, method, url)
-			markTested(session, id)
+			instance.markTested(streamId, id)
 			continue
 		}
 
@@ -295,8 +306,14 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 	return nil, fmt.Errorf("all urls failed")
 }
 
-func markTested(session *store.Session, id string) {
-	session.Mutex.Lock()
-	session.TestedIndexes = append(session.TestedIndexes, id)
-	session.Mutex.Unlock()
+func (instance *LoadBalancerInstance) markTested(streamId string, id string) {
+	instance.testedIndexesMu.Lock()
+	instance.testedIndexes[streamId] = append(instance.testedIndexes[streamId], id)
+	instance.testedIndexesMu.Unlock()
+}
+
+func (instance *LoadBalancerInstance) clearTested(streamId string) {
+	instance.testedIndexesMu.Lock()
+	instance.testedIndexes[streamId] = []string{}
+	instance.testedIndexesMu.Unlock()
 }
