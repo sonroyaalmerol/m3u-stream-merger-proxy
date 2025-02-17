@@ -54,8 +54,6 @@ func (h *StreamHTTPHandler) extractStreamURL(urlPath string) string {
 func (h *StreamHTTPHandler) handleStream(ctx context.Context, streamClient *client.StreamClient) {
 	r := streamClient.Request
 
-	h.logger.Logf("Received request from %s for URL: %s", r.RemoteAddr, r.URL.Path)
-
 	streamURL := h.extractStreamURL(r.URL.Path)
 	if streamURL == "" {
 		h.logger.Logf("Invalid m3uID for request from %s: %s", r.RemoteAddr, r.URL.Path)
@@ -68,8 +66,8 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, streamClient *clie
 		lbResult := coordinator.GetWriterLBResult()
 		var err error
 		if lbResult == nil {
-			h.logger.Logf("No existing shared buffer found for %s", streamURL)
-			h.logger.Logf("Client %s executing load balancer.", r.RemoteAddr)
+			h.logger.Debugf("No existing shared buffer found for %s", streamURL)
+			h.logger.Debugf("Client %s executing load balancer.", r.RemoteAddr)
 			lbResult, err = h.manager.LoadBalancer(ctx, r)
 			if err != nil {
 				h.logger.Logf("Load balancer error (%s): %v", r.URL.Path, err)
@@ -80,7 +78,7 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, streamClient *clie
 		}
 
 		exitStatus := make(chan int)
-		h.logger.Logf("Proxying %s to %s", r.RemoteAddr, lbResult.URL)
+		h.logger.Logf("Proxying %s to %s", r.URL.Path, lbResult.URL)
 
 		proxyCtx, cancel := context.WithCancel(ctx)
 		go func() {
@@ -120,7 +118,7 @@ func (h *StreamHTTPHandler) handleExitCode(code int, r *http.Request) bool {
 		h.logger.Logf("Retrying other servers...")
 		return false
 	case proxy.StatusM3U8Parsed:
-		h.logger.Logf("Finished handling M3U8 %s request: %s", r.Method,
+		h.logger.Debugf("Finished handling M3U8 %s request: %s", r.Method,
 			r.RemoteAddr)
 		return true
 	case proxy.StatusM3U8ParseError:
