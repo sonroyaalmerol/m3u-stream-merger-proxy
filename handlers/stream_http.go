@@ -74,6 +74,9 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, streamClient *clie
 				return
 			}
 		} else {
+			if _, ok := h.manager.GetConcurrencyManager().Invalid.Load(lbResult.URL); ok {
+				return
+			}
 			h.logger.Logf("Existing shared buffer found for %s", streamURL)
 		}
 
