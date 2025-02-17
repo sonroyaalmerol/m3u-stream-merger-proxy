@@ -13,6 +13,7 @@ import (
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
 	"strings"
+	"sync"
 )
 
 type StreamInstance struct {
@@ -20,6 +21,7 @@ type StreamInstance struct {
 	config       *config.StreamConfig
 	logger       logger.Logger
 	failoverProc *failovers.M3U8Processor
+	warned       sync.Map // map[string]struct{}{}
 }
 
 type StreamInstanceOption func(*StreamInstance)
@@ -72,17 +74,29 @@ func (instance *StreamInstance) ProxyStream(
 		handler.logger.Warn("VODs do not support shared buffer.")
 		result = handler.HandleDirectStream(ctx, lbResult, streamClient)
 	} else {
-		result = handler.HandleStream(ctx, lbResult, streamClient)
+		if _, ok := instance.warned.Load(lbResult.URL); !ok {
+			result = handler.HandleStream(ctx, lbResult, streamClient)
+		} else {
+			result = StreamResult{
+				Status: proxy.StatusIncompatible,
+			}
+		}
 	}
 	if result.Error != nil {
-		instance.logger.Logf("Stream handler status: %v", result.Error)
+		if result.Status != proxy.StatusIncompatible {
+			instance.logger.Errorf("Stream handler status: %v", result.Error)
+		}
 	}
 
 	if result.Status == proxy.StatusIncompatible && utils.IsAnM3U8Media(lbResult.Response) {
-		instance.logger.Logf("Source is known to have an incompatible media type for an M3U8. Trying a fallback passthrough method.")
-		instance.logger.Logf("Passthrough method will not have any shared buffer. Concurrency support might be unreliable.")
+		if _, ok := instance.warned.Load(lbResult.URL); !ok {
+			instance.logger.Logf("Source is known to have an incompatible media type for an M3U8. Trying a fallback passthrough method.")
+			instance.logger.Logf("Passthrough method will not have any shared buffer. Concurrency support might be unreliable.")
+			instance.warned.Store(lbResult.URL, struct{}{})
+		}
 
 		if err := instance.failoverProc.ProcessM3U8Stream(lbResult, streamClient); err != nil {
+			instance.warned.Delete(lbResult.URL)
 			statusChan <- proxy.StatusIncompatible
 			return
 		}
