@@ -9,8 +9,9 @@ import (
 )
 
 type ConcurrencyManager struct {
-	mu    sync.Mutex
-	count map[string]int
+	mu      sync.Mutex
+	count   map[string]int
+	Invalid sync.Map // map[string]struct{}{}
 }
 
 func NewConcurrencyManager() *ConcurrencyManager {
