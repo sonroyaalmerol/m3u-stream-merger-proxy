@@ -73,24 +73,22 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 		return nil
 	}
 
+	err := os.MkdirAll(config.GetStreamsDirPath(), os.ModePerm)
+	if err != nil {
+		logger.Default.Debugf("Error creating stream cache folder: %s -> %v", config.GetStreamsDirPath(), err)
+	}
+
 	base64Title := base64.StdEncoding.EncodeToString([]byte(stream.Title))
 	h := sha3.Sum224([]byte(cleanUrl))
 	urlHash := hex.EncodeToString(h[:])
 
-	// Determine shard from the first 3 hex characters of the URL hash
-	shard := urlHash[:3]
-	shardDir := filepath.Join(config.GetStreamsDirPath(), shard)
 	fileName := fmt.Sprintf("%s_%s|%s", base64Title, m3uIndex, urlHash)
-	filePath := filepath.Join(shardDir, fileName)
+	filePath := filepath.Join(config.GetStreamsDirPath(), fileName)
 
 	stream.SourceM3U = m3uIndex
 	stream.SourceIndex = nextLine.LineNum
 
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		// Create shard directory if it doesn't exist
-		if err := os.MkdirAll(shardDir, os.ModePerm); err != nil {
-			logger.Default.Debugf("Error creating shard directory %s: %v", shardDir, err)
-		}
 		content := fmt.Sprintf("%d:::%s", nextLine.LineNum, encodedUrl)
 		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
 			logger.Default.Debugf("Error indexing stream: %s (#%s) -> %v", stream.Title, m3uIndex, err)
