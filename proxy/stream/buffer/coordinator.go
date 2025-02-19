@@ -395,6 +395,10 @@ func (c *StreamCoordinator) readAndWriteStream(
 	lastErr := time.Now()
 	zeroReads := 0
 
+	var totalBytesRead int64
+	readingStartTime := time.Now()
+	lastHealthLog := time.Now()
+
 	for atomic.LoadInt32(&c.state) == stateActive {
 		select {
 		case <-ctx.Done():
@@ -415,8 +419,24 @@ func (c *StreamCoordinator) readAndWriteStream(
 				time.Sleep(10 * time.Millisecond)
 				continue
 			}
+
 			lastSuccess = time.Now()
 			zeroReads = 0
+			totalBytesRead += int64(n)
+
+			if time.Since(lastHealthLog) >= 5*time.Second {
+				elapsed := time.Since(readingStartTime).Seconds()
+				avgThroughput := float64(totalBytesRead) / elapsed
+				c.logger.Debugf("Buffer health: average throughput = %.2f Bps", avgThroughput)
+				lastHealthLog = time.Now()
+
+				if c.config.ExpectedThroughput > 0 &&
+					avgThroughput < float64(c.config.ExpectedThroughput) {
+					c.logger.Warnf("Low buffer health: average throughput %.2f Bps below expected %d Bps",
+						avgThroughput, c.config.ExpectedThroughput,
+					)
+				}
+			}
 
 			if err == io.EOF && n > 0 {
 				if err = processChunk(buffer[:n]); err != nil {
@@ -438,7 +458,7 @@ func (c *StreamCoordinator) readAndWriteStream(
 				return err
 			}
 
-			// Reset the backoff if at least one second has passed.
+			// Reset backoff if at least one second has passed.
 			if time.Since(lastErr) >= time.Second {
 				backoff.Reset()
 				lastErr = time.Now()
