@@ -2,6 +2,7 @@ package loadbalancer
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +19,10 @@ type streamTestResult struct {
 func evaluateBufferHealth(resp *http.Response) (float64, error) {
 	const probeBytes = 8192
 	const probeTimeout = 2 * time.Second
+
+	if resp == nil || resp.Body == nil {
+		return 0, errors.New("response is empty")
+	}
 
 	br := bufio.NewReader(resp.Body)
 
