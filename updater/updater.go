@@ -87,21 +87,13 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 	default:
 		instance.logger.Log("Background process: Updating sources...")
 
-		cacheOnSync := os.Getenv("CACHE_ON_SYNC")
-		if len(strings.TrimSpace(cacheOnSync)) == 0 {
-			cacheOnSync = "false"
-		}
-
 		instance.logger.Log("Background process: Building merged M3U...")
-		if cacheOnSync == "true" {
-			instance.logger.Log("CACHE_ON_SYNC enabled. Building cache.")
-			if _, ok := os.LookupEnv("BASE_URL"); !ok {
-				instance.logger.Error("BASE_URL is required for CACHE_ON_SYNC to work.")
-				return
-			}
-			if err := processor.Run(ctx, nil); err == nil {
-				instance.m3uHandler.SetProcessedPath(processor.GetResultPath())
-			}
+		if _, ok := os.LookupEnv("BASE_URL"); !ok {
+			instance.logger.Error("BASE_URL is required for M3U processing to work.")
+			return
+		}
+		if err := processor.Run(ctx, nil); err == nil {
+			instance.m3uHandler.SetProcessedPath(processor.GetResultPath())
 		}
 	}
 }
