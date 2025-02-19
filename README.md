@@ -71,6 +71,7 @@ services:
     environment:
       - PUID=1000
       - PGID=1000
+      - BASE_URL=http://<server>:<port> # THIS IS REQUIRED
       - TZ=America/Toronto
       - SYNC_ON_BOOT=true
       - SYNC_CRON=0 0 * * *
@@ -113,7 +114,6 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | USER_AGENT                  | Set the User-Agent of HTTP requests.                    | IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)    |  Any valid user agent        |
 | SYNC_CRON                   | Set cron schedule expression of the background updates. | 0 0 * * *   |  Any valid cron expression    |
 | SYNC_ON_BOOT                | Set if an initial background syncing will be executed on boot | true    | true/false   |
-| CACHE_ON_SYNC               | Set if an initial background cache building will be executed after sync. Requires BASE_URL to be set. | false | true/false   |
 | CLEAR_ON_BOOT                | Set if an initial database clearing will be executed on boot | false   | true/false   |
 
 ### Load Balancer Configs
