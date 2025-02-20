@@ -435,6 +435,7 @@ func (c *StreamCoordinator) readAndWriteStream(
 					c.logger.Warnf("Low buffer health: average throughput %.2f Bps below expected %d Bps",
 						avgThroughput, c.config.ExpectedThroughput,
 					)
+					return fmt.Errorf("low buffer health: %.2f Bps", avgThroughput)
 				}
 			}
 

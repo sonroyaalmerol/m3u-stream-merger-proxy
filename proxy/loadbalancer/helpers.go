@@ -24,7 +24,7 @@ func evaluateBufferHealth(resp *http.Response) (float64, error) {
 		return 0, errors.New("response is empty")
 	}
 
-	br := bufio.NewReader(resp.Body)
+	br := bufio.NewReaderSize(resp.Body, probeBytes)
 
 	start := time.Now()
 
