@@ -576,33 +576,3 @@ func TestSessionStatePersistence(t *testing.T) {
 		t.Errorf("Expected index 2, got %s", result3.Index)
 	}
 }
-
-type mockHTTPClientWithTracking struct {
-	responses map[string]*http.Response
-	errors    map[string]error
-	attempts  []string
-	mu        sync.RWMutex
-}
-
-func (m *mockHTTPClientWithTracking) Do(req *http.Request) (*http.Response, error) {
-	m.mu.Lock()
-	m.attempts = append(m.attempts, req.URL.String())
-	m.mu.Unlock()
-
-	if err := m.errors[req.URL.String()]; err != nil {
-		return nil, err
-	}
-
-	resp := m.responses[req.URL.String()]
-	if resp == nil {
-		return &http.Response{
-			StatusCode: http.StatusNotFound,
-			Body:       io.NopCloser(strings.NewReader("")),
-		}, nil
-	}
-
-	return &http.Response{
-		StatusCode: resp.StatusCode,
-		Body:       resp.Body,
-	}, nil
-}
