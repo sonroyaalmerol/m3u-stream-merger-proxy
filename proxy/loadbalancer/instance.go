@@ -309,7 +309,7 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 				return
 			}
 
-			health, evalErr := evaluateBufferHealth(resp)
+			health, evalErr := evaluateBufferHealth(resp, instance.config.BufferChunk)
 			if evalErr != nil {
 				instance.logger.Errorf("Error evaluating buffer health: %s", evalErr.Error())
 				instance.markTested(streamId, candidateId)

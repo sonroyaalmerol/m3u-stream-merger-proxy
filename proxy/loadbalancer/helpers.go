@@ -16,9 +16,8 @@ type streamTestResult struct {
 	err    error
 }
 
-func evaluateBufferHealth(resp *http.Response) (float64, error) {
+func evaluateBufferHealth(resp *http.Response, readChunkSize int) (float64, error) {
 	const measureDuration = 2 * time.Second
-	const readChunkSize = 4096
 
 	start := time.Now()
 	br := bufio.NewReader(resp.Body)

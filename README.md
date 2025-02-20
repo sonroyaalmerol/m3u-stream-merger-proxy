@@ -122,7 +122,7 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | MAX_RETRIES | Set max number of retries (loop) across all M3Us while streaming. 0 to never stop retrying (beware of throttling from provider). | 5 | Any integer greater than or equal 0 |
 | RETRY_WAIT | Set a wait time before retrying (looping) across all M3Us on stream initialization error. | 0 | Any integer greater than or equal 0 |
 | STREAM_TIMEOUT | Set timeout duration in seconds of retrying on error before a stream is considered down. | 3 | Any positive integer greater than 0 |
-| MINIMUM_THROUGHPUT | Set minimum buffer health throughput (in bytes per second) before a stream is considered down. | 500000 | Any positive integer greater than 0 |
+| MINIMUM_THROUGHPUT | Set minimum buffer health throughput (in bytes per second) before a stream is considered down. | 100000 | Any positive integer greater than 0 |
 | BUFFER_CHUNK_NUM | Set number of chunk "containers" for the **shared buffer** that rotates across all clients and the source of the stream. See [here](#how-does-the-shared-buffer-work) for more information. You can change this value by increments of 2. Higher quantity means more capacity for contents but more memory usage for the proxy. | 8 | Any positive integer |
 
 ### Playlist Output (`/playlist.m3u`) Configs

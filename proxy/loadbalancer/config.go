@@ -6,13 +6,15 @@ import (
 )
 
 type LBConfig struct {
-	MaxRetries int
-	RetryWait  int
+	MaxRetries  int
+	RetryWait   int
+	BufferChunk int
 }
 
 func NewDefaultLBConfig() *LBConfig {
 	finalMaxRetries := 5
 	finalRetryWait := 0
+	finalBufferChunk := 1024 * 1024
 
 	maxRetries, ok := os.LookupEnv("MAX_RETRIES")
 	if ok {
@@ -30,8 +32,17 @@ func NewDefaultLBConfig() *LBConfig {
 		}
 	}
 
+	bufferSize, ok := os.LookupEnv("BUFFER_CHUNK_NUM")
+	if ok {
+		intBufferSize, err := strconv.Atoi(bufferSize)
+		if err == nil && intBufferSize >= 0 {
+			finalBufferChunk = intBufferSize * 1024 * 1024
+		}
+	}
+
 	return &LBConfig{
-		MaxRetries: finalMaxRetries,
-		RetryWait:  finalRetryWait,
+		MaxRetries:  finalMaxRetries,
+		RetryWait:   finalRetryWait,
+		BufferChunk: finalBufferChunk,
 	}
 }
