@@ -424,7 +424,7 @@ func (c *StreamCoordinator) readAndWriteStream(
 			zeroReads = 0
 			totalBytesRead += int64(n)
 
-			if time.Since(lastHealthLog) >= 5*time.Second {
+			if time.Since(lastHealthLog) >= 2*time.Second {
 				elapsed := time.Since(readingStartTime).Seconds()
 				avgThroughput := float64(totalBytesRead) / elapsed
 				c.logger.Debugf("Buffer health: average throughput = %.2f Bps", avgThroughput)

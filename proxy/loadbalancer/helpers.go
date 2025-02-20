@@ -2,6 +2,7 @@ package loadbalancer
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,40 +17,41 @@ type streamTestResult struct {
 }
 
 func evaluateBufferHealth(resp *http.Response) (float64, error) {
-	const probeBytes = 8192
-	const probeTimeout = 500 * time.Millisecond
-
-	br := bufio.NewReaderSize(resp.Body, probeBytes)
+	const measureDuration = 2 * time.Second
+	const readChunkSize = 4096
 
 	start := time.Now()
+	br := bufio.NewReader(resp.Body)
 
-	type probeResult struct {
-		bytes []byte
-		err   error
-	}
-	resultCh := make(chan probeResult, 1)
+	var consumed bytes.Buffer
+	totalBytes := 0
 
-	go func() {
-		bytes, err := br.Peek(probeBytes)
-		resultCh <- probeResult{bytes: bytes, err: err}
-	}()
+	temp := make([]byte, readChunkSize)
+	deadline := time.Now().Add(measureDuration)
 
-	select {
-	case res := <-resultCh:
-		elapsed := time.Since(start)
-		if res.err != nil && res.err != io.EOF {
-			return 0, res.err
+	for time.Now().Before(deadline) {
+		n, err := br.Read(temp)
+		if n > 0 {
+			totalBytes += n
+			consumed.Write(temp[:n])
 		}
-		if elapsed <= 0 {
-			elapsed = time.Millisecond
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return 0, fmt.Errorf("error reading stream during measurement: %w", err)
 		}
-		throughput := float64(len(res.bytes)) / elapsed.Seconds()
-
-		resp.Body = io.NopCloser(br)
-		return throughput, nil
-	case <-time.After(probeTimeout):
-		return 0, fmt.Errorf("probe timed out after %v", probeTimeout)
 	}
+
+	elapsed := time.Since(start)
+	if elapsed.Seconds() == 0 {
+		elapsed = time.Millisecond
+	}
+	throughput := float64(totalBytes) / elapsed.Seconds()
+
+	newBody := io.MultiReader(bytes.NewReader(consumed.Bytes()), br)
+	resp.Body = io.NopCloser(newBody)
+	return throughput, nil
 }
 
 func contains(sl []string, val string) bool {
