@@ -117,7 +117,8 @@ func (p *M3UProcessor) GetResultPath() string {
 		}
 		return path
 	}
-	return p.file.Name()
+	prodPath := strings.TrimSuffix(p.file.Name(), ".tmp")
+	return prodPath
 }
 
 func (p *M3UProcessor) markCriticalError(err error) {
