@@ -92,83 +92,65 @@ func handleRemoteURL(m3uURL, idx string, result *SourceDownloaderResult) {
 		return
 	}
 
-	// Open the existing final file (if any) as a fallback.
 	fallbackFile, _ := os.Open(finalPath)
-	// Ensure fallbackFile is closed if it remains unused.
 	defer func() {
 		if fallbackFile != nil {
 			fallbackFile.Close()
 		}
 	}()
 
-	var file *os.File
-	var reader io.Reader
-
-	req, err := http.NewRequest("GET", m3uURL, nil)
-	if err == nil {
-		resp, err := utils.HTTPClient.Do(req)
-		if err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				newFile, err := os.Create(tmpPath)
-				if err == nil {
-					// We don't need the fallback file if we get a new file,
-					// so close it right now.
-					if fallbackFile != nil {
-						fallbackFile.Close()
-						fallbackFile = nil
-					}
-					file = newFile
-					reader = io.TeeReader(resp.Body, file)
-				} else {
-					logger.Default.Warnf("Error creating tmp file for index %s: %v. Falling back to existing file: %s",
-						idx, err, finalPath)
-					if fallbackFile != nil {
-						file = fallbackFile
-						reader = file
-						// Leave fallbackFile non-nil so the final file.Close() works.
-					} else {
-						result.Error <- fmt.Errorf("error creating tmp file: %v", err)
-						return
-					}
-				}
-			} else {
-				logger.Default.Warnf("HTTP status %d for index %s. Falling back to existing file: %s",
-					resp.StatusCode, idx, finalPath)
-				if fallbackFile != nil {
-					file = fallbackFile
-					reader = file
-				} else {
-					result.Error <- fmt.Errorf("HTTP status %d and no existing file", resp.StatusCode)
-					return
-				}
-			}
-		} else {
-			logger.Default.Warnf("HTTP request error for index %s: %v. Falling back to existing file: %s",
-				idx, err, finalPath)
-			if fallbackFile != nil {
-				file = fallbackFile
-				reader = file
-			} else {
-				result.Error <- fmt.Errorf("HTTP request error: %v", err)
-				return
-			}
-		}
-	} else {
-		logger.Default.Warnf("Error creating HTTP request for index %s: %v. Falling back to existing file: %s",
-			idx, err, finalPath)
+	useFallback := func(err error) {
 		if fallbackFile != nil {
-			file = fallbackFile
-			reader = file
+			scanAndStream(fallbackFile, result)
 		} else {
-			result.Error <- fmt.Errorf("error creating HTTP request: %v", err)
-			return
+			result.Error <- err
 		}
 	}
 
-	scanAndStream(reader, result)
+	req, err := http.NewRequest("GET", m3uURL, nil)
+	if err != nil {
+		logger.Default.Warnf("Error creating HTTP request for index %s: %v", idx, err)
+		useFallback(fmt.Errorf("error creating HTTP request: %v", err))
+		return
+	}
 
-	file.Close()
+	resp, err := utils.HTTPClient.Do(req)
+	if err != nil {
+		logger.Default.Warnf("HTTP request error for index %s: %v", idx, err)
+		useFallback(fmt.Errorf("HTTP request error: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		logger.Default.Warnf("HTTP status %d for index %s", resp.StatusCode, idx)
+		useFallback(fmt.Errorf("HTTP status %d and no existing file", resp.StatusCode))
+		return
+	}
+
+	bufReader := bufio.NewReader(resp.Body)
+	peekBytes, err := bufReader.Peek(7)
+	if err != nil || !strings.HasPrefix(string(peekBytes), "#EXTM3U") {
+		logger.Default.Warnf("Invalid M3U response for index %s. Falling back to existing file: %s", idx, finalPath)
+		useFallback(fmt.Errorf("invalid M3U response and no fallback"))
+		return
+	}
+
+	newFile, err := os.Create(tmpPath)
+	if err != nil {
+		logger.Default.Warnf("Error creating tmp file for index %s: %v", idx, err)
+		useFallback(fmt.Errorf("error creating tmp file: %v", err))
+		return
+	}
+	defer newFile.Close()
+
+	if fallbackFile != nil {
+		fallbackFile.Close()
+		fallbackFile = nil
+	}
+
+	reader := io.TeeReader(bufReader, newFile)
+	scanAndStream(reader, result)
 }
 
 func scanAndStream(r io.Reader, result *SourceDownloaderResult) {
