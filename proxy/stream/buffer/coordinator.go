@@ -409,8 +409,6 @@ func (c *StreamCoordinator) readAndWriteStream(
 			}
 
 			n, err := body.Read(buffer)
-			c.logger.Debugf("Read %d bytes, err: %v", n, err)
-
 			if n == 0 {
 				zeroReads++
 				if zeroReads > 10 {

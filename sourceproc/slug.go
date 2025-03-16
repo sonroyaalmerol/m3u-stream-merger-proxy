@@ -86,6 +86,9 @@ func DecodeSlug(encodedSlug string) (*StreamInfo, error) {
 		return nil, fmt.Errorf("error deserializing data: %v", err)
 	}
 
+	result.Lock()
 	result.URLs = make(map[string]map[string]string)
+	result.Unlock()
+
 	return &result, nil
 }

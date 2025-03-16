@@ -153,14 +153,18 @@ func (instance *LoadBalancerInstance) fetchBackendUrls(streamUrl string) error {
 
 	instance.logger.Debugf("Decoded slug: %v", stream)
 
+	stream.RLock()
+	urls := stream.URLs
+	stream.RUnlock()
+
 	// Validate URLs map
-	if len(stream.URLs) == 0 {
+	if len(urls) == 0 {
 		return fmt.Errorf("stream has no URLs configured")
 	}
 
 	// Validate that at least one index has URLs
 	hasValidUrls := false
-	for _, innerMap := range stream.URLs {
+	for _, innerMap := range urls {
 		if len(innerMap) > 0 {
 			hasValidUrls = true
 			break
@@ -207,7 +211,10 @@ func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, method 
 
 			done[index] = true
 
+			instance.Info.RLock()
 			innerMap, ok := instance.Info.URLs[index]
+			instance.Info.RUnlock()
+
 			if !ok {
 				instance.logger.Errorf("Channel not found from M3U_%s: %s", index, instance.Info.Title)
 				continue
@@ -277,7 +284,10 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 		go func(subIndex, url, candidateId string) {
 			defer wg.Done()
 
-			req, err := http.NewRequest(method, url, nil)
+			timeoutCtx, ctxCancel := context.WithTimeout(context.Background(), time.Second*3)
+			defer ctxCancel()
+
+			req, err := http.NewRequestWithContext(timeoutCtx, method, url, nil)
 			if err != nil {
 				instance.logger.Errorf("Error creating request: %s", err.Error())
 				instance.markTested(streamId, candidateId)
