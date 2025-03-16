@@ -74,9 +74,13 @@ func (p *M3UProcessor) Wait(ctx context.Context) error {
 
 		return ctx.Err()
 	}
+	logger.Default.Debug("Finished revalidation")
 
 	if !p.criticalErrorOccurred.Load() {
+		logger.Default.Debug("Error has not occurred")
 		prodPath := strings.TrimSuffix(p.file.Name(), ".tmp")
+
+		logger.Default.Debugf("Renaming %s to %s", p.file.Name(), prodPath)
 		err := os.Rename(p.file.Name(), prodPath)
 		if err != nil {
 			logger.Default.Errorf("Error renaming file: %v", err)
@@ -103,7 +107,8 @@ func (p *M3UProcessor) GetCount() int {
 }
 
 func (p *M3UProcessor) clearOldResults() {
-	err := config.ClearOldProcessedM3U(p.file.Name())
+	prodPath := strings.TrimSuffix(p.file.Name(), ".tmp")
+	err := config.ClearOldProcessedM3U(prodPath)
 	if err != nil {
 		logger.Default.Error(err.Error())
 	}
