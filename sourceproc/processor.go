@@ -163,11 +163,15 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 }
 
 func (p *M3UProcessor) addStream(stream *StreamInfo) error {
+	if stream == nil {
+		return nil
+	}
+
 	stream.RLock()
 	urls := stream.URLs
 	stream.RUnlock()
 
-	if stream == nil || len(urls) == 0 {
+	if len(urls) == 0 {
 		return nil
 	}
 
