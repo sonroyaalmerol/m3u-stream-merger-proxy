@@ -60,7 +60,10 @@ func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
 		return nil, err
 	}
 
+	initInfo.Lock()
 	initInfo.URLs = make(map[string]map[string]string)
+	initInfo.Unlock()
+
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(utils.GetM3UIndexes()))
 
@@ -104,7 +107,9 @@ func loadStreamURLs(stream *StreamInfo, m3uIndex string) error {
 		return fmt.Errorf("error finding files for pattern %s: %v", globPattern, err)
 	}
 
+	stream.Lock()
 	stream.URLs[m3uIndex] = make(map[string]string)
+	stream.Unlock()
 
 	for _, fileMatch := range fileMatches {
 		// Extract filename from path (works with sharded structure)
@@ -134,7 +139,9 @@ func loadStreamURLs(stream *StreamInfo, m3uIndex string) error {
 			continue
 		}
 
+		stream.Lock()
 		stream.URLs[m3uIndex][parts[1]] = strings.TrimSpace(fmt.Sprintf("%s:::%s", urlIndex, string(url)))
+		stream.Unlock()
 	}
 
 	return nil

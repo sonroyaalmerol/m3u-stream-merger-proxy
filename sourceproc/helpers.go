@@ -24,14 +24,18 @@ func GetStreamBySlug(slug string) (*StreamInfo, error) {
 }
 
 func GenerateStreamURL(baseUrl string, stream *StreamInfo) string {
-	subPaths := make(chan string, len(stream.URLs))
+	stream.RLock()
+	urls := stream.URLs
+	stream.RUnlock()
+
+	subPaths := make(chan string, len(urls))
 	var wg sync.WaitGroup
 	var err error
 
 	extension := ""
 
 	// Process URLs concurrently
-	for _, innerMap := range stream.URLs {
+	for _, innerMap := range urls {
 		for _, srcUrl := range innerMap {
 			if extension == "" {
 				extension, err = utils.GetFileExtensionFromUrl(srcUrl)

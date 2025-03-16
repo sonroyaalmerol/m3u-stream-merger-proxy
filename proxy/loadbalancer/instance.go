@@ -10,7 +10,6 @@ import (
 	"m3u-stream-merger/utils"
 	"net/http"
 	"path"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -22,6 +21,7 @@ type LoadBalancerInstance struct {
 	Cm              *store.ConcurrencyManager
 	config          *LBConfig
 	httpClient      HTTPClient
+	healthClient    HTTPClient
 	logger          logger.Logger
 	indexProvider   IndexProvider
 	slugParser      SlugParser
@@ -34,6 +34,7 @@ type LoadBalancerInstanceOption func(*LoadBalancerInstance)
 func WithHTTPClient(client HTTPClient) LoadBalancerInstanceOption {
 	return func(s *LoadBalancerInstance) {
 		s.httpClient = client
+		s.setHealthClient()
 	}
 }
 
@@ -69,6 +70,7 @@ func NewLoadBalancerInstance(
 		slugParser:    &DefaultSlugParser{},
 		testedIndexes: make(map[string][]string),
 	}
+	instance.setHealthClient()
 
 	for _, opt := range opts {
 		opt(instance)
@@ -82,6 +84,43 @@ type LoadBalancerResult struct {
 	URL      string
 	Index    string
 	SubIndex string
+}
+
+func (instance *LoadBalancerInstance) setHealthClient() {
+	if originalClient, ok := instance.httpClient.(*http.Client); ok {
+		healthCheckClient := *originalClient
+
+		if originalTransport, ok := originalClient.Transport.(*http.Transport); ok {
+			// Create a new transport and copy relevant fields from the original transport
+			transportCopy := &http.Transport{
+				Proxy:                 originalTransport.Proxy,
+				DialContext:           originalTransport.DialContext,
+				TLSClientConfig:       originalTransport.TLSClientConfig,
+				TLSHandshakeTimeout:   originalTransport.TLSHandshakeTimeout,
+				DisableKeepAlives:     originalTransport.DisableKeepAlives,
+				DisableCompression:    originalTransport.DisableCompression,
+				MaxIdleConns:          originalTransport.MaxIdleConns,
+				MaxIdleConnsPerHost:   originalTransport.MaxIdleConnsPerHost,
+				IdleConnTimeout:       originalTransport.IdleConnTimeout,
+				ResponseHeaderTimeout: 3 * time.Second,
+				ExpectContinueTimeout: originalTransport.ExpectContinueTimeout,
+				ForceAttemptHTTP2:     originalTransport.ForceAttemptHTTP2,
+			}
+
+			// Assign the copied transport to the new client
+			healthCheckClient.Transport = transportCopy
+		} else {
+			// If the transport is not *http.Transport, create a new transport
+			healthCheckClient.Transport = &http.Transport{
+				ResponseHeaderTimeout: 3 * time.Second,
+			}
+		}
+
+		instance.healthClient = &healthCheckClient
+	} else {
+		instance.healthClient = instance.httpClient
+	}
+
 }
 
 func (instance *LoadBalancerInstance) GetStreamId(req *http.Request) string {
@@ -154,14 +193,18 @@ func (instance *LoadBalancerInstance) fetchBackendUrls(streamUrl string) error {
 
 	instance.logger.Debugf("Decoded slug: %v", stream)
 
+	stream.RLock()
+	urls := stream.URLs
+	stream.RUnlock()
+
 	// Validate URLs map
-	if len(stream.URLs) == 0 {
+	if len(urls) == 0 {
 		return fmt.Errorf("stream has no URLs configured")
 	}
 
 	// Validate that at least one index has URLs
 	hasValidUrls := false
-	for _, innerMap := range stream.URLs {
+	for _, innerMap := range urls {
 		if len(innerMap) > 0 {
 			hasValidUrls = true
 			break
@@ -208,7 +251,10 @@ func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, method 
 
 			done[index] = true
 
+			instance.Info.RLock()
 			innerMap, ok := instance.Info.URLs[index]
+			instance.Info.RUnlock()
+
 			if !ok {
 				instance.logger.Errorf("Channel not found from M3U_%s: %s", index, instance.Info.Title)
 				continue
@@ -236,11 +282,16 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 	index string,
 	urls map[string]string,
 ) (*LoadBalancerResult, error) {
-	if instance.httpClient == nil {
+	if instance.healthClient == nil {
 		return nil, fmt.Errorf("HTTP client cannot be nil")
 	}
 
-	for _, subIndex := range sourceproc.SortStreamSubUrls(urls) {
+	sortedSubIndexes := sourceprocSortStreamSubUrls(urls)
+
+	var wg sync.WaitGroup
+	resultCh := make(chan *streamTestResult, len(sortedSubIndexes))
+
+	for _, subIndex := range sortedSubIndexes {
 		fileContent, ok := urls[subIndex]
 		if !ok {
 			continue
@@ -252,13 +303,15 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 			url = fileContentSplit[1]
 		}
 
-		id := index + "|" + subIndex
-		instance.testedIndexesMu.RLock()
-		alreadyTested := slices.Contains(instance.testedIndexes[streamId], index+"|"+subIndex)
-		instance.testedIndexesMu.RUnlock()
+		candidateId := index + "|" + subIndex
 
+		instance.testedIndexesMu.RLock()
+		alreadyTested := contains(instance.testedIndexes[streamId], candidateId)
+		instance.testedIndexesMu.RUnlock()
 		if alreadyTested {
-			instance.logger.Debugf("Skipping M3U_%s|%s: marked as previous stream", index, subIndex)
+			instance.logger.Debugf(
+				"Skipping M3U_%s|%s: already tested", index, subIndex,
+			)
 			continue
 		}
 
@@ -267,42 +320,81 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 			continue
 		}
 
-		req, err := http.NewRequest(method, url, nil)
-		if err != nil {
-			instance.logger.Errorf("Error creating request: %s", err.Error())
-			instance.markTested(streamId, id)
-			continue
-		}
+		wg.Add(1)
+		go func(subIndex, url, candidateId string) {
+			defer wg.Done()
 
-		resp, err := instance.httpClient.Do(req)
-		if err != nil {
-			instance.logger.Errorf("Error fetching stream: %s", err.Error())
-			instance.markTested(streamId, id)
-			continue
-		}
+			req, err := http.NewRequest(method, url, nil)
+			if err != nil {
+				instance.logger.Errorf("Error creating request: %s", err.Error())
+				instance.markTested(streamId, candidateId)
+				resultCh <- &streamTestResult{err: err}
+				return
+			}
 
-		if resp == nil {
-			instance.logger.Errorf("Received nil response from HTTP client")
-			instance.markTested(streamId, id)
-			continue
-		}
+			// Do the HTTP request.
+			resp, err := instance.healthClient.Do(req)
+			if err != nil {
+				instance.logger.Errorf("Error fetching stream: %s", err.Error())
+				instance.markTested(streamId, candidateId)
+				resultCh <- &streamTestResult{err: err}
+				return
+			}
+			if resp == nil {
+				instance.logger.Errorf("Received nil response from HTTP client")
+				instance.markTested(streamId, candidateId)
+				resultCh <- &streamTestResult{err: fmt.Errorf("nil response")}
+				return
+			}
+			if resp.StatusCode != http.StatusOK {
+				instance.logger.Errorf("Non-200 status %d for %s %s",
+					resp.StatusCode, method, url)
+				instance.markTested(streamId, candidateId)
+				resultCh <- &streamTestResult{
+					err: fmt.Errorf("non-200 status: %d", resp.StatusCode),
+				}
+				return
+			}
 
-		if resp.StatusCode != http.StatusOK {
-			instance.logger.Errorf("Non-200 status code received: %d for %s %s", resp.StatusCode, method, url)
-			instance.markTested(streamId, id)
-			continue
-		}
+			health, evalErr := evaluateBufferHealth(resp, instance.config.BufferChunk)
+			if evalErr != nil {
+				instance.logger.Errorf("Error evaluating buffer health: %s", evalErr.Error())
+				instance.markTested(streamId, candidateId)
+				resultCh <- &streamTestResult{err: evalErr}
+				return
+			}
 
-		instance.logger.Debugf("Successfully fetched stream from %s with method %s", url, method)
-
-		return &LoadBalancerResult{
-			Response: resp,
-			URL:      url,
-			Index:    index,
-			SubIndex: subIndex,
-		}, nil
+			instance.logger.Debugf("Successful stream from %s (health: %f)",
+				url, health)
+			resultCh <- &streamTestResult{
+				result: &LoadBalancerResult{
+					Response: resp,
+					URL:      url,
+					Index:    index,
+					SubIndex: subIndex,
+				},
+				health: health,
+				err:    nil,
+			}
+		}(subIndex, url, candidateId)
 	}
 
+	wg.Wait()
+	close(resultCh)
+
+	var bestResult *streamTestResult
+	for res := range resultCh {
+		if res.err != nil {
+			continue
+		}
+		if bestResult == nil || res.health > bestResult.health {
+			bestResult = res
+		}
+	}
+
+	if bestResult != nil {
+		return bestResult.result, nil
+	}
 	return nil, fmt.Errorf("all urls failed")
 }
 

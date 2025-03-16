@@ -223,7 +223,15 @@ func (p *M3UProcessor) cleanFailedRemoteFiles() {
 }
 
 func (p *M3UProcessor) addStream(stream *StreamInfo) error {
-	if stream == nil || len(stream.URLs) == 0 {
+	if stream == nil {
+		return nil
+	}
+
+	stream.RLock()
+	urls := stream.URLs
+	stream.RUnlock()
+
+	if len(urls) == 0 {
 		return nil
 	}
 

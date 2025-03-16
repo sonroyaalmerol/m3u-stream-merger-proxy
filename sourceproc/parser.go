@@ -62,9 +62,11 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 		return nil
 	}
 
+	stream.Lock()
 	if stream.URLs[m3uIndex] == nil {
 		stream.URLs[m3uIndex] = make(map[string]string)
 	}
+	stream.Unlock()
 
 	encodedUrl := base64.StdEncoding.EncodeToString([]byte(cleanUrl))
 
@@ -95,6 +97,8 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
 			logger.Default.Debugf("Error indexing stream: %s (#%s) -> %v", stream.Title, m3uIndex, err)
 		}
+
+		stream.Lock()
 		if stream.URLs == nil {
 			stream.URLs = make(map[string]map[string]string)
 		}
@@ -102,6 +106,7 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 			stream.URLs[m3uIndex] = make(map[string]string)
 		}
 		stream.URLs[m3uIndex][urlHash] = fmt.Sprintf("%d:::%s", nextLine.LineNum, cleanUrl)
+		stream.Unlock()
 	}
 
 	return stream
