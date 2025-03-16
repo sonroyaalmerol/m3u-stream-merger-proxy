@@ -19,15 +19,16 @@ import (
 
 type M3UProcessor struct {
 	sync.RWMutex
-	streamCount      atomic.Int64
-	file             *os.File
-	writer           *bufio.Writer
-	revalidatingDone chan struct{}
-	sortingMgr       *SortingManager
+	streamCount           atomic.Int64
+	file                  *os.File
+	writer                *bufio.Writer
+	revalidatingDone      chan struct{}
+	sortingMgr            *SortingManager
+	criticalErrorOccurred atomic.Bool
 }
 
 func NewProcessor() *M3UProcessor {
-	processedPath := config.GetNewM3UPath()
+	processedPath := config.GetNewM3UPath() + ".tmp"
 	file, err := createResultFile(processedPath)
 	if err != nil {
 		logger.Default.Errorf("Error creating result file: %v", err)
@@ -67,10 +68,27 @@ func (p *M3UProcessor) Wait(ctx context.Context) error {
 	select {
 	case <-p.revalidatingDone:
 	case <-ctx.Done():
+		logger.Default.Errorf("Revalidation failed due to context cancellation, keeping old data.")
+		os.Remove(p.file.Name())
+		p.cleanFailedRemoteFiles()
+
 		return ctx.Err()
 	}
 
-	p.clearOldResults()
+	if !p.criticalErrorOccurred.Load() {
+		prodPath := strings.TrimSuffix(p.file.Name(), ".tmp")
+		err := os.Rename(p.file.Name(), prodPath)
+		if err != nil {
+			logger.Default.Errorf("Error renaming file: %v", err)
+		}
+		p.applyNewRemoteFiles()
+		p.clearOldResults()
+	} else {
+		logger.Default.Errorf("Revalidation failed, keeping old data.")
+		os.Remove(p.file.Name())
+		p.file = nil
+		p.cleanFailedRemoteFiles()
+	}
 
 	return nil
 }
@@ -93,9 +111,18 @@ func (p *M3UProcessor) clearOldResults() {
 
 func (p *M3UProcessor) GetResultPath() string {
 	if p.file == nil {
-		return ""
+		path, err := config.GetLatestProcessedM3UPath()
+		if err != nil {
+			return ""
+		}
+		return path
 	}
 	return p.file.Name()
+}
+
+func (p *M3UProcessor) markCriticalError(err error) {
+	logger.Default.Errorf("Critical error during source processing: %v", err)
+	p.criticalErrorOccurred.Store(true)
 }
 
 func (p *M3UProcessor) processStreams(r *http.Request) chan error {
@@ -145,6 +172,10 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 				defer wgWorkers.Done()
 				for stream := range streamCh {
 					err := p.addStream(stream)
+					if err != nil {
+						p.markCriticalError(err)
+					}
+
 					select {
 					case errors <- err:
 					default:
@@ -160,6 +191,29 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 	}()
 
 	return errors
+}
+
+func (p *M3UProcessor) applyNewRemoteFiles() {
+	indexes := utils.GetM3UIndexes()
+	for _, idx := range indexes {
+		finalPath := utils.GetM3UFilePathByIndex(idx)
+		tmpPath := finalPath + ".new"
+		if _, err := os.Stat(tmpPath); err == nil {
+			// Rename the temporary file to the final file.
+			if err := os.Rename(tmpPath, finalPath); err != nil {
+				logger.Default.Errorf("Error renaming remote file %s: %v", tmpPath, err)
+			}
+		}
+	}
+}
+
+func (p *M3UProcessor) cleanFailedRemoteFiles() {
+	indexes := utils.GetM3UIndexes()
+	for _, idx := range indexes {
+		finalPath := utils.GetM3UFilePathByIndex(idx)
+		tmpPath := finalPath + ".new"
+		_ = os.RemoveAll(tmpPath)
+	}
 }
 
 func (p *M3UProcessor) addStream(stream *StreamInfo) error {
@@ -178,20 +232,25 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 
 	_, err := p.writer.WriteString("#EXTM3U\n")
 	if err != nil {
-		logger.Default.Errorf("Error writing to M3U file: %v", err)
+		p.markCriticalError(err)
+		return
 	}
 
 	err = p.sortingMgr.GetSortedEntries(func(entry *StreamInfo) {
 		_, writeErr := p.writer.WriteString(formatStreamEntry(baseURL, entry))
 		if writeErr != nil {
-			logger.Default.Errorf("Error writing to M3U file: %v", err)
+			p.markCriticalError(err)
 		}
 	})
 	if err != nil {
-		logger.Default.Errorf("Error streaming sorted entries: %v", err)
+		p.markCriticalError(err)
+		return
 	}
 
-	p.writer.Flush()
+	if flushErr := p.writer.Flush(); flushErr != nil {
+		p.markCriticalError(err)
+		return
+	}
 	p.file.Close()
 
 	p.sortingMgr.Close()
