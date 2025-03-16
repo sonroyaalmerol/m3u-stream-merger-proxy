@@ -230,6 +230,8 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 	p.Lock()
 	defer p.Unlock()
 
+	defer p.file.Close()
+
 	_, err := p.writer.WriteString("#EXTM3U\n")
 	if err != nil {
 		p.markCriticalError(err)
@@ -251,7 +253,6 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 		p.markCriticalError(err)
 		return
 	}
-	p.file.Close()
 
 	p.sortingMgr.Close()
 
