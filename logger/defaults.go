@@ -2,9 +2,10 @@ package logger
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"regexp"
+
+	"github.com/rs/zerolog"
 )
 
 type DefaultLogger struct {
@@ -12,6 +13,8 @@ type DefaultLogger struct {
 }
 
 var Default = &DefaultLogger{}
+
+var logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
 
 func cleanString(text string) string {
 	urlRegex := `[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[a-zA-Z0-9+%/.\-:_?&=#@+]+`
@@ -31,20 +34,19 @@ func safeLogf(format string, v ...any) string {
 }
 
 func (*DefaultLogger) Log(format string) {
-	log.Println(safeLogf("[INFO] %s", format))
+	logger.Info().Msg(safeLogf("%s", format))
 }
 
 func (*DefaultLogger) Logf(format string, v ...any) {
 	logString := fmt.Sprintf(format, v...)
-
-	log.Println(safeLogf("[INFO] %s", logString))
+	logger.Info().Msg(safeLogf("%s", logString))
 }
 
 func (*DefaultLogger) Debug(format string) {
 	debug := os.Getenv("DEBUG") == "true"
 
 	if debug {
-		log.Println(safeLogf("[DEBUG] %s", format))
+		logger.Debug().Msg(safeLogf("%s", format))
 	}
 }
 
@@ -53,36 +55,33 @@ func (*DefaultLogger) Debugf(format string, v ...any) {
 	logString := fmt.Sprintf(format, v...)
 
 	if debug {
-		log.Println(safeLogf("[DEBUG] %s", logString))
+		logger.Debug().Msg(safeLogf("%s", logString))
 	}
 }
 
 func (*DefaultLogger) Error(format string) {
-	log.Println(safeLogf("[ERROR] %s", format))
+	logger.Error().Msg(safeLogf("%s", format))
 }
 
 func (*DefaultLogger) Errorf(format string, v ...any) {
 	logString := fmt.Sprintf(format, v...)
-
-	log.Println(safeLogf("[ERROR] %s", logString))
+	logger.Error().Msg(safeLogf("%s", logString))
 }
 
 func (*DefaultLogger) Warn(format string) {
-	log.Println(safeLogf("[WARN] %s", format))
+	logger.Warn().Msg(safeLogf("%s", format))
 }
 
 func (*DefaultLogger) Warnf(format string, v ...any) {
 	logString := fmt.Sprintf(format, v...)
-
-	log.Println(safeLogf("[WARN] %s", logString))
+	logger.Warn().Msg(safeLogf("%s", logString))
 }
 
 func (*DefaultLogger) Fatal(format string) {
-	log.Fatal(safeLogf("[FATAL] %s", format))
+	logger.Fatal().Msg(safeLogf("%s", format))
 }
 
 func (*DefaultLogger) Fatalf(format string, v ...any) {
 	logString := fmt.Sprintf(format, v...)
-
-	log.Fatal(safeLogf("[FATAL] %s", logString))
+	logger.Fatal().Msg(safeLogf("%s", logString))
 }
