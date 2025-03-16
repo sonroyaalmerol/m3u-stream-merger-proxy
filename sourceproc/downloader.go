@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
 )
 
@@ -83,47 +84,73 @@ func handleLocalFile(localPath string, result *SourceDownloaderResult) {
 }
 
 func handleRemoteURL(m3uURL, idx string, result *SourceDownloaderResult) {
+	finalPath := utils.GetM3UFilePathByIndex(idx)
+	tmpPath := finalPath + ".new"
+
+	if err := os.MkdirAll(filepath.Dir(finalPath), os.ModePerm); err != nil {
+		result.Error <- fmt.Errorf("error creating dir for source: %v", err)
+		return
+	}
+
+	fallbackFile, _ := os.Open(finalPath)
+	defer func() {
+		if fallbackFile != nil {
+			fallbackFile.Close()
+		}
+	}()
+
+	useFallback := func(err error) {
+		if fallbackFile != nil {
+			scanAndStream(fallbackFile, result)
+		} else {
+			result.Error <- err
+		}
+	}
+
 	req, err := http.NewRequest("GET", m3uURL, nil)
 	if err != nil {
-		result.Error <- fmt.Errorf("error creating request: %v", err)
+		logger.Default.Warnf("Error creating HTTP request for index %s: %v", idx, err)
+		useFallback(fmt.Errorf("error creating HTTP request: %v", err))
 		return
 	}
 
 	resp, err := utils.HTTPClient.Do(req)
 	if err != nil {
-		result.Error <- fmt.Errorf("HTTP GET error: %v", err)
+		logger.Default.Warnf("HTTP request error for index %s: %v", idx, err)
+		useFallback(fmt.Errorf("HTTP request error: %v", err))
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		result.Error <- fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		logger.Default.Warnf("HTTP status %d for index %s", resp.StatusCode, idx)
+		useFallback(fmt.Errorf("HTTP status %d and no existing file", resp.StatusCode))
 		return
 	}
 
-	finalPath := utils.GetM3UFilePathByIndex(idx)
-	tmpPath := finalPath + ".new"
-
-	if err := os.MkdirAll(filepath.Dir(finalPath), os.ModePerm); err != nil {
-		result.Error <- fmt.Errorf("error creating directories: %v", err)
+	bufReader := bufio.NewReader(resp.Body)
+	peekBytes, err := bufReader.Peek(7)
+	if err != nil || !strings.HasPrefix(string(peekBytes), "#EXTM3U") {
+		logger.Default.Warnf("Invalid M3U response for index %s. Falling back to existing file: %s", idx, finalPath)
+		useFallback(fmt.Errorf("invalid M3U response and no fallback"))
 		return
 	}
 
-	file, err := os.Create(tmpPath)
+	newFile, err := os.Create(tmpPath)
 	if err != nil {
-		result.Error <- fmt.Errorf("error creating file: %v", err)
+		logger.Default.Warnf("Error creating tmp file for index %s: %v", idx, err)
+		useFallback(fmt.Errorf("error creating tmp file: %v", err))
 		return
 	}
+	defer newFile.Close()
 
-	reader := io.TeeReader(resp.Body, file)
-	scanAndStream(reader, result)
-
-	file.Close()
-	_ = os.Remove(finalPath)
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		result.Error <- fmt.Errorf("error moving file: %v", err)
-		os.Remove(tmpPath)
+	if fallbackFile != nil {
+		fallbackFile.Close()
+		fallbackFile = nil
 	}
+
+	reader := io.TeeReader(bufReader, newFile)
+	scanAndStream(reader, result)
 }
 
 func scanAndStream(r io.Reader, result *SourceDownloaderResult) {

@@ -97,6 +97,7 @@ http://example.com/vevo
 	os.Setenv("M3U_URL_1", fmt.Sprintf("file://%s", m3uPath1))
 	os.Setenv("M3U_URL_2", fmt.Sprintf("file://%s", m3uPath2))
 	os.Setenv("M3U_URL_3", fmt.Sprintf("file://%s", m3uPath3))
+	os.Setenv("BASE_URL", "http://example.com")
 
 	return func() {
 		testDataLock.Lock()
@@ -110,6 +111,7 @@ http://example.com/vevo
 		os.Unsetenv("M3U_URL_1")
 		os.Unsetenv("M3U_URL_2")
 		os.Unsetenv("M3U_URL_3")
+		os.Unsetenv("BASE_URL")
 	}
 }
 
@@ -357,6 +359,9 @@ func TestSortingVariations(t *testing.T) {
 }
 
 func TestMergeAttributesToM3UFile(t *testing.T) {
+	os.Setenv("BASE_URL", "http://example.com")
+	defer os.Unsetenv("BASE_URL")
+
 	m3u1 := `#EXTINF:-1 tvg-chno="010",First Channel`
 	url1 := "http://example.com/source1"
 	s1 := parseLine(m3u1, &LineDetails{Content: url1, LineNum: 1}, "M3U_Test")
@@ -413,5 +418,5 @@ func TestMergeAttributesToM3UFile(t *testing.T) {
 
 	assert.Contains(t, contentStr, `tvg-id="id-2"`, "Should contain tvg-id from merged attributes")
 	assert.Contains(t, contentStr, `tvg-type="type-2"`, "Should contain tvg-type from merged attributes")
-	assert.Contains(t, contentStr, `tvg-logo="http://logo/source4.png"`, "Should contain tvg-logo from merged attributes")
+	assert.Contains(t, contentStr, `tvg-logo="http://example.com/a/aHR0cDovL2xvZ28vc291cmNlNC5wbmc="`, "Should contain tvg-logo from merged attributes")
 }
