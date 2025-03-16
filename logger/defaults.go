@@ -14,7 +14,7 @@ type DefaultLogger struct {
 
 var Default = &DefaultLogger{}
 
-var logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
+var logger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().Timestamp().Logger()
 
 func cleanString(text string) string {
 	urlRegex := `[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[a-zA-Z0-9+%/.\-:_?&=#@+]+`
