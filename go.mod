@@ -1,6 +1,9 @@
 module m3u-stream-merger
 
 go 1.23.0
+
+toolchain go1.24.1
+
 require (
 	github.com/cespare/xxhash v1.1.0
 	github.com/goccy/go-json v0.10.4
@@ -10,10 +13,10 @@ require (
 	github.com/rs/zerolog v1.33.0
 	github.com/stretchr/testify v1.10.0
 	github.com/valyala/bytebufferpool v1.0.0
-	golang.org/x/crypto v0.31.0
+	golang.org/x/crypto v0.36.0
 )
 
-require golang.org/x/sys v0.28.0 // indirect
+require golang.org/x/sys v0.31.0 // indirect
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
