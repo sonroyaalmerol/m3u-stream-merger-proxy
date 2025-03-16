@@ -18,6 +18,7 @@ func main() {
 
 	m3uHandler := handlers.NewM3UHTTPHandler(logger.Default, "")
 	streamHandler := handlers.NewStreamHTTPHandler(handlers.NewDefaultProxyInstance(), logger.Default)
+	passthroughHandler := handlers.NewPassthroughHTTPHandler(logger.Default)
 
 	logger.Default.Log("Starting updater...")
 	_, err := updater.Initialize(ctx, logger.Default, m3uHandler)
@@ -41,6 +42,9 @@ func main() {
 	})
 	http.HandleFunc("/p/", func(w http.ResponseWriter, r *http.Request) {
 		streamHandler.ServeHTTP(w, r)
+	})
+	http.HandleFunc("/a/", func(w http.ResponseWriter, r *http.Request) {
+		passthroughHandler.ServeHTTP(w, r)
 	})
 	http.HandleFunc("/segment/", func(w http.ResponseWriter, r *http.Request) {
 		streamHandler.ServeSegmentHTTP(w, r)
