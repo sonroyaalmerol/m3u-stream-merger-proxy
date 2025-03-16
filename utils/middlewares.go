@@ -1,7 +1,9 @@
 package utils
 
 import (
+	"encoding/base64"
 	"m3u-stream-merger/logger"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -47,5 +49,18 @@ func GroupTitleParser(value string) string {
 }
 
 func TvgLogoParser(value string) string {
-	return GeneralParser(value)
+	value = GeneralParser(value)
+
+	parsedURL, err := url.Parse(value)
+	if err == nil && (parsedURL.Scheme == "http" || parsedURL.Scheme == "https") &&
+		parsedURL.Host != "" {
+		encoded := base64.URLEncoding.EncodeToString([]byte(value))
+		final, err := url.JoinPath(os.Getenv("BASE_URL"), "/a/"+encoded)
+		if err != nil {
+			return value
+		}
+		return final
+	}
+
+	return value
 }
