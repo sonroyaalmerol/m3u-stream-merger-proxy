@@ -359,6 +359,9 @@ func TestSortingVariations(t *testing.T) {
 }
 
 func TestMergeAttributesToM3UFile(t *testing.T) {
+	os.Setenv("BASE_URL", "http://example.com")
+	defer os.Unsetenv("BASE_URL")
+
 	m3u1 := `#EXTINF:-1 tvg-chno="010",First Channel`
 	url1 := "http://example.com/source1"
 	s1 := parseLine(m3u1, &LineDetails{Content: url1, LineNum: 1}, "M3U_Test")
