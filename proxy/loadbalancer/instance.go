@@ -236,6 +236,16 @@ func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, method 
 	return nil, fmt.Errorf("no available streams")
 }
 
+var healthTransport = &http.Transport{
+	ResponseHeaderTimeout: time.Second * 3,
+}
+
+var healthHttpClient = utils.HTTPClient
+
+func init() {
+	healthHttpClient.Transport = healthTransport
+}
+
 func (instance *LoadBalancerInstance) tryStreamUrls(
 	method string,
 	streamId string,
@@ -284,10 +294,7 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 		go func(subIndex, url, candidateId string) {
 			defer wg.Done()
 
-			timeoutCtx, ctxCancel := context.WithTimeout(context.Background(), time.Second*3)
-			defer ctxCancel()
-
-			req, err := http.NewRequestWithContext(timeoutCtx, method, url, nil)
+			req, err := http.NewRequest(method, url, nil)
 			if err != nil {
 				instance.logger.Errorf("Error creating request: %s", err.Error())
 				instance.markTested(streamId, candidateId)
@@ -296,7 +303,7 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 			}
 
 			// Do the HTTP request.
-			resp, err := instance.httpClient.Do(req)
+			resp, err := healthHttpClient.Do(req)
 			if err != nil {
 				instance.logger.Errorf("Error fetching stream: %s", err.Error())
 				instance.markTested(streamId, candidateId)
