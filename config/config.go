@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -36,11 +37,19 @@ func GetLatestProcessedM3UPath() (string, error) {
 		return "", fmt.Errorf("failed to read directory: %w", err)
 	}
 
+	var validFiles []os.DirEntry
+	for _, file := range files {
+		if strings.HasSuffix(file.Name(), ".tmp") {
+			continue
+		}
+		validFiles = append(validFiles, file)
+	}
+
 	if len(files) == 0 {
 		return "", fmt.Errorf("no files found in directory")
 	}
 
-	return files[len(files)-1].Name(), nil
+	return validFiles[len(files)-1].Name(), nil
 }
 
 func GetNewM3UPath() string {
