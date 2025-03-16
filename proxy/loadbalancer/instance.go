@@ -21,6 +21,7 @@ type LoadBalancerInstance struct {
 	Cm              *store.ConcurrencyManager
 	config          *LBConfig
 	httpClient      HTTPClient
+	healthClient    HTTPClient
 	logger          logger.Logger
 	indexProvider   IndexProvider
 	slugParser      SlugParser
@@ -33,6 +34,7 @@ type LoadBalancerInstanceOption func(*LoadBalancerInstance)
 func WithHTTPClient(client HTTPClient) LoadBalancerInstanceOption {
 	return func(s *LoadBalancerInstance) {
 		s.httpClient = client
+		s.setHealthClient()
 	}
 }
 
@@ -68,6 +70,7 @@ func NewLoadBalancerInstance(
 		slugParser:    &DefaultSlugParser{},
 		testedIndexes: make(map[string][]string),
 	}
+	instance.setHealthClient()
 
 	for _, opt := range opts {
 		opt(instance)
@@ -81,6 +84,43 @@ type LoadBalancerResult struct {
 	URL      string
 	Index    string
 	SubIndex string
+}
+
+func (instance *LoadBalancerInstance) setHealthClient() {
+	if originalClient, ok := instance.httpClient.(*http.Client); ok {
+		healthCheckClient := *originalClient
+
+		if originalTransport, ok := originalClient.Transport.(*http.Transport); ok {
+			// Create a new transport and copy relevant fields from the original transport
+			transportCopy := &http.Transport{
+				Proxy:                 originalTransport.Proxy,
+				DialContext:           originalTransport.DialContext,
+				TLSClientConfig:       originalTransport.TLSClientConfig,
+				TLSHandshakeTimeout:   originalTransport.TLSHandshakeTimeout,
+				DisableKeepAlives:     originalTransport.DisableKeepAlives,
+				DisableCompression:    originalTransport.DisableCompression,
+				MaxIdleConns:          originalTransport.MaxIdleConns,
+				MaxIdleConnsPerHost:   originalTransport.MaxIdleConnsPerHost,
+				IdleConnTimeout:       originalTransport.IdleConnTimeout,
+				ResponseHeaderTimeout: 3 * time.Second,
+				ExpectContinueTimeout: originalTransport.ExpectContinueTimeout,
+				ForceAttemptHTTP2:     originalTransport.ForceAttemptHTTP2,
+			}
+
+			// Assign the copied transport to the new client
+			healthCheckClient.Transport = transportCopy
+		} else {
+			// If the transport is not *http.Transport, create a new transport
+			healthCheckClient.Transport = &http.Transport{
+				ResponseHeaderTimeout: 3 * time.Second,
+			}
+		}
+
+		instance.healthClient = &healthCheckClient
+	} else {
+		instance.healthClient = instance.httpClient
+	}
+
 }
 
 func (instance *LoadBalancerInstance) GetStreamId(req *http.Request) string {
@@ -236,23 +276,13 @@ func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, method 
 	return nil, fmt.Errorf("no available streams")
 }
 
-var healthTransport = &http.Transport{
-	ResponseHeaderTimeout: time.Second * 3,
-}
-
-var healthHttpClient = utils.HTTPClient
-
-func init() {
-	healthHttpClient.Transport = healthTransport
-}
-
 func (instance *LoadBalancerInstance) tryStreamUrls(
 	method string,
 	streamId string,
 	index string,
 	urls map[string]string,
 ) (*LoadBalancerResult, error) {
-	if instance.httpClient == nil {
+	if instance.healthClient == nil {
 		return nil, fmt.Errorf("HTTP client cannot be nil")
 	}
 
@@ -303,7 +333,7 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 			}
 
 			// Do the HTTP request.
-			resp, err := healthHttpClient.Do(req)
+			resp, err := instance.healthClient.Do(req)
 			if err != nil {
 				instance.logger.Errorf("Error fetching stream: %s", err.Error())
 				instance.markTested(streamId, candidateId)
