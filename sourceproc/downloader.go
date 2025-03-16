@@ -175,13 +175,38 @@ func scanAndStream(r io.Reader, result *SourceDownloaderResult) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 
+	firstFound := false
 	lineNum := 0
+
 	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			lineNum++
+			continue
+		}
+
+		if !firstFound {
+			if !strings.HasPrefix(trimmed, "#EXTM3U") {
+				result.Error <- fmt.Errorf(
+					"invalid m3u file: first non-empty line must start with #EXTM3U, got %q",
+					line,
+				)
+				return
+			}
+			firstFound = true
+		}
+
 		result.Lines <- &LineDetails{
-			Content: scanner.Text(),
+			Content: line,
 			LineNum: lineNum,
 		}
 		lineNum++
+	}
+
+	if !firstFound {
+		result.Error <- fmt.Errorf("invalid M3U file source")
+		return
 	}
 
 	if err := scanner.Err(); err != nil {
