@@ -110,26 +110,53 @@ func handleRemoteURL(m3uURL, idx string, result *SourceDownloaderResult) {
 		if err == nil {
 			defer resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
-				newFile, err := os.Create(tmpPath)
-				if err == nil {
-					// We don't need the fallback file if we get a new file,
-					// so close it right now.
-					if fallbackFile != nil {
-						fallbackFile.Close()
-						fallbackFile = nil
-					}
-					file = newFile
-					reader = io.TeeReader(resp.Body, file)
-				} else {
-					logger.Default.Warnf("Error creating tmp file for index %s: %v. Falling back to existing file: %s",
-						idx, err, finalPath)
+				bufReader := bufio.NewReader(resp.Body)
+				peekBytes, err := bufReader.Peek(7)
+				if err != nil {
+					logger.Default.Warnf("Error peeking into response: %v", err)
+					// Fallback if available.
 					if fallbackFile != nil {
 						file = fallbackFile
 						reader = file
-						// Leave fallbackFile non-nil so the final file.Close() works.
 					} else {
-						result.Error <- fmt.Errorf("error creating tmp file: %v", err)
+						result.Error <- fmt.Errorf("error peeking into response: %v", err)
 						return
+					}
+				}
+				if !strings.HasPrefix(string(peekBytes), "#EXTM3U") {
+					logger.Default.Warnf(
+						"Response for index %s does not appear to be a valid m3u file. Falling "+
+							"back to existing file: %s",
+						idx, finalPath)
+					if fallbackFile != nil {
+						file = fallbackFile
+						reader = file
+					} else {
+						result.Error <- fmt.Errorf("response does not appear to be a valid m3u file and no fallback")
+						return
+					}
+				} else {
+					// Create a new file
+					newFile, err := os.Create(tmpPath)
+					if err != nil {
+						logger.Default.Warnf("Error creating tmp file for index %s: %v. Falling back to existing file: %s",
+							idx, err, finalPath)
+						if fallbackFile != nil {
+							file = fallbackFile
+							reader = file
+						} else {
+							result.Error <- fmt.Errorf("error creating tmp file: %v", err)
+							return
+						}
+					} else {
+						// We don't need the fallback file if we get the new file.
+						if fallbackFile != nil {
+							fallbackFile.Close()
+							fallbackFile = nil
+						}
+						file = newFile
+						// Use the buffered reader (which has been peeked) as the source.
+						reader = io.TeeReader(bufReader, file)
 					}
 				}
 			} else {
@@ -175,38 +202,13 @@ func scanAndStream(r io.Reader, result *SourceDownloaderResult) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 
-	firstFound := false
 	lineNum := 0
-
 	for scanner.Scan() {
-		line := scanner.Text()
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			lineNum++
-			continue
-		}
-
-		if !firstFound {
-			if !strings.HasPrefix(trimmed, "#EXTM3U") {
-				result.Error <- fmt.Errorf(
-					"invalid m3u file: first non-empty line must start with #EXTM3U, got %q",
-					line,
-				)
-				return
-			}
-			firstFound = true
-		}
-
 		result.Lines <- &LineDetails{
-			Content: line,
+			Content: scanner.Text(),
 			LineNum: lineNum,
 		}
 		lineNum++
-	}
-
-	if !firstFound {
-		result.Error <- fmt.Errorf("invalid M3U file source")
-		return
 	}
 
 	if err := scanner.Err(); err != nil {
