@@ -8,6 +8,7 @@ import (
 	"m3u-stream-merger/sourceproc"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
+	"m3u-stream-merger/utils/safemap"
 	"net/http"
 	"path"
 	"slices"
@@ -18,7 +19,8 @@ import (
 )
 
 type LoadBalancerInstance struct {
-	Info            *sourceproc.StreamInfo
+	infoMu          sync.Mutex
+	info            *sourceproc.StreamInfo
 	Cm              *store.ConcurrencyManager
 	config          *LBConfig
 	httpClient      HTTPClient
@@ -82,6 +84,18 @@ type LoadBalancerResult struct {
 	URL      string
 	Index    string
 	SubIndex string
+}
+
+func (instance *LoadBalancerInstance) GetStreamInfo() *sourceproc.StreamInfo {
+	instance.infoMu.Lock()
+	defer instance.infoMu.Unlock()
+	return instance.info
+}
+
+func (instance *LoadBalancerInstance) SetStreamInfo(info *sourceproc.StreamInfo) {
+	instance.infoMu.Lock()
+	defer instance.infoMu.Unlock()
+	instance.info = info
 }
 
 func (instance *LoadBalancerInstance) GetStreamId(req *http.Request) string {
@@ -154,24 +168,29 @@ func (instance *LoadBalancerInstance) fetchBackendUrls(streamUrl string) error {
 
 	instance.logger.Debugf("Decoded slug: %v", stream)
 
+	if stream.URLs == nil {
+		stream.URLs = safemap.New[string, map[string]string]()
+	}
 	// Validate URLs map
-	if len(stream.URLs) == 0 {
+	if stream.URLs.Len() == 0 {
 		return fmt.Errorf("stream has no URLs configured")
 	}
 
 	// Validate that at least one index has URLs
 	hasValidUrls := false
-	for _, innerMap := range stream.URLs {
+	stream.URLs.ForEach(func(_ string, innerMap map[string]string) bool {
 		if len(innerMap) > 0 {
 			hasValidUrls = true
-			break
+			return false
 		}
-	}
+
+		return true
+	})
 	if !hasValidUrls {
 		return fmt.Errorf("stream has no valid URLs")
 	}
 
-	instance.Info = stream
+	instance.SetStreamInfo(stream)
 
 	return nil
 }
@@ -208,9 +227,9 @@ func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, method 
 
 			done[index] = true
 
-			innerMap, ok := instance.Info.URLs[index]
+			innerMap, ok := instance.GetStreamInfo().URLs.Get(index)
 			if !ok {
-				instance.logger.Errorf("Channel not found from M3U_%s: %s", index, instance.Info.Title)
+				instance.logger.Errorf("Channel not found from M3U_%s: %s", index, instance.GetStreamInfo().Title)
 				continue
 			}
 

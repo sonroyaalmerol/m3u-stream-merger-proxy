@@ -14,7 +14,7 @@ RUN go mod download
 COPY . .
 
 # test and build the app.
-RUN go test ./... && go build -ldflags='-s -w' -o m3u-proxy .
+RUN go test -race -timeout=30s ./... && go build -ldflags='-s -w' -o m3u-proxy .
 
 # End from the latest alpine image
 # hadolint ignore=DL3007
