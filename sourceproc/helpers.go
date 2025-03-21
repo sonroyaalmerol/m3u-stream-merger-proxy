@@ -11,6 +11,7 @@ import (
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
+	"m3u-stream-merger/utils/safemap"
 )
 
 func GetStreamBySlug(slug string) (*StreamInfo, error) {
@@ -24,14 +25,18 @@ func GetStreamBySlug(slug string) (*StreamInfo, error) {
 }
 
 func GenerateStreamURL(baseUrl string, stream *StreamInfo) string {
-	subPaths := make(chan string, len(stream.URLs))
+	if stream.URLs == nil {
+		stream.URLs = safemap.New[string, map[string]string]()
+	}
+
+	subPaths := make(chan string, stream.URLs.Len())
 	var wg sync.WaitGroup
 	var err error
 
 	extension := ""
 
 	// Process URLs concurrently
-	for _, innerMap := range stream.URLs {
+	stream.URLs.ForEach(func(_ string, innerMap map[string]string) bool {
 		for _, srcUrl := range innerMap {
 			if extension == "" {
 				extension, err = utils.GetFileExtensionFromUrl(srcUrl)
@@ -48,7 +53,9 @@ func GenerateStreamURL(baseUrl string, stream *StreamInfo) string {
 				}
 			}(srcUrl)
 		}
-	}
+
+		return true
+	})
 
 	// Close channel after all goroutines complete
 	go func() {

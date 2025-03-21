@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
+	"m3u-stream-merger/utils/safemap"
 	"os"
 	"path/filepath"
 	"sort"
@@ -299,17 +300,24 @@ func mergeStreamInfoAttributes(base, new *StreamInfo) *StreamInfo {
 	}
 
 	if base.URLs == nil {
-		base.URLs = make(map[string]map[string]string)
+		base.URLs = safemap.New[string, map[string]string]()
 	}
-	for key, value := range new.URLs {
-		if _, exists := base.URLs[key]; !exists {
-			base.URLs[key] = value
-		} else {
-			for subKey, subValue := range value {
-				base.URLs[key][subKey] = subValue
+
+	new.URLs.ForEach(func(key string, value map[string]string) bool {
+		_, _ = base.URLs.Compute(key, func(oldValue map[string]string, loaded bool) (newValue map[string]string, del bool) {
+			if oldValue == nil {
+				oldValue = value
+			} else {
+				for subKey, subValue := range value {
+					oldValue[subKey] = subValue
+				}
 			}
-		}
-	}
+
+			return oldValue, false
+		})
+
+		return true
+	})
 
 	if new.SourceM3U < base.SourceM3U || (new.SourceM3U == base.SourceM3U && new.SourceIndex < base.SourceIndex) {
 		base.SourceM3U = new.SourceM3U

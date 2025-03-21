@@ -18,6 +18,28 @@ import (
 	"m3u-stream-merger/sourceproc"
 )
 
+// responseWriterPiper implements http.ResponseWriter and pipes the body to an io.PipeWriter.
+type responseWriterPiper struct {
+	pw     *io.PipeWriter
+	header http.Header
+	status int
+}
+
+func (rw *responseWriterPiper) Header() http.Header {
+	return rw.header
+}
+
+func (rw *responseWriterPiper) Write(data []byte) (int, error) {
+	if rw.status == 0 {
+		rw.WriteHeader(http.StatusOK)
+	}
+	return rw.pw.Write(data)
+}
+
+func (rw *responseWriterPiper) WriteHeader(statusCode int) {
+	rw.status = statusCode
+}
+
 func TestStreamHTTPHandler(t *testing.T) {
 	// Create temp directory for test data
 	tempDir, err := os.MkdirTemp("", "m3u-test-*")
@@ -115,14 +137,20 @@ func TestStreamHTTPHandler(t *testing.T) {
 		if isUrl := strings.HasPrefix(line, "http"); isUrl {
 			t.Run(line, func(t *testing.T) {
 				req := httptest.NewRequest(http.MethodGet, line, nil)
-				w := httptest.NewRecorder()
+				pr, pw := io.Pipe()
+				defer pr.Close()
+
+				rw := &responseWriterPiper{
+					pw:     pw,
+					header: make(http.Header),
+				}
 
 				// Create a channel to coordinate test completion
 				done := make(chan struct{})
 
 				// Start the stream handler in a goroutine
 				go func() {
-					streamHandler.ServeHTTP(w, req)
+					streamHandler.ServeHTTP(rw, req)
 					close(done)
 				}()
 
@@ -146,7 +174,7 @@ func TestStreamHTTPHandler(t *testing.T) {
 						return
 					default:
 						// Read from response stream
-						n2, err2 := w.Body.Read(buffer2)
+						n2, err2 := pr.Read(buffer2)
 						if err2 != nil && err2 != io.EOF {
 							t.Logf("Error reading response stream: %v", err2)
 							success = false

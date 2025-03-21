@@ -7,6 +7,7 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/sourceproc"
 	"m3u-stream-merger/store"
+	"m3u-stream-merger/utils/safemap"
 	"net/http"
 	"os"
 	"sort"
@@ -99,19 +100,20 @@ func setupTestInstance(t *testing.T) (*LoadBalancerInstance, *mockHTTPClient, *m
 		indexes: []string{"1", "2"},
 	}
 
+	urls := safemap.New[string, map[string]string]()
+	urls.Set("1", map[string]string{
+		"a": "http://test1.com/stream",
+		"b": "http://test1.com/backup",
+	})
+	urls.Set("2", map[string]string{
+		"a": "http://test2.com/stream",
+	})
+
 	slugParser := &mockSlugParser{
 		streams: map[string]*sourceproc.StreamInfo{
 			"test-stream": {
 				Title: "Test Stream",
-				URLs: map[string]map[string]string{
-					"1": {
-						"a": "http://test1.com/stream",
-						"b": "http://test1.com/backup",
-					},
-					"2": {
-						"a": "http://test2.com/stream",
-					},
-				},
+				URLs:  urls,
 			},
 		},
 	}
@@ -137,13 +139,16 @@ func setupTestInstance(t *testing.T) (*LoadBalancerInstance, *mockHTTPClient, *m
 }
 
 func TestNewLoadBalancerInstance(t *testing.T) {
+	urls := safemap.New[string, map[string]string]()
+	urls.Set("1", map[string]string{
+		"a": "http://test1.com/stream",
+	})
+
 	slugParser := &mockSlugParser{
 		streams: map[string]*sourceproc.StreamInfo{
 			"test-stream": {
 				Title: "Test Stream",
-				URLs: map[string]map[string]string{
-					"1": {"a": "http://test1.com/stream"},
-				},
+				URLs:  urls,
 			},
 		},
 	}
@@ -428,6 +433,8 @@ func TestConcurrentAccess(t *testing.T) {
 }
 
 func TestEdgeCaseURLConfigurations(t *testing.T) {
+	urls := safemap.New[string, map[string]string]()
+	urls.Set("1", map[string]string{})
 	tests := []struct {
 		name      string
 		streams   map[string]*sourceproc.StreamInfo
@@ -438,7 +445,7 @@ func TestEdgeCaseURLConfigurations(t *testing.T) {
 			streams: map[string]*sourceproc.StreamInfo{
 				"test-stream": {
 					Title: "Test Stream",
-					URLs:  map[string]map[string]string{},
+					URLs:  safemap.New[string, map[string]string](),
 				},
 			},
 			expectErr: true,
@@ -458,9 +465,7 @@ func TestEdgeCaseURLConfigurations(t *testing.T) {
 			streams: map[string]*sourceproc.StreamInfo{
 				"test-stream": {
 					Title: "Test Stream",
-					URLs: map[string]map[string]string{
-						"1": {},
-					},
+					URLs:  urls,
 				},
 			},
 			expectErr: true,
@@ -572,6 +577,16 @@ func (m *mockHTTPClientWithTracking) Do(req *http.Request) (*http.Response, erro
 }
 
 func TestLoadBalancerConcurrencyPriority(t *testing.T) {
+	urls := safemap.New[string, map[string]string]()
+	urls.Set("1", map[string]string{
+		"a": "http://index1.com/stream",
+	})
+	urls.Set("2", map[string]string{
+		"a": "http://index2.com/stream",
+	})
+	urls.Set("3", map[string]string{
+		"a": "http://index3.com/stream",
+	})
 	tests := []struct {
 		name           string
 		setupEnv       func()
@@ -591,11 +606,7 @@ func TestLoadBalancerConcurrencyPriority(t *testing.T) {
 				return map[string]*sourceproc.StreamInfo{
 					"test-stream": {
 						Title: "Test Stream",
-						URLs: map[string]map[string]string{
-							"1": {"a": "http://index1.com/stream"},
-							"2": {"a": "http://index2.com/stream"},
-							"3": {"a": "http://index3.com/stream"},
-						},
+						URLs:  urls,
 					},
 				}
 			},
@@ -640,9 +651,10 @@ func TestLoadBalancerConcurrencyPriority(t *testing.T) {
 
 			// Create indexes slice
 			var indexes []string
-			for idx := range streams["test-stream"].URLs {
+			streams["test-stream"].URLs.ForEach(func(idx string, _ map[string]string) bool {
 				indexes = append(indexes, idx)
-			}
+				return true
+			})
 			sort.Strings(indexes) // Ensure consistent order
 			t.Logf("Indexes created: %v", indexes)
 

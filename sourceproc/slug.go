@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"m3u-stream-merger/logger"
+	"m3u-stream-merger/utils/safemap"
 
 	"github.com/goccy/go-json"
 	"github.com/klauspost/compress/zstd"
@@ -86,6 +87,6 @@ func DecodeSlug(encodedSlug string) (*StreamInfo, error) {
 		return nil, fmt.Errorf("error deserializing data: %v", err)
 	}
 
-	result.URLs = make(map[string]map[string]string)
+	result.URLs = safemap.New[string, map[string]string]()
 	return &result, nil
 }
