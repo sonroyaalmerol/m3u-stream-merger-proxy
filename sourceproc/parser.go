@@ -95,7 +95,6 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 			logger.Default.Debugf("Error indexing stream: %s (#%s) -> %v", stream.Title, m3uIndex, err)
 		}
 
-		stream.Lock()
 		if stream.URLs == nil {
 			stream.URLs = safemap.New[string, map[string]string]()
 		}

@@ -299,11 +299,9 @@ func mergeStreamInfoAttributes(base, new *StreamInfo) *StreamInfo {
 		base.Group = new.Group
 	}
 
-	base.Lock()
 	if base.URLs == nil {
 		base.URLs = safemap.New[string, map[string]string]()
 	}
-	base.Unlock()
 
 	new.URLs.ForEach(func(key string, value map[string]string) bool {
 		_, _ = base.URLs.Compute(key, func(oldValue map[string]string, loaded bool) (newValue map[string]string, del bool) {
