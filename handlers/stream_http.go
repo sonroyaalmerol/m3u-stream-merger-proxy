@@ -173,7 +173,7 @@ func (h *StreamHTTPHandler) handleSegmentStream(streamClient *client.StreamClien
 
 	_ = streamClient.WriteHeader(resp.StatusCode)
 
-	if _, err = io.Copy(streamClient.GetWriter(), resp.Body); err != nil {
+	if _, err = io.Copy(streamClient, resp.Body); err != nil {
 		if isBrokenPipe(err) {
 			h.logger.Debugf("Client disconnected (broken pipe): %v", err)
 		} else {

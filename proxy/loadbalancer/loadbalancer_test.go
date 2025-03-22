@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
+	"m3u-stream-merger/logger"
+	"m3u-stream-merger/sourceproc"
+	"m3u-stream-merger/store"
+	"m3u-stream-merger/utils/safemap"
 	"net/http"
 	"strings"
 	"sync"
@@ -105,19 +108,20 @@ func setupTestInstance(t *testing.T) (*LoadBalancerInstance, *mockHTTPClient, *m
 		indexes: []string{"1", "2"},
 	}
 
+	urls := safemap.New[string, map[string]string]()
+	urls.Set("1", map[string]string{
+		"a": "http://test1.com/stream",
+		"b": "http://test1.com/backup",
+	})
+	urls.Set("2", map[string]string{
+		"a": "http://test2.com/stream",
+	})
+
 	slugParser := &mockSlugParser{
 		streams: map[string]*sourceproc.StreamInfo{
 			"test-stream": {
 				Title: "Test Stream",
-				URLs: map[string]map[string]string{
-					"1": {
-						"a": "http://test1.com/stream",
-						"b": "http://test1.com/backup",
-					},
-					"2": {
-						"a": "http://test2.com/stream",
-					},
-				},
+				URLs:  urls,
 			},
 		},
 	}
@@ -143,13 +147,16 @@ func setupTestInstance(t *testing.T) (*LoadBalancerInstance, *mockHTTPClient, *m
 }
 
 func TestNewLoadBalancerInstance(t *testing.T) {
+	urls := safemap.New[string, map[string]string]()
+	urls.Set("1", map[string]string{
+		"a": "http://test1.com/stream",
+	})
+
 	slugParser := &mockSlugParser{
 		streams: map[string]*sourceproc.StreamInfo{
 			"test-stream": {
 				Title: "Test Stream",
-				URLs: map[string]map[string]string{
-					"1": {"a": "http://test1.com/stream"},
-				},
+				URLs:  urls,
 			},
 		},
 	}
@@ -459,6 +466,8 @@ func TestConcurrentAccess(t *testing.T) {
 }
 
 func TestEdgeCaseURLConfigurations(t *testing.T) {
+	urls := safemap.New[string, map[string]string]()
+	urls.Set("1", map[string]string{})
 	tests := []struct {
 		name      string
 		streams   map[string]*sourceproc.StreamInfo
@@ -469,7 +478,7 @@ func TestEdgeCaseURLConfigurations(t *testing.T) {
 			streams: map[string]*sourceproc.StreamInfo{
 				"test-stream": {
 					Title: "Test Stream",
-					URLs:  map[string]map[string]string{},
+					URLs:  safemap.New[string, map[string]string](),
 				},
 			},
 			expectErr: true,
@@ -489,9 +498,7 @@ func TestEdgeCaseURLConfigurations(t *testing.T) {
 			streams: map[string]*sourceproc.StreamInfo{
 				"test-stream": {
 					Title: "Test Stream",
-					URLs: map[string]map[string]string{
-						"1": {},
-					},
+					URLs:  urls,
 				},
 			},
 			expectErr: true,
@@ -574,5 +581,170 @@ func TestSessionStatePersistence(t *testing.T) {
 
 	if result3.Index != "2" {
 		t.Errorf("Expected index 2, got %s", result3.Index)
+	}
+}
+
+type mockHTTPClientWithTracking struct {
+	responses map[string]*http.Response
+	errors    map[string]error
+	attempts  []string
+	mu        sync.RWMutex
+}
+
+func (m *mockHTTPClientWithTracking) Do(req *http.Request) (*http.Response, error) {
+	m.mu.Lock()
+	m.attempts = append(m.attempts, req.URL.String())
+	m.mu.Unlock()
+
+	if err := m.errors[req.URL.String()]; err != nil {
+		return nil, err
+	}
+
+	resp := m.responses[req.URL.String()]
+	if resp == nil {
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+		}, nil
+	}
+
+	return resp, nil
+}
+
+func TestLoadBalancerConcurrencyPriority(t *testing.T) {
+	urls := safemap.New[string, map[string]string]()
+	urls.Set("1", map[string]string{
+		"a": "http://index1.com/stream",
+	})
+	urls.Set("2", map[string]string{
+		"a": "http://index2.com/stream",
+	})
+	urls.Set("3", map[string]string{
+		"a": "http://index3.com/stream",
+	})
+	tests := []struct {
+		name           string
+		setupEnv       func()
+		setupStreams   func() map[string]*sourceproc.StreamInfo
+		setupResponses func(client *mockHTTPClientWithTracking)
+		manipulateCM   func(*store.ConcurrencyManager)
+		expectedOrder  []string
+	}{
+		{
+			name: "tries indexes in order of available slots",
+			setupEnv: func() {
+				os.Setenv("M3U_MAX_CONCURRENCY_1", "3")
+				os.Setenv("M3U_MAX_CONCURRENCY_2", "2")
+				os.Setenv("M3U_MAX_CONCURRENCY_3", "1")
+			},
+			setupStreams: func() map[string]*sourceproc.StreamInfo {
+				return map[string]*sourceproc.StreamInfo{
+					"test-stream": {
+						Title: "Test Stream",
+						URLs:  urls,
+					},
+				}
+			},
+			setupResponses: func(client *mockHTTPClientWithTracking) {
+				client.responses = make(map[string]*http.Response)
+				client.errors = map[string]error{
+					"http://index1.com/stream": errors.New("failed"),
+					"http://index2.com/stream": errors.New("failed"),
+					"http://index3.com/stream": errors.New("failed"),
+				}
+			},
+			manipulateCM: nil,
+			expectedOrder: []string{
+				"http://index1.com/stream", // Priority 3 (3-0)
+				"http://index2.com/stream", // Priority 2 (2-0)
+				"http://index3.com/stream", // Priority 1 (1-0)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup environment
+			if tt.setupEnv != nil {
+				tt.setupEnv()
+				t.Log("Environment variables set")
+			}
+
+			// Setup client
+			client := &mockHTTPClientWithTracking{
+				responses: make(map[string]*http.Response),
+				errors:    make(map[string]error),
+				attempts:  make([]string, 0),
+			}
+			t.Log("Client initialized")
+
+			// Setup streams and responses
+			streams := tt.setupStreams()
+			tt.setupResponses(client)
+			slugParser := &mockSlugParser{streams: streams}
+			t.Log("Streams and responses set up")
+
+			// Create indexes slice
+			var indexes []string
+			streams["test-stream"].URLs.ForEach(func(idx string, _ map[string]string) bool {
+				indexes = append(indexes, idx)
+				return true
+			})
+			sort.Strings(indexes) // Ensure consistent order
+			t.Logf("Indexes created: %v", indexes)
+
+			// Setup concurrency manager
+			cm := store.NewConcurrencyManager()
+			if tt.manipulateCM != nil {
+				tt.manipulateCM(cm)
+				t.Log("Concurrency manager manipulated")
+			}
+
+			// Create instance
+			cfg := NewDefaultLBConfig()
+			cfg.MaxRetries = 1
+			instance := NewLoadBalancerInstance(
+				cm,
+				cfg,
+				WithHTTPClient(client),
+				WithLogger(logger.Default),
+				WithIndexProvider(&mockIndexProvider{indexes: indexes}),
+				WithSlugParser(slugParser),
+			)
+
+			err := instance.fetchBackendUrls("test-stream")
+			if err != nil {
+				t.Fatalf("Failed to create LoadBalancerInstance: %v", err)
+			}
+			t.Log("LoadBalancer instance created")
+
+			// Run balance
+			ctx := context.Background()
+			result, err := instance.Balance(ctx, newTestRequest(http.MethodGet))
+			t.Logf("Balance result: %+v, error: %v", result, err)
+			t.Logf("Attempts made: %v", client.attempts)
+			t.Logf("Expected order: %v", tt.expectedOrder)
+
+			// Verify attempts
+			for i, attempt := range client.attempts {
+				if i >= len(tt.expectedOrder) {
+					t.Errorf("More attempts than expected. Got attempt %d: %s", i+1, attempt)
+					continue
+				}
+				expected := tt.expectedOrder[i]
+				if attempt != expected {
+					t.Errorf("Attempt %d: got %s, want %s", i+1, attempt, expected)
+				}
+			}
+
+			// If we got an error, verify we tried all URLs
+			if err != nil && len(client.attempts) != len(tt.expectedOrder) {
+				t.Errorf("With error response, got %d attempts, want %d attempts", len(client.attempts), len(tt.expectedOrder))
+			}
+
+			// Cleanup
+			os.Unsetenv("M3U_MAX_CONCURRENCY_1")
+			os.Unsetenv("M3U_MAX_CONCURRENCY_2")
+			os.Unsetenv("M3U_MAX_CONCURRENCY_3")
+		})
 	}
 }

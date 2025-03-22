@@ -7,6 +7,7 @@ import (
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
+	"m3u-stream-merger/utils/safemap"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -27,7 +28,7 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 
 	cleanUrl := strings.TrimSpace(nextLine.Content)
 	stream := &StreamInfo{
-		URLs: make(map[string]map[string]string),
+		URLs: safemap.New[string, map[string]string](),
 	}
 
 	matches := attributeRegex.FindAllStringSubmatch(line, -1)
@@ -62,11 +63,7 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 		return nil
 	}
 
-	stream.Lock()
-	if stream.URLs[m3uIndex] == nil {
-		stream.URLs[m3uIndex] = make(map[string]string)
-	}
-	stream.Unlock()
+	_, _ = stream.URLs.GetOrSet(m3uIndex, make(map[string]string))
 
 	encodedUrl := base64.StdEncoding.EncodeToString([]byte(cleanUrl))
 
@@ -100,13 +97,15 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 
 		stream.Lock()
 		if stream.URLs == nil {
-			stream.URLs = make(map[string]map[string]string)
+			stream.URLs = safemap.New[string, map[string]string]()
 		}
-		if stream.URLs[m3uIndex] == nil {
-			stream.URLs[m3uIndex] = make(map[string]string)
-		}
-		stream.URLs[m3uIndex][urlHash] = fmt.Sprintf("%d:::%s", nextLine.LineNum, cleanUrl)
-		stream.Unlock()
+		_, _ = stream.URLs.Compute(m3uIndex, func(oldValue map[string]string, loaded bool) (newValue map[string]string, del bool) {
+			if oldValue == nil {
+				oldValue = make(map[string]string)
+			}
+			oldValue[urlHash] = fmt.Sprintf("%d:::%s", nextLine.LineNum, cleanUrl)
+			return oldValue, false
+		})
 	}
 
 	return stream
