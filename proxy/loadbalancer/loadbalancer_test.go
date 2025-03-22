@@ -4,19 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/sourceproc"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils/safemap"
 	"net/http"
+	"os"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-
-	"m3u-stream-merger/logger"
-	"m3u-stream-merger/sourceproc"
-	"m3u-stream-merger/store"
 )
 
 // Helper function to create test requests
