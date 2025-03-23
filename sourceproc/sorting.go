@@ -5,15 +5,14 @@ import (
 	"fmt"
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
-	"m3u-stream-merger/utils/safemap"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/cespare/xxhash"
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 const (
@@ -22,12 +21,15 @@ const (
 )
 
 type SortingManager struct {
-	muxes      []*sync.Mutex       // Sharded mutexes
-	indexes    []map[string]bool   // In-memory existence checks
-	buffers    []map[string][]byte // Buffered writes
+	shardMap   *xsync.MapOf[uint64, *shardData]
 	sortingKey string
 	sortingDir string
 	basePath   string
+}
+
+type shardData struct {
+	index  map[string]bool
+	buffer map[string][]byte
 }
 
 func newSortingManager() *SortingManager {
@@ -39,20 +41,8 @@ func newSortingManager() *SortingManager {
 		logger.Default.Error(err.Error())
 	}
 
-	muxes := make([]*sync.Mutex, mutexShards)
-	indexes := make([]map[string]bool, mutexShards)
-	buffers := make([]map[string][]byte, mutexShards)
-
-	for i := range muxes {
-		muxes[i] = &sync.Mutex{}
-		indexes[i] = make(map[string]bool)
-		buffers[i] = make(map[string][]byte)
-	}
-
 	return &SortingManager{
-		muxes:      muxes,
-		indexes:    indexes,
-		buffers:    buffers,
+		shardMap:   xsync.NewMapOf[uint64, *shardData](),
 		sortingKey: sortingKey,
 		sortingDir: sortingDir,
 		basePath:   basePath,
@@ -62,43 +52,57 @@ func newSortingManager() *SortingManager {
 func (m *SortingManager) AddToSorter(s *StreamInfo) error {
 	titleHash := xxhash.Sum64String(s.Title)
 	shardIndex := titleHash % mutexShards
-	mutex := m.muxes[shardIndex]
 	sanitizedTitle := sanitizeField(s.Title)
 
-	mutex.Lock()
-	defer mutex.Unlock()
-
-	// Check in-memory index first
-	if m.indexes[shardIndex][sanitizedTitle] {
-		return m.handleExisting(shardIndex, sanitizedTitle, s)
-	}
-
-	// Check filesystem if not in memory index
-	shardFile := filepath.Join(m.basePath, fmt.Sprintf(shardFileTemplate, shardIndex))
-	if _, err := os.Stat(shardFile); err == nil {
-		if err := m.loadShard(shardIndex); err != nil {
-			return err
+	var addErr error
+	m.shardMap.Compute(shardIndex, func(oldVal *shardData, loaded bool) (*shardData, bool) {
+		if oldVal == nil {
+			oldVal = &shardData{
+				index:  make(map[string]bool),
+				buffer: make(map[string][]byte),
+			}
 		}
-		if m.indexes[shardIndex][sanitizedTitle] {
-			return m.handleExisting(shardIndex, sanitizedTitle, s)
+
+		if oldVal.index[sanitizedTitle] {
+			addErr = m.handleExisting(shardIndex, sanitizedTitle, s)
+			return oldVal, false
 		}
-	}
 
-	// New entry - buffer in memory
-	encoded, err := json.Marshal(s)
-	if err != nil {
-		return fmt.Errorf("failed to marshal StreamInfo: %w", err)
-	}
+		shardFile := filepath.Join(m.basePath, fmt.Sprintf(shardFileTemplate, shardIndex))
+		if _, err := os.Stat(shardFile); err == nil {
+			entries, err := m.readShard(shardIndex)
+			if err != nil {
+				addErr = err
+				return oldVal, false
+			}
+			for title := range entries {
+				oldVal.index[title] = true
+			}
+			if oldVal.index[sanitizedTitle] {
+				addErr = m.handleExisting(shardIndex, sanitizedTitle, s)
+				return oldVal, false
+			}
+		}
 
-	m.buffers[shardIndex][sanitizedTitle] = encoded
-	m.indexes[shardIndex][sanitizedTitle] = true
+		encoded, err := json.Marshal(s)
+		if err != nil {
+			addErr = fmt.Errorf("failed to marshal StreamInfo: %w", err)
+			return oldVal, false
+		}
 
-	// Flush buffer if reaching memory limit
-	if len(m.buffers[shardIndex]) >= 250 { // ~1MB per shard buffer
-		return m.flushShard(shardIndex)
-	}
+		oldVal.buffer[sanitizedTitle] = encoded
+		oldVal.index[sanitizedTitle] = true
 
-	return nil
+		if len(oldVal.buffer) >= 250 {
+			if err := m.flushShard(shardIndex, oldVal); err != nil {
+				addErr = err
+			}
+		}
+
+		return oldVal, false
+	})
+
+	return addErr
 }
 
 func (m *SortingManager) Close() {
@@ -107,13 +111,11 @@ func (m *SortingManager) Close() {
 }
 
 func (m *SortingManager) handleExisting(shardIndex uint64, title string, s *StreamInfo) error {
-	// Read existing entries
 	entries, err := m.readShard(shardIndex)
 	if err != nil {
 		return err
 	}
 
-	// Find and merge existing entry
 	if existing, exists := entries[title]; exists {
 		merged := mergeStreamInfoAttributes(existing, s)
 		entries[title] = merged
@@ -121,34 +123,32 @@ func (m *SortingManager) handleExisting(shardIndex uint64, title string, s *Stre
 		entries[title] = s
 	}
 
-	// Write back merged entries
 	return m.writeShard(shardIndex, entries)
 }
 
-func (m *SortingManager) flushShard(shardIndex uint64) error {
-	if len(m.buffers[shardIndex]) == 0 {
+func (m *SortingManager) flushShard(shardIndex uint64, data *shardData) error {
+	if len(data.buffer) == 0 {
 		return nil
 	}
 
-	// Read existing entries if any
-	entries, _ := m.readShard(shardIndex)
+	entries, err := m.readShard(shardIndex)
+	if err != nil {
+		return err
+	}
 
-	// Merge buffered entries
-	for title, data := range m.buffers[shardIndex] {
+	for title, buf := range data.buffer {
 		var s StreamInfo
-		if err := json.Unmarshal(data, &s); err != nil {
+		if err := json.Unmarshal(buf, &s); err != nil {
 			continue
 		}
 		entries[title] = &s
 	}
 
-	// Write merged entries
 	if err := m.writeShard(shardIndex, entries); err != nil {
 		return err
 	}
 
-	// Clear buffer
-	m.buffers[shardIndex] = make(map[string][]byte)
+	data.buffer = make(map[string][]byte)
 	return nil
 }
 
@@ -190,38 +190,23 @@ func (m *SortingManager) writeShard(shardIndex uint64, entries map[string]*Strea
 	return nil
 }
 
-func (m *SortingManager) loadShard(shardIndex uint64) error {
-	entries, err := m.readShard(shardIndex)
-	if err != nil {
-		return err
-	}
-
-	for title := range entries {
-		m.indexes[shardIndex][title] = true
-	}
-	return nil
-}
-
 func (m *SortingManager) GetSortedEntries(callback func(*StreamInfo)) error {
-	// First flush any buffered entries
-	for shardIndex := uint64(0); shardIndex < mutexShards; shardIndex++ {
-		m.muxes[shardIndex].Lock()
-		if err := m.flushShard(shardIndex); err != nil {
-			m.muxes[shardIndex].Unlock()
-			return fmt.Errorf("failed to flush shard %d: %w", shardIndex, err)
-		}
-		m.muxes[shardIndex].Unlock()
+	for shardIndex := 0; shardIndex < mutexShards; shardIndex++ {
+		index := uint64(shardIndex)
+		m.shardMap.Compute(index, func(oldVal *shardData, loaded bool) (*shardData, bool) {
+			if oldVal == nil {
+				return nil, false
+			}
+			if err := m.flushShard(index, oldVal); err != nil {
+				logger.Default.Errorf("failed to flush shard %d: %v", index, err)
+			}
+			return oldVal, false
+		})
 	}
 
-	// Collect all entries from all shards
-	type shardEntry struct {
-		key   string
-		value *StreamInfo
-	}
-	entries := make([]shardEntry, 0, 1_000_000) // Preallocate for 1M entries
+	entries := make([]*StreamInfo, 0, 1_000_000)
 
-	// Read and parse all shard files
-	for shardIndex := uint64(0); shardIndex < mutexShards; shardIndex++ {
+	for shardIndex := 0; shardIndex < mutexShards; shardIndex++ {
 		shardFile := filepath.Join(m.basePath, fmt.Sprintf(shardFileTemplate, shardIndex))
 
 		file, err := os.Open(shardFile)
@@ -239,23 +224,19 @@ func (m *SortingManager) GetSortedEntries(callback func(*StreamInfo)) error {
 		}
 		file.Close()
 
-		// Convert map to sortable slice
 		for _, stream := range shardData {
-			entries = append(entries, shardEntry{
-				key:   getSortKey(stream, m.sortingKey, m.sortingDir),
-				value: stream,
-			})
+			entries = append(entries, stream)
 		}
 	}
 
-	// Sort the entries
 	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].key < entries[j].key
+		iKey := getSortKey(entries[i], m.sortingKey, m.sortingDir)
+		jKey := getSortKey(entries[j], m.sortingKey, m.sortingDir)
+		return iKey < jKey
 	})
 
-	// Execute callback in sorted order
 	for _, entry := range entries {
-		callback(entry.value)
+		callback(entry)
 	}
 
 	return nil
@@ -300,10 +281,10 @@ func mergeStreamInfoAttributes(base, new *StreamInfo) *StreamInfo {
 	}
 
 	if base.URLs == nil {
-		base.URLs = safemap.New[string, map[string]string]()
+		base.URLs = xsync.NewMapOf[string, map[string]string]()
 	}
 
-	new.URLs.ForEach(func(key string, value map[string]string) bool {
+	new.URLs.Range(func(key string, value map[string]string) bool {
 		_, _ = base.URLs.Compute(key, func(oldValue map[string]string, loaded bool) (newValue map[string]string, del bool) {
 			if oldValue == nil {
 				oldValue = value
