@@ -7,13 +7,14 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/sourceproc"
 	"m3u-stream-merger/store"
-	"m3u-stream-merger/utils/safemap"
 	"net/http"
 	"os"
 	"sort"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 // Helper function to create test requests
@@ -100,12 +101,12 @@ func setupTestInstance(t *testing.T) (*LoadBalancerInstance, *mockHTTPClient, *m
 		indexes: []string{"1", "2"},
 	}
 
-	urls := safemap.New[string, map[string]string]()
-	urls.Set("1", map[string]string{
+	urls := xsync.NewMapOf[string, map[string]string]()
+	urls.Store("1", map[string]string{
 		"a": "http://test1.com/stream",
 		"b": "http://test1.com/backup",
 	})
-	urls.Set("2", map[string]string{
+	urls.Store("2", map[string]string{
 		"a": "http://test2.com/stream",
 	})
 
@@ -139,8 +140,8 @@ func setupTestInstance(t *testing.T) (*LoadBalancerInstance, *mockHTTPClient, *m
 }
 
 func TestNewLoadBalancerInstance(t *testing.T) {
-	urls := safemap.New[string, map[string]string]()
-	urls.Set("1", map[string]string{
+	urls := xsync.NewMapOf[string, map[string]string]()
+	urls.Store("1", map[string]string{
 		"a": "http://test1.com/stream",
 	})
 
@@ -433,8 +434,8 @@ func TestConcurrentAccess(t *testing.T) {
 }
 
 func TestEdgeCaseURLConfigurations(t *testing.T) {
-	urls := safemap.New[string, map[string]string]()
-	urls.Set("1", map[string]string{})
+	urls := xsync.NewMapOf[string, map[string]string]()
+	urls.Store("1", map[string]string{})
 	tests := []struct {
 		name      string
 		streams   map[string]*sourceproc.StreamInfo
@@ -445,7 +446,7 @@ func TestEdgeCaseURLConfigurations(t *testing.T) {
 			streams: map[string]*sourceproc.StreamInfo{
 				"test-stream": {
 					Title: "Test Stream",
-					URLs:  safemap.New[string, map[string]string](),
+					URLs:  xsync.NewMapOf[string, map[string]string](),
 				},
 			},
 			expectErr: true,
@@ -577,14 +578,14 @@ func (m *mockHTTPClientWithTracking) Do(req *http.Request) (*http.Response, erro
 }
 
 func TestLoadBalancerConcurrencyPriority(t *testing.T) {
-	urls := safemap.New[string, map[string]string]()
-	urls.Set("1", map[string]string{
+	urls := xsync.NewMapOf[string, map[string]string]()
+	urls.Store("1", map[string]string{
 		"a": "http://index1.com/stream",
 	})
-	urls.Set("2", map[string]string{
+	urls.Store("2", map[string]string{
 		"a": "http://index2.com/stream",
 	})
-	urls.Set("3", map[string]string{
+	urls.Store("3", map[string]string{
 		"a": "http://index3.com/stream",
 	})
 	tests := []struct {
@@ -651,7 +652,7 @@ func TestLoadBalancerConcurrencyPriority(t *testing.T) {
 
 			// Create indexes slice
 			var indexes []string
-			streams["test-stream"].URLs.ForEach(func(idx string, _ map[string]string) bool {
+			streams["test-stream"].URLs.Range(func(idx string, _ map[string]string) bool {
 				indexes = append(indexes, idx)
 				return true
 			})

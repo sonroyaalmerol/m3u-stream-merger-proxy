@@ -7,12 +7,12 @@ import (
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
-	"m3u-stream-merger/utils/safemap"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/puzpuzpuz/xsync/v3"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -28,7 +28,7 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 
 	cleanUrl := strings.TrimSpace(nextLine.Content)
 	stream := &StreamInfo{
-		URLs: safemap.New[string, map[string]string](),
+		URLs: xsync.NewMapOf[string, map[string]string](),
 	}
 
 	matches := attributeRegex.FindAllStringSubmatch(line, -1)
@@ -63,7 +63,7 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 		return nil
 	}
 
-	_, _ = stream.URLs.GetOrSet(m3uIndex, make(map[string]string))
+	_, _ = stream.URLs.LoadOrStore(m3uIndex, make(map[string]string))
 
 	encodedUrl := base64.StdEncoding.EncodeToString([]byte(cleanUrl))
 
@@ -95,7 +95,7 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 			logger.Default.Debugf("Error indexing stream: %s (#%s) -> %v", stream.Title, m3uIndex, err)
 		}
 		if stream.URLs == nil {
-			stream.URLs = safemap.New[string, map[string]string]()
+			stream.URLs = xsync.NewMapOf[string, map[string]string]()
 		}
 		_, _ = stream.URLs.Compute(m3uIndex, func(oldValue map[string]string, loaded bool) (newValue map[string]string, del bool) {
 			if oldValue == nil {
