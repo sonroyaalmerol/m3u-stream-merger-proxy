@@ -254,7 +254,18 @@ func getSortKey(s *StreamInfo, sortingKey, direction string) string {
 	case "tvg-type":
 		return normalizeStringField(s.TvgType, direction)
 	case "source":
-		return normalizeNumericField(s.SourceM3U, 5, direction)
+		// Sortiere nach SourceM3U als Zahl (Index der Quelle), dann nach SourceIndex (Zeilennummer in der Quelle)
+		// Das stellt sicher, dass die Reihenfolge der Quellen und deren Einträge übernommen wird
+		sourceIdx, err := strconv.Atoi(s.SourceM3U)
+		if err != nil {
+			sourceIdx = 0
+		}
+		// Kombiniere SourceM3U und SourceIndex für eine stabile Sortierung
+		if direction == "desc" {
+			// Für absteigend: große Werte zuerst
+			return fmt.Sprintf("%05d-%08d", 99999-sourceIdx, 99999999-s.SourceIndex)
+		}
+		return fmt.Sprintf("%05d-%08d", sourceIdx, s.SourceIndex)
 	default: // Title
 		return normalizeStringField(s.Title, direction)
 	}
