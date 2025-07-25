@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/sourceproc"
@@ -18,22 +19,19 @@ func setupTest(t *testing.T) (*M3UHTTPHandler, *httptest.ResponseRecorder, *http
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
-	defer func() {
-		t.Log("Cleaning up temporary directory:", tempDir)
+	t.Cleanup(func() {
 		if err := os.RemoveAll(tempDir); err != nil {
 			t.Errorf("Failed to cleanup temp directory: %v", err)
 		}
-	}()
+	})
 
 	// Set up test environment
 	testDataPath := filepath.Join(tempDir, "data")
-	t.Log("Setting up test data path:", testDataPath)
 	if err := os.MkdirAll(testDataPath, 0755); err != nil {
 		t.Fatalf("Failed to create test data directory: %v", err)
 	}
 
 	tempPath := filepath.Join(testDataPath, "temp")
-	t.Log("Creating temp directory:", tempPath)
 	if err := os.MkdirAll(tempPath, 0755); err != nil {
 		t.Fatalf("Failed to create streams directory: %v", err)
 	}
@@ -71,54 +69,54 @@ func TestM3UHTTPHandler_NoAuth(t *testing.T) {
 }
 
 func TestM3UHTTPHandler_BasicAuth(t *testing.T) {
+	creds := []Credential{
+		{Username: "user1", Password: "pass1"},
+		{Username: "user2", Password: "pass2"},
+	}
+	credsJSON, _ := json.Marshal(creds)
+
 	tests := []struct {
-		name        string
-		credentials string
-		username    string
-		password    string
-		wantStatus  int
+		name       string
+		username   string
+		password   string
+		wantStatus int
 	}{
 		{
-			name:        "Valid credentials",
-			credentials: "user1:pass1|user2:pass2",
-			username:    "user1",
-			password:    "pass1",
-			wantStatus:  http.StatusNotFound,
+			name:       "Valid credentials",
+			username:   "user1",
+			password:   "pass1",
+			wantStatus: http.StatusNotFound,
 		},
 		{
-			name:        "Invalid password",
-			credentials: "user1:pass1",
-			username:    "user1",
-			password:    "wrongpass",
-			wantStatus:  http.StatusForbidden,
+			name:       "Invalid password",
+			username:   "user1",
+			password:   "wrongpass",
+			wantStatus: http.StatusForbidden,
 		},
 		{
-			name:        "Invalid username",
-			credentials: "user1:pass1",
-			username:    "wronguser",
-			password:    "pass1",
-			wantStatus:  http.StatusForbidden,
+			name:       "Invalid username",
+			username:   "wronguser",
+			password:   "pass1",
+			wantStatus: http.StatusForbidden,
 		},
 		{
-			name:        "Missing credentials",
-			credentials: "user1:pass1",
-			username:    "",
-			password:    "",
-			wantStatus:  http.StatusForbidden,
+			name:       "Missing credentials",
+			username:   "",
+			password:   "",
+			wantStatus: http.StatusForbidden,
 		},
 		{
-			name:        "Case insensitive username",
-			credentials: "User1:pass1",
-			username:    "user1",
-			password:    "pass1",
-			wantStatus:  http.StatusNotFound,
+			name:       "Case insensitive username",
+			username:   "User1",
+			password:   "pass1",
+			wantStatus: http.StatusNotFound,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup
-			os.Setenv("CREDENTIALS", tt.credentials)
+			os.Setenv("CREDENTIALS", string(credsJSON))
 			handler, recorder, request := setupTest(t)
 
 			// Add auth parameters
@@ -139,43 +137,36 @@ func TestM3UHTTPHandler_BasicAuth(t *testing.T) {
 }
 
 func TestM3UHTTPHandler_ExpirationDate(t *testing.T) {
-	tomorrow := time.Now().Add(24 * time.Hour).Format(time.DateOnly)
-	yesterday := time.Now().Add(-24 * time.Hour).Format(time.DateOnly)
+	creds := []Credential{
+		{Username: "user1", Password: "pass1", Expiration: time.Now().Add(24 * time.Hour)},
+		{Username: "user2", Password: "pass2", Expiration: time.Now().Add(-24 * time.Hour)},
+	}
+	credsJSON, _ := json.Marshal(creds)
 
 	tests := []struct {
-		name        string
-		credentials string
-		username    string
-		password    string
-		wantStatus  int
+		name       string
+		username   string
+		password   string
+		wantStatus int
 	}{
 		{
-			name:        "Valid credentials with future expiration",
-			credentials: "user1:pass1:" + tomorrow,
-			username:    "user1",
-			password:    "pass1",
-			wantStatus:  http.StatusNotFound,
+			name:       "Valid credentials with future expiration",
+			username:   "user1",
+			password:   "pass1",
+			wantStatus: http.StatusNotFound,
 		},
 		{
-			name:        "Expired credentials",
-			credentials: "user1:pass1:" + yesterday,
-			username:    "user1",
-			password:    "pass1",
-			wantStatus:  http.StatusForbidden,
-		},
-		{
-			name:        "Multiple users with different expiration dates",
-			credentials: "user1:pass1:" + yesterday + "|user2:pass2:" + tomorrow,
-			username:    "user2",
-			password:    "pass2",
-			wantStatus:  http.StatusNotFound,
+			name:       "Expired credentials",
+			username:   "user2",
+			password:   "pass2",
+			wantStatus: http.StatusForbidden,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup
-			os.Setenv("CREDENTIALS", tt.credentials)
+			os.Setenv("CREDENTIALS", string(credsJSON))
 			handler, recorder, request := setupTest(t)
 
 			// Add auth parameters
