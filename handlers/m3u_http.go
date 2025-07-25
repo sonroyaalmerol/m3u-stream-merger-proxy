@@ -17,17 +17,37 @@ type Credential struct {
 	Expiration time.Time `json:"expiration"`
 }
 
-var credentialsMap = make(map[string]Credential)
-
 type M3UHTTPHandler struct {
 	logger        logger.Logger
 	processedPath string
+	credentials   map[string]Credential
 }
 
 func NewM3UHTTPHandler(logger logger.Logger, processedPath string) *M3UHTTPHandler {
-	return &M3UHTTPHandler{
+	h := &M3UHTTPHandler{
 		logger:        logger,
 		processedPath: processedPath,
+		credentials:   make(map[string]Credential),
+	}
+	h.loadCredentials()
+	return h
+}
+
+func (h *M3UHTTPHandler) loadCredentials() {
+	credsStr := os.Getenv("CREDENTIALS")
+	if credsStr == "" || strings.ToLower(credsStr) == "none" {
+		return
+	}
+
+	var creds []Credential
+	err := json.Unmarshal([]byte(credsStr), &creds)
+	if err != nil {
+		h.logger.Errorf("error parsing credentials: %v", err)
+		return
+	}
+
+	for _, cred := range creds {
+		h.credentials[strings.ToLower(cred.Username)] = cred
 	}
 }
 
@@ -52,32 +72,30 @@ func (h *M3UHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *M3UHTTPHandler) handleAuth(r *http.Request) bool {
-	credentials := os.Getenv("CREDENTIALS")
-	if credentials == "" || strings.ToLower(credentials) == "none" {
-		// No authentication required.
-		return true
+	if len(h.credentials) == 0 {
+		return true // No authentication required
 	}
 
-	creds := h.parseCredentials(credentials)
 	user, pass := r.URL.Query().Get("username"), r.URL.Query().Get("password")
 	if user == "" || pass == "" {
 		return false
 	}
 
-	for _, cred := range creds {
-		if strings.EqualFold(user, cred.Username) && strings.EqualFold(pass, cred.Password) {
-			return true
-		}
+	cred, ok := h.credentials[strings.ToLower(user)]
+	if !ok {
+		return false
 	}
-	return false
-}
 
-func (h *M3UHTTPHandler) parseCredentials(raw string) []Credential {
-	var creds []Credential
-	err := json.Unmarshal([]byte(raw), &creds)
-	if err != nil {
-		h.logger.Errorf("error parsing credentials: %v", err)
-		return nil
+	// Constant-time comparison for passwords
+	if subtle.ConstantTimeCompare([]byte(pass), []byte(cred.Password)) != 1 {
+		return false
 	}
-	return creds
+
+	// Check expiration
+	if !cred.Expiration.IsZero() && time.Now().After(cred.Expiration) {
+		h.logger.Debugf("Credential expired for user: %s", user)
+		return false
+	}
+
+	return true
 }
