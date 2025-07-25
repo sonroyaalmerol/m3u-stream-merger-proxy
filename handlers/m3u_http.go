@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"crypto/subtle"
+	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
@@ -8,6 +10,14 @@ import (
 
 	"m3u-stream-merger/logger"
 )
+
+type Credential struct {
+	Username   string    `json:"username"`
+	Password   string    `json:"password"`
+	Expiration time.Time `json:"expiration"`
+}
+
+var credentialsMap = make(map[string]Credential)
 
 type M3UHTTPHandler struct {
 	logger        logger.Logger
@@ -26,7 +36,7 @@ func (h *M3UHTTPHandler) SetProcessedPath(path string) {
 }
 
 func (h *M3UHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-control-allow-origin", "*")
 	isAuthorized := h.handleAuth(r)
 	if !isAuthorized {
 		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
@@ -55,29 +65,19 @@ func (h *M3UHTTPHandler) handleAuth(r *http.Request) bool {
 	}
 
 	for _, cred := range creds {
-		if strings.EqualFold(user, cred[0]) && strings.EqualFold(pass, cred[1]) {
+		if strings.EqualFold(user, cred.Username) && strings.EqualFold(pass, cred.Password) {
 			return true
 		}
 	}
 	return false
 }
 
-func (h *M3UHTTPHandler) parseCredentials(raw string) [][]string {
-	var result [][]string
-	for _, item := range strings.Split(raw, "|") {
-		cred := strings.Split(item, ":")
-		if len(cred) == 3 {
-			if d, err := time.ParseInLocation(time.DateOnly, cred[2], time.Local); err != nil {
-				h.logger.Warnf("invalid credential format: %s", item)
-				continue
-			} else if time.Now().After(d) {
-				h.logger.Debugf("Credential expired: %s", item)
-				continue
-			}
-			result = append(result, cred[:2])
-		} else {
-			result = append(result, cred)
-		}
+func (h *M3UHTTPHandler) parseCredentials(raw string) []Credential {
+	var creds []Credential
+	err := json.Unmarshal([]byte(raw), &creds)
+	if err != nil {
+		h.logger.Errorf("error parsing credentials: %v", err)
+		return nil
 	}
-	return result
+	return creds
 }
