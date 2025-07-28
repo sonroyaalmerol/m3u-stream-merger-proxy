@@ -13,9 +13,18 @@ type Config struct {
 	TempPath string
 }
 
-var globalConfig = &Config{
-	DataPath: "/m3u-proxy/data/",
-	TempPath: "/tmp/m3u-proxy/",
+var globalConfig = &Config{}
+
+func init() {
+	globalConfig.DataPath = getEnv("DATA_PATH", "./data")
+	globalConfig.TempPath = getEnv("TEMP_PATH", "./temp")
+}
+
+func getEnv(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
+		return value
+	}
+	return fallback
 }
 
 func GetConfig() *Config {
@@ -74,8 +83,7 @@ func ClearOldProcessedM3U(latestFilename string) error {
 		filePath := filepath.Join(dir, file.Name())
 
 		if filePath == latestFilename {
-			continue
-		}
+			continue		}
 
 		err := os.Remove(filePath)
 		if err != nil {

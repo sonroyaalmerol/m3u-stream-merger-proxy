@@ -105,6 +105,8 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | PUID | Set UID of user running the container.                  |   1000 |   Any valid UID |
 | PGID | Set GID of user running the container.                  |   1000 |   Any valid GID |
 | TZ                          | Set timezone                                           | Etc/UTC     | [TZ Identifiers](https://nodatime.org/TimeZones) |
+| DATA_PATH                   | Set the directory for storing processed M3U playlists and stream data. | `./data`      | Any valid path                                 |
+| TEMP_PATH                   | Set the directory for temporary files used during M3U processing. | `./temp`      | Any valid path                                 |
 
 ### Playlist Source Configs
 | ENV VAR                     | Description                                              | Default Value | Possible Values                                |
@@ -133,7 +135,7 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | ENV VAR                     | Description                                              | Default Value | Possible Values                                |
 |-----------------------------|----------------------------------------------------------|---------------|------------------------------------------------|
 | BASE_URL | Sets the base URL for the stream URls in the M3U file to be generated. | http/s://<request_hostname> (e.g. <http://192.168.1.10:8080>)    | Any string that follows the URL format  |
-| CREDENTIALS | Set authentication credentials for the M3U playlist. Enabling this will require query variables in the M3U playlist URL to be authenticated. (e.g. <http://test.test/playlist.m3u?username=user1&password=pass1>) | none | Format: `user1:pass1\|user2:pass2:2025-02-01` (separate multiple users with `\|`, each user's credentials with `:`). You can add an optional expiry date at the end with another colon (:) as shown. Set to `none` or leave it empty to disable auth. |
+| CREDENTIALS                 | Set authentication credentials for the M3U playlist. This expects a JSON array of objects. | `none`        | Example: `[{"username":"user1","password":"pass1","expiration":"2025-02-01T00:00:00Z"},{"username":"user2","password":"pass2"}]`. Set to `none` or leave empty to disable auth. |
 | SORTING_KEY | Set tag to be used for sorting the stream list | title | tvg-id, tvg-chno, tvg-group, tvg-type, source |
 | SORTING_DIRECTION | Set sorting direction based on `SORTING_KEY` | asc | asc, desc |
 | INCLUDE_GROUPS_1, INCLUDE_GROUPS_2, INCLUDE_GROUPS_X    | Set channels to include based on groups (Takes precedence over EXCLUDE_GROUPS_X) | N/A | Go regexp |
