@@ -58,4 +58,4 @@ Desktop.ini
 *.tmp
 *.temp
 temp/
-tmp/
+tmp/data/
