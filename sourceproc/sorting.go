@@ -230,9 +230,30 @@ func (m *SortingManager) GetSortedEntries(callback func(*StreamInfo)) error {
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
-		iKey := getSortKey(entries[i], m.sortingKey, m.sortingDir)
-		jKey := getSortKey(entries[j], m.sortingKey, m.sortingDir)
-		return iKey < jKey
+		iStream := entries[i]
+		jStream := entries[j]
+
+		var cmp int
+
+		switch m.sortingKey {
+		case "tvg-chno", "channel-id", "channel-number":
+			cmp = compareNumeric(iStream.TvgChNo, jStream.TvgChNo)
+		case "tvg-id":
+			cmp = compareNumeric(iStream.TvgID, jStream.TvgID)
+		case "source":
+			cmp = compareNumeric(iStream.SourceM3U, jStream.SourceM3U)
+		case "tvg-group", "group-title":
+			cmp = strings.Compare(iStream.Group, jStream.Group)
+		case "tvg-type":
+			cmp = strings.Compare(iStream.TvgType, jStream.TvgType)
+		default: // Title
+			cmp = strings.Compare(iStream.Title, jStream.Title)
+		}
+
+		if m.sortingDir == "desc" {
+			return cmp > 0
+		}
+		return cmp < 0
 	})
 
 	for _, entry := range entries {
@@ -240,24 +261,6 @@ func (m *SortingManager) GetSortedEntries(callback func(*StreamInfo)) error {
 	}
 
 	return nil
-}
-
-// Helper to replicate the filename-based sorting logic
-func getSortKey(s *StreamInfo, sortingKey, direction string) string {
-	switch sortingKey {
-	case "tvg-id":
-		return normalizeNumericField(s.TvgID, 10, direction)
-	case "tvg-chno", "channel-id", "channel-number":
-		return normalizeNumericField(s.TvgChNo, 10, direction)
-	case "tvg-group", "group-title":
-		return normalizeStringField(s.Group, direction)
-	case "tvg-type":
-		return normalizeStringField(s.TvgType, direction)
-	case "source":
-		return normalizeNumericField(s.SourceM3U, 5, direction)
-	default: // Title
-		return normalizeStringField(s.Title, direction)
-	}
 }
 
 func mergeStreamInfoAttributes(base, new *StreamInfo) *StreamInfo {
@@ -308,31 +311,8 @@ func mergeStreamInfoAttributes(base, new *StreamInfo) *StreamInfo {
 	return base
 }
 
-func normalizeNumericField(value string, width int, direction string) string {
-	num, err := strconv.Atoi(value)
-	if err != nil {
-		return sanitizeField(value)
-	}
-	if direction == "desc" {
-		maxValue := int64(1<<31 - 1) // Use a large constant (e.g., max int32)
-		return fmt.Sprintf("%0*d", width, maxValue-int64(num))
-	}
-	return fmt.Sprintf("%0*d", width, num)
-}
-
-func normalizeStringField(value, direction string) string {
-	if direction == "desc" {
-		return reverseLexicographical(value)
-	}
-	return sanitizeField(value)
-}
-
-func reverseLexicographical(value string) string {
-	return fmt.Sprintf("~%s", value)
-}
-
 func sanitizeField(value string) string {
-	santized := strings.NewReplacer(
+	sanitized := strings.NewReplacer(
 		"/", "_",
 		"\\", "_",
 		":", "_",
@@ -345,9 +325,26 @@ func sanitizeField(value string) string {
 		" ", "",
 	).Replace(value)
 
-	if len(santized) > 100 {
-		santized = santized[:100]
+	runes := []rune(sanitized)
+	if len(runes) > 100 {
+		sanitized = string(runes[:100])
 	}
 
-	return santized
+	return sanitized
+}
+
+func compareNumeric(a, b string) int {
+	aNum, aErr := strconv.Atoi(a)
+	bNum, bErr := strconv.Atoi(b)
+
+	if aErr == nil && bErr == nil {
+		if aNum < bNum {
+			return -1
+		} else if aNum > bNum {
+			return 1
+		}
+		return 0
+	}
+
+	return strings.Compare(a, b)
 }
