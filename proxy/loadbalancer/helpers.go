@@ -53,15 +53,6 @@ func evaluateBufferHealth(resp *http.Response, readChunkSize int) (float64, erro
 	return throughput, nil
 }
 
-func contains(sl []string, val string) bool {
-	for _, s := range sl {
-		if s == val {
-			return true
-		}
-	}
-	return false
-}
-
 func sourceprocSortStreamSubUrls(urls map[string]string) []string {
 	keys := make([]string, 0, len(urls))
 	for k := range urls {
