@@ -229,16 +229,16 @@ func (m *SortingManager) GetSortedEntries(callback func(*StreamInfo)) error {
 		}
 	}
 
-		sort.Slice(entries, func(i, j int) bool {
-		tream := entries[i]
-		tream := entries[j]
+	sort.Slice(entries, func(i, j int) bool {
+		iStream := entries[i]
+		jStream := entries[j]
 
-		r cmp int
+		var cmp int
 
-		itch m.sortingKey {
-		se "tvg-chno", "channel-id", "channel-number":
-			 compareNumeric(iStream.TvgChNo, jStream.TvgChNo)
-		se "tvg-id":
+		switch m.sortingKey {
+		case "tvg-chno", "channel-id", "channel-number":
+			cmp = compareNumeric(iStream.TvgChNo, jStream.TvgChNo)
+		case "tvg-id":
 			cmp = compareNumeric(iStream.TvgID, jStream.TvgID)
 		case "source":
 			cmp = compareNumeric(iStream.SourceM3U, jStream.SourceM3U)
@@ -253,14 +253,14 @@ func (m *SortingManager) GetSortedEntries(callback func(*StreamInfo)) error {
 		default: // Title
 			cmp = strings.Compare(
 				strings.ToLower(iStream.Title),
-				ToLower(jStream.Title))
-		
+				strings.ToLower(jStream.Title))
+		}
 
-		 m.sortingDir == "desc" {
-			n cmp > 0
-		
-		turn cmp < 0
-		})
+		if m.sortingDir == "desc" {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
 
 	for _, entry := range entries {
 		callback(entry)
