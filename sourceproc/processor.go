@@ -116,6 +116,9 @@ func (p *M3UProcessor) clearOldResults() {
 
 func (p *M3UProcessor) GetResultPath() string {
 	if p.file == nil {
+		lockSources()
+		defer unlockSources()
+
 		path, err := config.GetLatestProcessedM3UPath()
 		if err != nil {
 			return ""
@@ -200,7 +203,11 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 }
 
 func (p *M3UProcessor) applyNewRemoteFiles() {
+	lockSources()
+	defer unlockSources()
+
 	indexes := utils.GetM3UIndexes()
+
 	for _, idx := range indexes {
 		finalPath := utils.GetM3UFilePathByIndex(idx)
 		tmpPath := finalPath + ".new"
@@ -211,6 +218,9 @@ func (p *M3UProcessor) applyNewRemoteFiles() {
 			}
 		}
 	}
+
+	_ = os.RemoveAll(config.GetCurrentSlugDirPath())
+	_ = os.Rename(config.GetNewSlugDirPath(), config.GetCurrentSlugDirPath())
 }
 
 func (p *M3UProcessor) cleanFailedRemoteFiles() {
@@ -220,6 +230,7 @@ func (p *M3UProcessor) cleanFailedRemoteFiles() {
 		tmpPath := finalPath + ".new"
 		_ = os.RemoveAll(tmpPath)
 	}
+	_ = os.RemoveAll(config.GetNewSlugDirPath())
 }
 
 func (p *M3UProcessor) addStream(stream *StreamInfo) error {

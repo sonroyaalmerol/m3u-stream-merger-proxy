@@ -30,6 +30,18 @@ func GetProcessedDirPath() string {
 	return filepath.Join(globalConfig.DataPath, "processed/")
 }
 
+func GetCurrentSlugDirPath() string {
+	return filepath.Join(globalConfig.DataPath, "slugs/")
+}
+
+func GetNewSlugDirPath() string {
+	return filepath.Join(globalConfig.DataPath, "new-slugs/")
+}
+
+func GetLockFile() string {
+	return filepath.Join(globalConfig.DataPath, ".lock")
+}
+
 func GetLatestProcessedM3UPath() (string, error) {
 	dir := GetProcessedDirPath()
 	files, err := os.ReadDir(dir)
