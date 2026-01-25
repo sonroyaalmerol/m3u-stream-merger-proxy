@@ -18,12 +18,12 @@ func lockSources() {
 	mu.Lock()
 	defer mu.Unlock()
 
-	lockFile.Lock()
+	_ = lockFile.Lock()
 }
 
 func unlockSources() {
 	mu.Lock()
 	defer mu.Unlock()
 
-	lockFile.Unlock()
+	_ = lockFile.Unlock()
 }

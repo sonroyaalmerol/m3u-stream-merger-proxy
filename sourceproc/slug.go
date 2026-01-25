@@ -5,44 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
 
 	"github.com/goccy/go-json"
-	"github.com/klauspost/compress/zstd"
 	"golang.org/x/crypto/sha3"
 )
-
-var (
-	encoderPool sync.Pool
-	decoderPool sync.Pool
-)
-
-func init() {
-	encoderPool = sync.Pool{
-		New: func() interface{} {
-			encoder, err := zstd.NewWriter(nil)
-			if err != nil {
-				logger.Default.Debugf("Error creating zstd encoder: %v", err)
-				return nil
-			}
-			return encoder
-		},
-	}
-
-	decoderPool = sync.Pool{
-		New: func() interface{} {
-			decoder, err := zstd.NewReader(nil)
-			if err != nil {
-				logger.Default.Debugf("Error creating zstd decoder: %v", err)
-				return nil
-			}
-			return decoder
-		},
-	}
-}
 
 func EncodeSlug(stream *StreamInfo) string {
 	h := sha3.Sum224([]byte(stream.Title))
