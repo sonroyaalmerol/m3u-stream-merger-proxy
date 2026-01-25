@@ -10,6 +10,7 @@ import (
 	"m3u-stream-merger/utils"
 	"net/http"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -322,7 +323,7 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 		var alreadyTested bool
 		streamTested, ok := instance.testedIndexes.Load(streamId)
 		if ok {
-			alreadyTested = slices.Contains(streamTested, index+"|"+subIndex)
+			alreadyTested = slices.Contains(streamTested, id)
 		}
 
 		if alreadyTested {
@@ -393,7 +394,7 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 				health: health,
 				err:    nil,
 			}
-		}(subIndex, url, candidateId)
+		}(subIndex, url, id)
 	}
 
 	wg.Wait()
