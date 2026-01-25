@@ -43,7 +43,11 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 	c.m3uHeaderSet.Store(false)
 	c.logger.Debug("StartHLSWriter: Beginning read loop")
 
-	c.cm.UpdateConcurrency(lbResult.Index, true)
+	if !c.cm.UpdateConcurrency(lbResult.Index, true) {
+		c.logger.Warnf("Failed to acquire concurrency slot for M3U_%s", lbResult.Index)
+		c.writeError(fmt.Errorf("concurrency limit reached"), proxy.StatusServerError)
+		return
+	}
 	defer c.cm.UpdateConcurrency(lbResult.Index, false)
 
 	var lastErr error

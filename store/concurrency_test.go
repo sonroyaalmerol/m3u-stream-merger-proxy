@@ -2,6 +2,7 @@ package store
 
 import (
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -17,7 +18,9 @@ func TestConcurrencyManagerBasicOps(t *testing.T) {
 	})
 
 	t.Run("SingleIncrement", func(t *testing.T) {
-		cm.UpdateConcurrency("TEST1", true)
+		if !cm.UpdateConcurrency("TEST1", true) {
+			t.Error("Should successfully increment")
+		}
 		if cm.GetCount("TEST1") != 1 {
 			t.Errorf("Expected 1 connection, got %d", cm.GetCount("TEST1"))
 		}
@@ -30,6 +33,35 @@ func TestConcurrencyManagerBasicOps(t *testing.T) {
 			t.Errorf("Expected 0 connections, got %d", cm.GetCount("TEST1"))
 		}
 	})
+}
+
+// TestConcurrencyManagerLimit tests that the limit is enforced
+func TestConcurrencyManagerLimit(t *testing.T) {
+	t.Setenv("M3U_MAX_CONCURRENCY_LIMIT", "2")
+	cm := NewConcurrencyManager()
+
+	// First two should succeed
+	if !cm.UpdateConcurrency("LIMIT", true) {
+		t.Error("First increment should succeed")
+	}
+	if !cm.UpdateConcurrency("LIMIT", true) {
+		t.Error("Second increment should succeed")
+	}
+
+	// Third should fail
+	if cm.UpdateConcurrency("LIMIT", true) {
+		t.Error("Third increment should fail (at limit)")
+	}
+
+	if count := cm.GetCount("LIMIT"); count != 2 {
+		t.Errorf("Expected 2 connections (at limit), got %d", count)
+	}
+
+	// After decrement, should be able to increment again
+	cm.UpdateConcurrency("LIMIT", false)
+	if !cm.UpdateConcurrency("LIMIT", true) {
+		t.Error("Should succeed after decrement")
+	}
 }
 
 // TestConcurrencyManagerPriority tests priority value calculations
@@ -54,22 +86,32 @@ func TestConcurrencyManagerRaceConditions(t *testing.T) {
 	cm := NewConcurrencyManager()
 	var wg sync.WaitGroup
 
-	// Start 150 concurrent requests
+	successCount := int32(0)
+
+	// Start 150 concurrent requests (50 should fail)
 	for i := 0; i < 150; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			cm.UpdateConcurrency("STRESS", true)
+			if cm.UpdateConcurrency("STRESS", true) {
+				atomic.AddInt32(&successCount, 1)
+			}
 		}()
 	}
 
 	wg.Wait()
-	if count := cm.GetCount("STRESS"); count != 150 {
-		t.Errorf("Expected 150 connections, got %d", count)
+
+	// Should only have 100 successful increments (the limit)
+	if count := cm.GetCount("STRESS"); count != 100 {
+		t.Errorf("Expected 100 connections (limit), got %d", count)
+	}
+
+	if successCount != 100 {
+		t.Errorf("Expected 100 successful increments, got %d", successCount)
 	}
 
 	// Decrement all
-	for i := 0; i < 150; i++ {
+	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

@@ -25,7 +25,11 @@ func (c *StreamCoordinator) StartMediaWriter(ctx context.Context, lbResult *load
 
 	c.logger.Debug("StartMediaWriter: Beginning read loop")
 
-	c.cm.UpdateConcurrency(lbResult.Index, true)
+	if !c.cm.UpdateConcurrency(lbResult.Index, true) {
+		c.logger.Warnf("Failed to acquire concurrency slot for M3U_%s", lbResult.Index)
+		c.writeError(fmt.Errorf("concurrency limit reached"), proxy.StatusServerError)
+		return
+	}
 	defer c.cm.UpdateConcurrency(lbResult.Index, false)
 
 	c.WriterRespHeader.Store(&lbResult.Response.Header)

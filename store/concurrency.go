@@ -13,7 +13,7 @@ import (
 type ConcurrencyManager struct {
 	count    *xsync.MapOf[string, *atomic.Int32]
 	Invalid  *xsync.MapOf[string, struct{}]
-	maxCache *xsync.MapOf[string, int] // Cache for parsed max concurrency values
+	maxCache *xsync.MapOf[string, int]
 }
 
 func NewConcurrencyManager() *ConcurrencyManager {
@@ -50,9 +50,14 @@ func (cm *ConcurrencyManager) GetConcurrencyStatus(m3uIndex string) (current int
 }
 
 func (cm *ConcurrencyManager) CheckConcurrency(m3uIndex string) bool {
-	current, max, _ := cm.GetConcurrencyStatus(m3uIndex)
-	logger.Default.Logf("Current connections for M3U_%s: %d/%d", m3uIndex, current, max)
-	return current >= max
+	max := cm.getMaxConcurrency(m3uIndex)
+	if val, ok := cm.count.Load(m3uIndex); ok {
+		current := int(val.Load())
+		logger.Default.Logf("Current connections for M3U_%s: %d/%d", m3uIndex, current, max)
+		return current >= max
+	}
+	logger.Default.Logf("Current connections for M3U_%s: 0/%d", m3uIndex, max)
+	return false
 }
 
 func (cm *ConcurrencyManager) ConcurrencyPriorityValue(m3uIndex string) int {
@@ -60,52 +65,38 @@ func (cm *ConcurrencyManager) ConcurrencyPriorityValue(m3uIndex string) int {
 	return priority
 }
 
-func (cm *ConcurrencyManager) UpdateConcurrency(m3uIndex string, incr bool) {
-	current, _ := cm.count.Compute(m3uIndex, func(count *atomic.Int32, _ bool) (newValue *atomic.Int32, delete bool) {
+func (cm *ConcurrencyManager) UpdateConcurrency(m3uIndex string, incr bool) bool {
+	max := cm.getMaxConcurrency(m3uIndex)
+	var finalCount int32
+	var success bool
+
+	cm.count.Compute(m3uIndex, func(count *atomic.Int32, _ bool) (*atomic.Int32, bool) {
 		if count == nil {
 			count = &atomic.Int32{}
 		}
+
 		if incr {
-			count.Add(1)
+			current := count.Load()
+			if current < int32(max) {
+				count.Add(1)
+				success = true
+			} else {
+				success = false
+			}
 		} else {
 			if count.Load() > 0 {
 				count.Add(-1)
 			}
+			success = true
 		}
+
+		finalCount = count.Load()
 		return count, false
 	})
 
-	max := cm.getMaxConcurrency(m3uIndex)
-	logger.Default.Logf("Updated connections for M3U_%s: %d/%d", m3uIndex, current.Load(), max)
-}
-
-func (cm *ConcurrencyManager) Increment(m3uIndex string) {
-	cm.count.Compute(m3uIndex, func(val *atomic.Int32, loaded bool) (*atomic.Int32, bool) {
-		if val == nil {
-			val = &atomic.Int32{}
-		}
-		val.Add(1)
-		return val, false
-	})
-}
-
-func (cm *ConcurrencyManager) Decrement(m3uIndex string) {
-	cm.count.Compute(m3uIndex, func(val *atomic.Int32, loaded bool) (*atomic.Int32, bool) {
-		if val == nil {
-			return nil, false // Shouldn't happen if Decrement is called after Increment
-		}
-		// Atomic decrement with check to prevent negative values
-		for {
-			current := val.Load()
-			if current <= 0 {
-				return val, false
-			}
-			if val.CompareAndSwap(current, current-1) {
-				break
-			}
-		}
-		return val, false
-	})
+	logger.Default.Logf("Updated connections for M3U_%s: %d/%d (success=%v)",
+		m3uIndex, finalCount, max, success)
+	return success
 }
 
 func (cm *ConcurrencyManager) GetCount(m3uIndex string) int {
