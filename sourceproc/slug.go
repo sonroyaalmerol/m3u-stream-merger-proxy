@@ -40,8 +40,8 @@ func storeSlugMapping(slug string, stream *StreamInfo) error {
 }
 
 func DecodeSlug(slug string) (*StreamInfo, error) {
-	lockSources()
-	defer unlockSources()
+	LockSources()
+	defer UnlockSources()
 
 	slugDir := config.GetCurrentSlugDirPath()
 	slugFile := filepath.Join(slugDir, slug)

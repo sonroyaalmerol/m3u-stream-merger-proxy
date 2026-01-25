@@ -116,8 +116,8 @@ func (p *M3UProcessor) clearOldResults() {
 
 func (p *M3UProcessor) GetResultPath() string {
 	if p.file == nil {
-		lockSources()
-		defer unlockSources()
+		LockSources()
+		defer UnlockSources()
 
 		path, err := config.GetLatestProcessedM3UPath()
 		if err != nil {
@@ -203,8 +203,8 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 }
 
 func (p *M3UProcessor) applyNewRemoteFiles() {
-	lockSources()
-	defer unlockSources()
+	LockSources()
+	defer UnlockSources()
 
 	indexes := utils.GetM3UIndexes()
 

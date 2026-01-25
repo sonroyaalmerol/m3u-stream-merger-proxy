@@ -37,7 +37,10 @@ func Initialize(ctx context.Context, logger logger.Logger, m3uHandler *handlers.
 		updateInstance.logger.Log("CLEAR_ON_BOOT enabled. Clearing current cache.")
 		sourceproc.ClearProcessedM3Us()
 	} else {
+		sourceproc.LockSources()
 		latestM3u, err := config.GetLatestProcessedM3UPath()
+		sourceproc.UnlockSources()
+
 		if err == nil {
 			m3uHandler.SetProcessedPath(latestM3u)
 		}

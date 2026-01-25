@@ -14,14 +14,14 @@ func init() {
 	lockFile = flock.New(config.GetLockFile())
 }
 
-func lockSources() {
+func LockSources() {
 	mu.Lock()
 	defer mu.Unlock()
 
 	_ = lockFile.Lock()
 }
 
-func unlockSources() {
+func UnlockSources() {
 	mu.Lock()
 	defer mu.Unlock()
 
