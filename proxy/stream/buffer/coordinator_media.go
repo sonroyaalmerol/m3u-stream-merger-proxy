@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"io"
 	"m3u-stream-merger/proxy"
+	"m3u-stream-merger/proxy/client"
 	"m3u-stream-merger/proxy/loadbalancer"
 	"time"
 )
 
-func (c *StreamCoordinator) StartMediaWriter(ctx context.Context, lbResult *loadbalancer.LoadBalancerResult) {
+func (c *StreamCoordinator) StartMediaWriter(ctx context.Context, lbResult *loadbalancer.LoadBalancerResult, streamC *client.StreamClient) {
 	defer func() {
 		c.LBResultOnWrite.Store(nil)
 		if r := recover(); r != nil {

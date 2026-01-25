@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"m3u-stream-merger/proxy"
+	"m3u-stream-merger/proxy/client"
 	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/utils"
 	"math"
@@ -31,7 +32,7 @@ type PlaylistMetadata struct {
 	IsMaster       bool
 }
 
-func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadbalancer.LoadBalancerResult) {
+func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadbalancer.LoadBalancerResult, streamC *client.StreamClient) {
 	defer func() {
 		c.LBResultOnWrite.Store(nil)
 		if r := recover(); r != nil {
@@ -88,7 +89,7 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 				return
 			}
 
-			resp, err := utils.CustomHttpRequest("GET", playlistURL)
+			resp, err := utils.CustomHttpRequest(streamC.Request, "GET", playlistURL)
 			if err != nil {
 				c.logger.Warnf("Failed to fetch playlist: %v", err)
 				lastErr = err
@@ -140,7 +141,7 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 			}
 
 			if metadata.IsEndlist {
-				err := c.processSegments(ctx, metadata.Segments)
+				err := c.processSegments(ctx, metadata.Segments, streamC)
 				if err != nil {
 					c.logger.Errorf("Error processing segments: %v", err)
 				}
@@ -152,7 +153,7 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 				lastChangeTime = time.Now()
 				newSegments := c.getNewSegments(metadata.Segments, lastMediaSeq, metadata.MediaSequence)
 
-				if err := c.processSegments(ctx, newSegments); err != nil {
+				if err := c.processSegments(ctx, newSegments, streamC); err != nil {
 					if ctx.Err() != nil {
 						writeErrorAndReturn(err, proxy.StatusServerError)
 						return
@@ -188,13 +189,13 @@ func (c *StreamCoordinator) getNewSegments(allSegments []string, lastSeq, curren
 	return allSegments[skipCount:]
 }
 
-func (c *StreamCoordinator) processSegments(ctx context.Context, segments []string) error {
+func (c *StreamCoordinator) processSegments(ctx context.Context, segments []string, streamC *client.StreamClient) error {
 	for _, segment := range segments {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			if err := c.streamSegment(ctx, segment); err != nil {
+			if err := c.streamSegment(ctx, segment, streamC); err != nil {
 				if err != io.EOF {
 					return err
 				}
@@ -204,8 +205,8 @@ func (c *StreamCoordinator) processSegments(ctx context.Context, segments []stri
 	return nil
 }
 
-func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string) error {
-	resp, err := utils.CustomHttpRequest("GET", segmentURL)
+func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string, streamC *client.StreamClient) error {
+	resp, err := utils.CustomHttpRequest(streamC.Request, "GET", segmentURL)
 	if err != nil {
 		return fmt.Errorf("Error fetching segment stream: %v", err)
 	}

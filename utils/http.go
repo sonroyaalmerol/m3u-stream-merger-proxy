@@ -18,7 +18,7 @@ var HTTPClient = &http.Client{
 	},
 }
 
-func CustomHttpRequest(method string, url string) (*http.Response, error) {
+func CustomHttpRequest(origReq *http.Request, method string, url string) (*http.Response, error) {
 	userAgent := GetEnv("USER_AGENT")
 	accept := GetEnv("HTTP_ACCEPT")
 
@@ -29,6 +29,16 @@ func CustomHttpRequest(method string, url string) (*http.Response, error) {
 
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", accept)
+
+	if origReq != nil {
+		for header, value := range origReq.Header {
+			req.Header.Del(header)
+
+			for _, v := range value {
+				req.Header.Add(header, v)
+			}
+		}
+	}
 
 	resp, err := HTTPClient.Do(req)
 	if err != nil {
