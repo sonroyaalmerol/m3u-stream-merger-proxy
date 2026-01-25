@@ -112,6 +112,7 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | M3U_URL_1, M3U_URL_2, M3U_URL_X | Set M3U URLs as environment variables.                  |   N/A            |   Any valid M3U URLs                                             |
 | M3U_MAX_CONCURRENCY_1, M3U_MAX_CONCURRENCY_2, M3U_MAX_CONCURRENCY_X | Set max concurrency. The "X" should match the M3U URL.                                 |  1             |   Any integer                                             |
 | USER_AGENT                  | Set the User-Agent of HTTP requests.                    | IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)    |  Any valid user agent        |
+| HTTP_ACCEPT                  | Set the Accept header of HTTP requests.                    | video/MP2T, */*    |  Any valid Accept value        |
 | SYNC_CRON                   | Set cron schedule expression of the background updates. | 0 0 * * *   |  Any valid cron expression    |
 | SYNC_ON_BOOT                | Set if an initial background syncing will be executed on boot | true    | true/false   |
 | CLEAR_ON_BOOT                | Set if an initial database clearing will be executed on boot | false   | true/false   |

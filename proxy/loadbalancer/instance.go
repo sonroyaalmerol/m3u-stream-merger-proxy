@@ -173,7 +173,7 @@ func (instance *LoadBalancerInstance) Balance(ctx context.Context, req *http.Req
 	for lap := 0; lap < instance.config.MaxRetries || instance.config.MaxRetries == 0; lap++ {
 		instance.logger.Debugf("Stream attempt %d out of %d", lap+1, instance.config.MaxRetries)
 
-		result, err := instance.tryAllStreams(ctx, req.Method, streamId)
+		result, err := instance.tryAllStreams(ctx, req, streamId)
 		if err == nil {
 			return result, nil
 		}
@@ -238,7 +238,7 @@ func (instance *LoadBalancerInstance) fetchBackendUrls(streamUrl string) error {
 	return nil
 }
 
-func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, method string, streamId string) (*LoadBalancerResult, error) {
+func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, req *http.Request, streamId string) (*LoadBalancerResult, error) {
 	instance.logger.Logf("Trying all stream urls for: %s", streamId)
 	if instance.indexProvider == nil {
 		return nil, fmt.Errorf("index provider cannot be nil")
@@ -276,7 +276,7 @@ func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, method 
 				continue
 			}
 
-			result, err := instance.tryStreamUrls(method, streamId, index, innerMap)
+			result, err := instance.tryStreamUrls(req, streamId, index, innerMap)
 			if err == nil {
 				return result, nil
 			}
@@ -293,7 +293,7 @@ func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, method 
 }
 
 func (instance *LoadBalancerInstance) tryStreamUrls(
-	method string,
+	req *http.Request,
 	streamId string,
 	index string,
 	urls map[string]string,
@@ -342,12 +342,21 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 		go func(subIndex, url, candidateId string) {
 			defer wg.Done()
 
-			req, err := http.NewRequest(method, url, nil)
+			req, err := http.NewRequest(req.Method, url, nil)
 			if err != nil {
 				instance.logger.Errorf("Error creating request: %s", err.Error())
 				instance.markTested(streamId, candidateId)
 				resultCh <- &streamTestResult{err: err}
 				return
+			}
+
+			if req != nil {
+				for header, value := range req.Header {
+					req.Header.Del(header)
+					for _, v := range value {
+						req.Header.Add(header, v)
+					}
+				}
 			}
 
 			// Do the HTTP request.
@@ -366,7 +375,7 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 			}
 			if resp.StatusCode != http.StatusOK {
 				instance.logger.Errorf("Non-200 status %d for %s %s",
-					resp.StatusCode, method, url)
+					resp.StatusCode, req.Method, url)
 				instance.markTested(streamId, candidateId)
 				resultCh <- &streamTestResult{
 					err: fmt.Errorf("non-200 status: %d", resp.StatusCode),

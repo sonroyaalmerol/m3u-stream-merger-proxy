@@ -21,15 +21,22 @@ func (c *StreamCoordinator) StartMediaWriter(ctx context.Context, lbResult *load
 
 	c.LBResultOnWrite.Store(lbResult)
 	c.WriterRespHeader.Store(nil)
-	c.respHeaderSet = make(chan struct{})
+	newHeaderChan := make(chan struct{})
+	c.respHeaderSet.Store(&newHeaderChan)
 
 	c.logger.Debug("StartMediaWriter: Beginning read loop")
 
-	c.cm.UpdateConcurrency(lbResult.Index, true)
+	if !c.cm.UpdateConcurrency(lbResult.Index, true) {
+		c.logger.Warnf("Failed to acquire concurrency slot for M3U_%s", lbResult.Index)
+		c.writeError(fmt.Errorf("concurrency limit reached"), proxy.StatusServerError)
+		return
+	}
 	defer c.cm.UpdateConcurrency(lbResult.Index, false)
 
 	c.WriterRespHeader.Store(&lbResult.Response.Header)
-	close(c.respHeaderSet)
+	if ch := c.respHeaderSet.Load(); ch != nil {
+		close(*ch)
+	}
 
 	err := c.readAndWriteStream(ctx, lbResult.Response.Body, func(b []byte) error {
 		chunk := newChunkData()
@@ -45,7 +52,7 @@ func (c *StreamCoordinator) StartMediaWriter(ctx context.Context, lbResult *load
 		case ctx.Err():
 			c.logger.Debug("StartWriter: Context cancelled")
 			c.writeError(ctx.Err(), proxy.StatusClientClosed)
-		case fmt.Errorf("stream timeout: no new segments"):
+		case ErrStreamTimeout:
 			c.writeError(nil, proxy.StatusServerError)
 		case io.EOF:
 			c.writeError(io.EOF, proxy.StatusEOF)
