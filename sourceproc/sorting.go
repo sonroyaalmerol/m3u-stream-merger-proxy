@@ -229,32 +229,38 @@ func (m *SortingManager) GetSortedEntries(callback func(*StreamInfo)) error {
 		}
 	}
 
-	sort.Slice(entries, func(i, j int) bool {
-		iStream := entries[i]
-		jStream := entries[j]
+		sort.Slice(entries, func(i, j int) bool {
+		tream := entries[i]
+		tream := entries[j]
 
-		var cmp int
+		r cmp int
 
-		switch m.sortingKey {
-		case "tvg-chno", "channel-id", "channel-number":
-			cmp = compareNumeric(iStream.TvgChNo, jStream.TvgChNo)
-		case "tvg-id":
+		itch m.sortingKey {
+		se "tvg-chno", "channel-id", "channel-number":
+			 compareNumeric(iStream.TvgChNo, jStream.TvgChNo)
+		se "tvg-id":
 			cmp = compareNumeric(iStream.TvgID, jStream.TvgID)
 		case "source":
 			cmp = compareNumeric(iStream.SourceM3U, jStream.SourceM3U)
 		case "tvg-group", "group-title":
-			cmp = strings.Compare(iStream.Group, jStream.Group)
+			cmp = strings.Compare(
+				strings.ToLower(iStream.Group),
+				strings.ToLower(jStream.Group))
 		case "tvg-type":
-			cmp = strings.Compare(iStream.TvgType, jStream.TvgType)
+			cmp = strings.Compare(
+				strings.ToLower(iStream.TvgType),
+				strings.ToLower(jStream.TvgType))
 		default: // Title
-			cmp = strings.Compare(iStream.Title, jStream.Title)
-		}
+			cmp = strings.Compare(
+				strings.ToLower(iStream.Title),
+				ToLower(jStream.Title))
+		
 
-		if m.sortingDir == "desc" {
-			return cmp > 0
-		}
-		return cmp < 0
-	})
+		 m.sortingDir == "desc" {
+			n cmp > 0
+		
+		turn cmp < 0
+		})
 
 	for _, entry := range entries {
 		callback(entry)
