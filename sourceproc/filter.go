@@ -6,12 +6,13 @@ import (
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
-	"m3u-stream-merger/utils/safemap"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 var (
@@ -61,7 +62,7 @@ func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
 		return nil, err
 	}
 
-	initInfo.URLs = safemap.New[string, map[string]string]()
+	initInfo.URLs = xsync.NewMapOf[string, map[string]string]()
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(utils.GetM3UIndexes()))
 
@@ -105,7 +106,7 @@ func loadStreamURLs(stream *StreamInfo, m3uIndex string) error {
 		return fmt.Errorf("error finding files for pattern %s: %v", globPattern, err)
 	}
 
-	stream.URLs.Set(m3uIndex, make(map[string]string))
+	stream.URLs.Store(m3uIndex, make(map[string]string))
 
 	for _, fileMatch := range fileMatches {
 		// Extract filename from path (works with sharded structure)

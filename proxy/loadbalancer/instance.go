@@ -8,27 +8,27 @@ import (
 	"m3u-stream-merger/sourceproc"
 	"m3u-stream-merger/store"
 	"m3u-stream-merger/utils"
-	"m3u-stream-merger/utils/safemap"
 	"net/http"
 	"path"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 type LoadBalancerInstance struct {
-	infoMu          sync.Mutex
-	info            *sourceproc.StreamInfo
-	Cm              *store.ConcurrencyManager
-	config          *LBConfig
-	httpClient      HTTPClient
-	healthClient    HTTPClient
-	logger          logger.Logger
-	indexProvider   IndexProvider
-	slugParser      SlugParser
-	testedIndexes   map[string][]string
-	testedIndexesMu sync.RWMutex
+	infoMu        sync.Mutex
+	info          *sourceproc.StreamInfo
+	Cm            *store.ConcurrencyManager
+	config        *LBConfig
+	httpClient    HTTPClient
+	healthClient  HTTPClient
+	logger        logger.Logger
+	indexProvider IndexProvider
+	slugParser    SlugParser
+	testedIndexes *xsync.MapOf[string, []string]
 }
 
 type LoadBalancerInstanceOption func(*LoadBalancerInstance)
@@ -70,7 +70,7 @@ func NewLoadBalancerInstance(
 		logger:        &logger.DefaultLogger{},
 		indexProvider: &DefaultIndexProvider{},
 		slugParser:    &DefaultSlugParser{},
-		testedIndexes: make(map[string][]string),
+		testedIndexes: xsync.NewMapOf[string, []string](),
 	}
 	instance.setHealthClient()
 
@@ -195,7 +195,11 @@ func (instance *LoadBalancerInstance) Balance(ctx context.Context, req *http.Req
 }
 
 func (instance *LoadBalancerInstance) GetNumTestedIndexes(streamId string) int {
-	return len(instance.testedIndexes[streamId])
+	streamTested, ok := instance.testedIndexes.Load(streamId)
+	if !ok {
+		return 0
+	}
+	return len(streamTested)
 }
 
 func (instance *LoadBalancerInstance) fetchBackendUrls(streamUrl string) error {
@@ -207,16 +211,16 @@ func (instance *LoadBalancerInstance) fetchBackendUrls(streamUrl string) error {
 	instance.logger.Debugf("Decoded slug: %v", stream)
 
 	if stream.URLs == nil {
-		stream.URLs = safemap.New[string, map[string]string]()
+		stream.URLs = xsync.NewMapOf[string, map[string]string]()
 	}
 	// Validate URLs map
-	if stream.URLs.Len() == 0 {
+	if stream.URLs.Size() == 0 {
 		return fmt.Errorf("stream has no URLs configured")
 	}
 
 	// Validate that at least one index has URLs
 	hasValidUrls := false
-	stream.URLs.ForEach(func(_ string, innerMap map[string]string) bool {
+	stream.URLs.Range(func(_ string, innerMap map[string]string) bool {
 		if len(innerMap) > 0 {
 			hasValidUrls = true
 			return false
@@ -265,7 +269,7 @@ func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, method 
 
 			done[index] = true
 
-			innerMap, ok := instance.GetStreamInfo().URLs.Get(index)
+			innerMap, ok := instance.GetStreamInfo().URLs.Load(index)
 			if !ok {
 				instance.logger.Errorf("Channel not found from M3U_%s: %s", index, instance.GetStreamInfo().Title)
 				continue
@@ -314,11 +318,13 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 			url = fileContentSplit[1]
 		}
 
-		candidateId := index + "|" + subIndex
+		id := index + "|" + subIndex
+		var alreadyTested bool
+		streamTested, ok := instance.testedIndexes.Load(streamId)
+		if ok {
+			alreadyTested = slices.Contains(streamTested, index+"|"+subIndex)
+		}
 
-		instance.testedIndexesMu.RLock()
-		alreadyTested := contains(instance.testedIndexes[streamId], candidateId)
-		instance.testedIndexesMu.RUnlock()
 		if alreadyTested {
 			instance.logger.Debugf(
 				"Skipping M3U_%s|%s: already tested", index, subIndex,
@@ -410,13 +416,12 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 }
 
 func (instance *LoadBalancerInstance) markTested(streamId string, id string) {
-	instance.testedIndexesMu.Lock()
-	instance.testedIndexes[streamId] = append(instance.testedIndexes[streamId], id)
-	instance.testedIndexesMu.Unlock()
+	instance.testedIndexes.Compute(streamId, func(val []string, _ bool) (newValue []string, delete bool) {
+		val = append(val, id)
+		return val, false
+	})
 }
 
 func (instance *LoadBalancerInstance) clearTested(streamId string) {
-	instance.testedIndexesMu.Lock()
-	instance.testedIndexes[streamId] = []string{}
-	instance.testedIndexesMu.Unlock()
+	instance.testedIndexes.Delete(streamId)
 }

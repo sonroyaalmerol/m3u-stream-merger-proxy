@@ -223,7 +223,7 @@ func (p *M3UProcessor) cleanFailedRemoteFiles() {
 }
 
 func (p *M3UProcessor) addStream(stream *StreamInfo) error {
-	if stream == nil || stream.URLs.Len() == 0 {
+	if stream == nil || stream.URLs.Size() == 0 {
 		return nil
 	}
 

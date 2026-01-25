@@ -4,13 +4,14 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/proxy/stream/config"
 	"m3u-stream-merger/store"
-	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 type StreamRegistry struct {
-	coordinators  sync.Map
+	coordinators  *xsync.MapOf[string, *StreamCoordinator]
 	logger        logger.Logger
 	config        *config.StreamConfig
 	cleanupTicker *time.Ticker
@@ -22,10 +23,11 @@ type StreamRegistry struct {
 
 func NewStreamRegistry(config *config.StreamConfig, cm *store.ConcurrencyManager, logger logger.Logger, cleanupInterval time.Duration) *StreamRegistry {
 	registry := &StreamRegistry{
-		logger: logger,
-		config: config,
-		cm:     cm,
-		done:   make(chan struct{}),
+		coordinators: xsync.NewMapOf[string, *StreamCoordinator](),
+		logger:       logger,
+		config:       config,
+		cm:           cm,
+		done:         make(chan struct{}),
 	}
 
 	if cleanupInterval > 0 {
@@ -55,14 +57,14 @@ func (r *StreamRegistry) GetOrCreateCoordinator(streamID string) *StreamCoordina
 	// }
 
 	if coord, ok := r.coordinators.Load(coordId); ok {
-		return coord.(*StreamCoordinator)
+		return coord
 	}
 
 	coord := NewStreamCoordinator(coordId, r.config, r.cm, r.logger)
 
 	actual, loaded := r.coordinators.LoadOrStore(coordId, coord)
 	if loaded {
-		return actual.(*StreamCoordinator)
+		return actual
 	}
 
 	return coord
@@ -87,9 +89,9 @@ func (r *StreamRegistry) runCleanup() {
 }
 
 func (r *StreamRegistry) cleanup() {
-	r.coordinators.Range(func(key, value interface{}) bool {
-		streamID := key.(string)
-		coord := value.(*StreamCoordinator)
+	r.coordinators.Range(func(key string, value *StreamCoordinator) bool {
+		streamID := key
+		coord := value
 
 		if atomic.LoadInt32(&coord.ClientCount) == 0 {
 			r.logger.Logf("Removing inactive coordinator for stream: %s", streamID)
@@ -101,8 +103,5 @@ func (r *StreamRegistry) cleanup() {
 
 func (r *StreamRegistry) Shutdown() {
 	close(r.done)
-	r.coordinators.Range(func(key, value interface{}) bool {
-		r.coordinators.Delete(key)
-		return true
-	})
+	r.coordinators.Clear()
 }
