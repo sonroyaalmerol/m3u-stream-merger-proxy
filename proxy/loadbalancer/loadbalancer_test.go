@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/sourceproc"
 	"m3u-stream-merger/store"
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -64,11 +66,13 @@ func (m *mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	if resp == nil {
 		return &http.Response{
 			StatusCode: http.StatusNotFound,
+			Body:       io.NopCloser(strings.NewReader("")),
 		}, nil
 	}
 
 	return &http.Response{
 		StatusCode: resp.StatusCode,
+		Body:       resp.Body,
 	}, nil
 }
 
@@ -89,12 +93,15 @@ func setupTestInstance(t *testing.T) (*LoadBalancerInstance, *mockHTTPClient, *m
 
 	client.responses["http://test1.com/stream"] = &http.Response{
 		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("dummy stream content")),
 	}
 	client.responses["http://test1.com/backup"] = &http.Response{
 		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("dummy backup content")),
 	}
 	client.responses["http://test2.com/stream"] = &http.Response{
 		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("dummy stream2 content")),
 	}
 
 	indexProvider := &mockIndexProvider{
@@ -208,7 +215,8 @@ func TestLoadBalancer(t *testing.T) {
 				client.responses = make(map[string]*http.Response)
 				client.errors = make(map[string]error)
 				client.responses["http://test1.com/stream"] = &http.Response{
-					StatusCode: 200,
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader("dummy stream content")),
 				}
 			},
 			expectErr:      false,
@@ -223,7 +231,8 @@ func TestLoadBalancer(t *testing.T) {
 				client.errors = make(map[string]error)
 				client.errors["http://test1.com/stream"] = errors.New("connection failed")
 				client.responses["http://test1.com/backup"] = &http.Response{
-					StatusCode: 200,
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader("dummy backup content")),
 				}
 			},
 			expectErr:      false,
@@ -290,8 +299,14 @@ func TestLoadBalancerWithHTTPStatusCodes(t *testing.T) {
 			name: "handles 301 redirect",
 			setupMocks: func(client *mockHTTPClient) {
 				client.responses = map[string]*http.Response{
-					"http://test1.com/stream": {StatusCode: 301},
-					"http://test1.com/backup": {StatusCode: 200},
+					"http://test1.com/stream": {
+						StatusCode: 301,
+						Body:       io.NopCloser(strings.NewReader("dummy status 301")),
+					},
+					"http://test1.com/backup": {
+						StatusCode: 200,
+						Body:       io.NopCloser(strings.NewReader("dummy backup")),
+					},
 				}
 			},
 			expectErr:   false,
@@ -301,8 +316,14 @@ func TestLoadBalancerWithHTTPStatusCodes(t *testing.T) {
 			name: "handles 404 not found",
 			setupMocks: func(client *mockHTTPClient) {
 				client.responses = map[string]*http.Response{
-					"http://test1.com/stream": {StatusCode: 404},
-					"http://test1.com/backup": {StatusCode: 200},
+					"http://test1.com/stream": {
+						StatusCode: 404,
+						Body:       io.NopCloser(strings.NewReader("dummy status 404")),
+					},
+					"http://test1.com/backup": {
+						StatusCode: 200,
+						Body:       io.NopCloser(strings.NewReader("dummy backup")),
+					},
 				}
 			},
 			expectErr:   false,
@@ -312,9 +333,18 @@ func TestLoadBalancerWithHTTPStatusCodes(t *testing.T) {
 			name: "all endpoints return 500",
 			setupMocks: func(client *mockHTTPClient) {
 				client.responses = map[string]*http.Response{
-					"http://test1.com/stream": {StatusCode: 500},
-					"http://test1.com/backup": {StatusCode: 500},
-					"http://test2.com/stream": {StatusCode: 500},
+					"http://test1.com/stream": {
+						StatusCode: 500,
+						Body:       io.NopCloser(strings.NewReader("dummy status 500")),
+					},
+					"http://test1.com/backup": {
+						StatusCode: 500,
+						Body:       io.NopCloser(strings.NewReader("dummy status 500")),
+					},
+					"http://test2.com/stream": {
+						StatusCode: 500,
+						Body:       io.NopCloser(strings.NewReader("dummy status 500")),
+					},
 				}
 			},
 			expectErr: true,
@@ -368,6 +398,7 @@ func TestLoadBalancerWithDifferentHTTPMethods(t *testing.T) {
 			client.errors = make(map[string]error)
 			client.responses["http://test1.com/stream"] = &http.Response{
 				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("dummy content")),
 			}
 			client.mu.Unlock()
 
@@ -394,6 +425,7 @@ func TestConcurrentAccess(t *testing.T) {
 	client.errors = make(map[string]error)
 	client.responses["http://test1.com/stream"] = &http.Response{
 		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("dummy stream content")),
 	}
 	client.mu.Unlock()
 
@@ -402,7 +434,7 @@ func TestConcurrentAccess(t *testing.T) {
 	wg.Add(numGoroutines)
 
 	results := make(chan string, numGoroutines)
-	errors := make(chan error, numGoroutines)
+	errorsCh := make(chan error, numGoroutines)
 
 	for i := 0; i < numGoroutines; i++ {
 		go func(id int) {
@@ -411,7 +443,7 @@ func TestConcurrentAccess(t *testing.T) {
 			ctx := context.Background()
 			result, err := instance.Balance(ctx, newTestRequest(http.MethodGet))
 			if err != nil {
-				errors <- fmt.Errorf("goroutine %d error: %v", id, err)
+				errorsCh <- fmt.Errorf("goroutine %d error: %v", id, err)
 				return
 			}
 			results <- result.URL
@@ -420,9 +452,9 @@ func TestConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 	close(results)
-	close(errors)
+	close(errorsCh)
 
-	for err := range errors {
+	for err := range errorsCh {
 		t.Errorf("Concurrent LoadBalancer() error: %v", err)
 	}
 
@@ -506,7 +538,8 @@ func TestSessionStatePersistence(t *testing.T) {
 		"http://test1.com/backup": errors.New("failure 2"),
 	}
 	client.responses["http://test2.com/stream"] = &http.Response{
-		StatusCode: 200,
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("dummy stream2 content")),
 	}
 
 	ctx := context.Background()
