@@ -75,9 +75,10 @@ type StreamCoordinator struct {
 	WriterCtxMu  sync.Mutex
 	WriterActive atomic.Bool
 
-	WriterRespHeader atomic.Pointer[http.Header]
-	respHeaderSet    chan struct{}
-	m3uHeaderSet     atomic.Bool
+	WriterRespHeader  atomic.Pointer[http.Header]
+	respHeaderSet     atomic.Pointer[chan struct{}]
+	m3uHeaderSet      atomic.Bool
+	respHeaderSetOnce sync.Once
 
 	LastError atomic.Value
 	logger    logger.Logger
@@ -121,16 +122,17 @@ func NewStreamCoordinator(streamID string, config *config.StreamConfig, cm *stor
 		r = r.Next()
 	}
 
+	respHeaderChan := make(chan struct{})
 	coord := &StreamCoordinator{
-		Buffer:        r,
-		WriterChan:    make(chan struct{}, 1),
-		logger:        logger,
-		config:        config,
-		cm:            cm,
-		streamID:      streamID,
-		broadcast:     make(chan struct{}),
-		respHeaderSet: make(chan struct{}),
+		Buffer:     r,
+		WriterChan: make(chan struct{}, 1),
+		logger:     logger,
+		config:     config,
+		cm:         cm,
+		streamID:   streamID,
+		broadcast:  make(chan struct{}),
 	}
+	coord.respHeaderSet.Store(&respHeaderChan)
 	atomic.StoreInt32(&coord.state, stateActive)
 	coord.LastError.Store((*ChunkData)(nil))
 
@@ -140,8 +142,13 @@ func NewStreamCoordinator(streamID string, config *config.StreamConfig, cm *stor
 }
 
 func (c *StreamCoordinator) WaitHeaders(ctx context.Context) {
+	ch := c.respHeaderSet.Load()
+	if ch == nil {
+		return // Headers channel not initialized
+	}
+
 	select {
-	case <-c.respHeaderSet:
+	case <-*ch:
 	case <-ctx.Done():
 	}
 }
@@ -154,12 +161,23 @@ func (c *StreamCoordinator) GetWriterLBResult() *loadbalancer.LoadBalancerResult
 // RegisterClient registers a new client and returns an error if the stream
 // is no longer active.
 func (c *StreamCoordinator) RegisterClient() error {
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
+
 	state := atomic.LoadInt32(&c.state)
+	clientCount := atomic.LoadInt32(&c.ClientCount)
 
 	// If stream is closed but there are no clients, allow reset
-	if state != stateActive && atomic.LoadInt32(&c.ClientCount) == 0 {
+	if state != stateActive && clientCount == 0 {
 		c.logger.Debug("Resetting closed stream to active state")
 		atomic.StoreInt32(&c.state, stateActive)
+
+		// Reset error state
+		c.LastError.Store((*ChunkData)(nil))
+
+		// Reset header channel
+		newHeaderChan := make(chan struct{})
+		c.respHeaderSet.Store(&newHeaderChan)
 	}
 
 	count := atomic.AddInt32(&c.ClientCount, 1)
@@ -405,7 +423,7 @@ func (c *StreamCoordinator) readAndWriteStream(
 			return ctx.Err()
 		default:
 			if c.shouldTimeout(lastSuccess, timeout) {
-				return fmt.Errorf("stream timeout: no new segments")
+				return ErrStreamTimeout
 			}
 
 			n, err := body.Read(buffer)

@@ -39,7 +39,9 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 
 	c.LBResultOnWrite.Store(lbResult)
 	c.WriterRespHeader.Store(nil)
-	c.respHeaderSet = make(chan struct{})
+
+	newHeaderChan := make(chan struct{})
+	c.respHeaderSet.Store(&newHeaderChan)
 	c.m3uHeaderSet.Store(false)
 	c.logger.Debug("StartHLSWriter: Beginning read loop")
 
@@ -71,7 +73,7 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 			// Check timeout first
 			if time.Since(lastChangeTime) > time.Duration(c.config.TimeoutSeconds)*time.Second+pollInterval {
 				c.logger.Debug("No sequence changes detected within timeout period")
-				c.writeError(fmt.Errorf("stream timeout: no new segments"), proxy.StatusEOF)
+				c.writeError(ErrStreamTimeout, proxy.StatusEOF)
 				return
 			}
 
@@ -189,7 +191,10 @@ func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string
 	if c.m3uHeaderSet.CompareAndSwap(false, true) {
 		resp.Header.Del("Content-Length")
 		c.WriterRespHeader.Store(&resp.Header)
-		close(c.respHeaderSet)
+
+		if ch := c.respHeaderSet.Load(); ch != nil {
+			close(*ch)
+		}
 	}
 
 	return c.readAndWriteStream(ctx, resp.Body, func(b []byte) error {
