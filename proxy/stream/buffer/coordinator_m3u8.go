@@ -2,7 +2,6 @@ package buffer
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +16,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+)
+
+const (
+	initialSegmentCap = 32
 )
 
 type PlaylistMetadata struct {
@@ -52,67 +55,78 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 	}
 	defer c.cm.UpdateConcurrency(lbResult.Index, false)
 
+	playlistURL := lbResult.Response.Request.URL.String()
+	lbResult.Response.Body.Close()
+
 	var lastErr error
 	lastChangeTime := time.Now()
-	lastMediaSeq := int64(-1)
-
-	// Start with a conservative polling rate
 	pollInterval := time.Second
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
+
+	writeErrorAndReturn := func(err error, status int) {
+		ticker.Stop()
+		c.writeError(err, status)
+	}
+
+	lastMediaSeq := c.lastProcessedSeq.Load()
 
 	for atomic.LoadInt32(&c.state) == stateActive {
 		select {
 		case <-ctx.Done():
 			if lastErr == nil {
 				c.logger.Debug("StartHLSWriter: Context cancelled")
-				c.writeError(ctx.Err(), proxy.StatusClientClosed)
+				writeErrorAndReturn(ctx.Err(), proxy.StatusClientClosed)
 			}
 			return
+
 		case <-ticker.C:
-			// Check timeout first
-			if time.Since(lastChangeTime) > time.Duration(c.config.TimeoutSeconds)*time.Second+pollInterval {
+			timeout := time.Duration(c.config.TimeoutSeconds)*time.Second + pollInterval
+			if time.Since(lastChangeTime) > timeout {
 				c.logger.Debug("No sequence changes detected within timeout period")
-				c.writeError(ErrStreamTimeout, proxy.StatusEOF)
+				writeErrorAndReturn(ErrStreamTimeout, proxy.StatusEOF)
 				return
 			}
 
-			// Copy response body for fallback
-			httpRequestBody := &bytes.Buffer{}
-			_, err := io.Copy(httpRequestBody, lbResult.Response.Body)
+			resp, err := utils.CustomHttpRequest("GET", playlistURL)
 			if err != nil {
-				c.writeError(err, proxy.StatusServerError)
-				return
+				c.logger.Warnf("Failed to fetch playlist: %v", err)
+				lastErr = err
+				continue // Retry on next tick
 			}
 
-			lbResult.Response.Body.Close()
+			if resp == nil {
+				c.logger.Warn("Received nil response from HTTP client")
+				continue
+			}
 
-			byteClone := bytes.Clone(httpRequestBody.Bytes())
-			requestBodyClone := bytes.NewBuffer(byteClone)
+			if resp.StatusCode != http.StatusOK {
+				resp.Body.Close()
+				c.logger.Warnf("Non-200 status for playlist: %d", resp.StatusCode)
+				lastErr = fmt.Errorf("playlist returned status %d", resp.StatusCode)
+				continue
+			}
 
-			lbResult.Response.Body = io.NopCloser(httpRequestBody)
-			m3uPlaylist, err := io.ReadAll(requestBodyClone)
+			m3uPlaylist, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+
 			if err != nil {
-				c.writeError(err, proxy.StatusServerError)
-				return
+				c.logger.Warnf("Failed to read playlist body: %v", err)
+				lastErr = err
+				continue
 			}
 
-			mediaURL := lbResult.Response.Request.URL.String()
-			metadata, err := c.parsePlaylist(mediaURL, string(m3uPlaylist))
+			metadata, err := c.parsePlaylist(playlistURL, string(m3uPlaylist))
 			if err != nil {
-				c.writeError(err, proxy.StatusServerError)
-				return
+				c.logger.Warnf("Failed to parse playlist: %v", err)
+				lastErr = err
+				continue
 			}
 
-			// Update polling rate based on target duration
 			if metadata.TargetDuration > 0 {
-				// HLS spec recommends polling at no less than target duration / 2
 				newInterval := time.Duration(metadata.TargetDuration * float64(time.Second) / 2)
-
-				// Add a small random jitter (±10%) to prevent thundering herd
 				jitter := time.Duration(float64(newInterval) * (0.9 + 0.2*rand.Float64()))
 
-				// Only update if significantly different (>10% change)
 				if math.Abs(float64(jitter-pollInterval)) > float64(pollInterval)*0.1 {
 					pollInterval = jitter
 					ticker.Reset(pollInterval)
@@ -121,35 +135,57 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 			}
 
 			if metadata.IsMaster {
-				c.writeError(fmt.Errorf("master playlist not supported"), proxy.StatusServerError)
+				writeErrorAndReturn(fmt.Errorf("master playlist not supported"), proxy.StatusServerError)
 				return
 			}
 
 			if metadata.IsEndlist {
-				// Process remaining segments before ending
-				err = c.processSegments(ctx, metadata.Segments)
+				err := c.processSegments(ctx, metadata.Segments)
 				if err != nil {
 					c.logger.Errorf("Error processing segments: %v", err)
 				}
-				c.writeError(io.EOF, proxy.StatusEOF)
+				writeErrorAndReturn(io.EOF, proxy.StatusEOF)
 				return
 			}
 
 			if metadata.MediaSequence > lastMediaSeq {
 				lastChangeTime = time.Now()
-				lastMediaSeq = metadata.MediaSequence
+				newSegments := c.getNewSegments(metadata.Segments, lastMediaSeq, metadata.MediaSequence)
 
-				if err := c.processSegments(ctx, metadata.Segments); err != nil {
+				if err := c.processSegments(ctx, newSegments); err != nil {
 					if ctx.Err() != nil {
-						c.writeError(err, proxy.StatusServerError)
+						writeErrorAndReturn(err, proxy.StatusServerError)
 						return
 					}
 					lastErr = err
+				} else {
+					lastMediaSeq = metadata.MediaSequence
+					c.lastProcessedSeq.Store(lastMediaSeq)
+					lastErr = nil // Clear error on success
 				}
 			}
-
 		}
 	}
+}
+
+func (c *StreamCoordinator) getNewSegments(allSegments []string, lastSeq, currentSeq int64) []string {
+	if lastSeq < 0 {
+		return allSegments
+	}
+
+	segmentCount := int64(len(allSegments))
+	seqDiff := currentSeq - lastSeq
+
+	if seqDiff <= 0 || seqDiff >= segmentCount {
+		return allSegments
+	}
+
+	skipCount := segmentCount - seqDiff
+	if skipCount < 0 {
+		skipCount = 0
+	}
+
+	return allSegments[skipCount:]
 }
 
 func (c *StreamCoordinator) processSegments(ctx context.Context, segments []string) error {
@@ -211,8 +247,8 @@ func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string
 
 func (c *StreamCoordinator) parsePlaylist(mediaURL string, content string) (*PlaylistMetadata, error) {
 	metadata := &PlaylistMetadata{
-		Segments:       make([]string, 0, 32),
-		TargetDuration: 2, // Default target duration as fallback
+		Segments:       make([]string, 0, initialSegmentCap),
+		TargetDuration: 2,
 	}
 
 	base, err := url.Parse(mediaURL)

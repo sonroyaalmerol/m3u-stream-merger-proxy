@@ -75,10 +75,9 @@ type StreamCoordinator struct {
 	WriterCtxMu  sync.Mutex
 	WriterActive atomic.Bool
 
-	WriterRespHeader  atomic.Pointer[http.Header]
-	respHeaderSet     atomic.Pointer[chan struct{}]
-	m3uHeaderSet      atomic.Bool
-	respHeaderSetOnce sync.Once
+	WriterRespHeader atomic.Pointer[http.Header]
+	respHeaderSet    atomic.Pointer[chan struct{}]
+	m3uHeaderSet     atomic.Bool
 
 	LastError atomic.Value
 	logger    logger.Logger
@@ -91,7 +90,8 @@ type StreamCoordinator struct {
 	// state represents active, draining, or closed.
 	state int32
 
-	LBResultOnWrite atomic.Pointer[loadbalancer.LoadBalancerResult]
+	LBResultOnWrite  atomic.Pointer[loadbalancer.LoadBalancerResult]
+	lastProcessedSeq atomic.Int64
 
 	// writeSeq is an atomic counter to track the order of chunks.
 	writeSeq int64
