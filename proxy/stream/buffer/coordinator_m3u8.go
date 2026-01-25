@@ -167,12 +167,7 @@ func (c *StreamCoordinator) processSegments(ctx context.Context, segments []stri
 }
 
 func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string) error {
-	req, err := http.NewRequest("GET", segmentURL, nil)
-	if err != nil {
-		return fmt.Errorf("Error creating request to segment: %v", err)
-	}
-
-	resp, err := utils.HTTPClient.Do(req)
+	resp, err := utils.CustomHttpRequest("GET", segmentURL)
 	if err != nil {
 		return fmt.Errorf("Error fetching segment stream: %v", err)
 	}

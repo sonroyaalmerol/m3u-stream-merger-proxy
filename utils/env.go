@@ -11,19 +11,24 @@ import (
 func GetEnv(env string) string {
 	switch env {
 	case "USER_AGENT":
-		// Set the custom User-Agent header
 		userAgent, exists := os.LookupEnv("USER_AGENT")
 		if !exists {
 			userAgent = "IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)"
 		}
 		return userAgent
+	case "HTTP_ACCEPT":
+		accept, exists := os.LookupEnv("HTTP_ACCEPT")
+		if !exists {
+			accept = "video/MP2T, */*"
+		}
+		return accept
 	default:
 		return ""
 	}
 }
 
 var (
-	m3uIndexes         []string
+	m3uIndexes     []string
 	m3uIndexesOnce = new(sync.Once)
 )
 

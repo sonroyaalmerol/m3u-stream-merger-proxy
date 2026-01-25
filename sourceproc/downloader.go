@@ -107,14 +107,7 @@ func handleRemoteURL(m3uURL, idx string, result *SourceDownloaderResult) {
 		}
 	}
 
-	req, err := http.NewRequest("GET", m3uURL, nil)
-	if err != nil {
-		logger.Default.Warnf("Error creating HTTP request for index %s: %v", idx, err)
-		useFallback(fmt.Errorf("error creating HTTP request: %v", err))
-		return
-	}
-
-	resp, err := utils.HTTPClient.Do(req)
+	resp, err := utils.CustomHttpRequest("GET", m3uURL)
 	if err != nil {
 		logger.Default.Warnf("HTTP request error for index %s: %v", idx, err)
 		useFallback(fmt.Errorf("HTTP request error: %v", err))

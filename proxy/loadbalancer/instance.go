@@ -350,6 +350,12 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 				return
 			}
 
+			userAgent := utils.GetEnv("USER_AGENT")
+			accept := utils.GetEnv("HTTP_ACCEPT")
+
+			req.Header.Set("User-Agent", userAgent)
+			req.Header.Set("Accept", accept)
+
 			// Do the HTTP request.
 			resp, err := instance.healthClient.Do(req)
 			if err != nil {

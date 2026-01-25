@@ -10,23 +10,25 @@ import (
 var HTTPClient = &http.Client{
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		userAgent := GetEnv("USER_AGENT")
+		accept := GetEnv("HTTP_ACCEPT")
 
-		// Follow redirects while preserving the custom User-Agent header
 		req.Header.Set("User-Agent", userAgent)
+		req.Header.Set("Accept", accept)
 		return nil
 	},
 }
 
 func CustomHttpRequest(method string, url string) (*http.Response, error) {
 	userAgent := GetEnv("USER_AGENT")
+	accept := GetEnv("HTTP_ACCEPT")
 
-	// Create a new HTTP client with a custom User-Agent header
 	req, err := http.NewRequest(method, url, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", accept)
 
 	resp, err := HTTPClient.Do(req)
 	if err != nil {

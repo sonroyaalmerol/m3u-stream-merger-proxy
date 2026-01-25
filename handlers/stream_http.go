@@ -156,7 +156,7 @@ func (h *StreamHTTPHandler) handleSegmentStream(streamClient *client.StreamClien
 		return
 	}
 
-	resp, err := utils.HTTPClient.Get(segment.URL)
+	resp, err := utils.CustomHttpRequest("GET", segment.URL)
 	if err != nil {
 		h.logger.Errorf("Failed to fetch URL: %v", err)
 		_ = streamClient.WriteHeader(http.StatusInternalServerError)
