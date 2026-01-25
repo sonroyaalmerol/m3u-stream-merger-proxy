@@ -137,6 +137,9 @@ func loadStreamURLs(stream *StreamInfo, m3uIndex string) error {
 		}
 
 		_, _ = stream.URLs.Compute(m3uIndex, func(oldValue map[string]string, loaded bool) (newValue map[string]string, del bool) {
+			if oldValue == nil {
+				oldValue = make(map[string]string)
+			}
 			oldValue[parts[1]] = strings.TrimSpace(fmt.Sprintf("%s:::%s", urlIndex, string(url)))
 			return oldValue, false
 		})
