@@ -1,92 +1,61 @@
 package sourceproc
 
 import (
-	"bytes"
 	"encoding/base64"
 	"fmt"
-	"io"
-	"sync"
+	"os"
+	"path/filepath"
 
+	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
 
 	"github.com/goccy/go-json"
-	"github.com/klauspost/compress/zstd"
-	"github.com/puzpuzpuz/xsync/v3"
+	"golang.org/x/crypto/sha3"
 )
-
-var (
-	encoderPool sync.Pool
-	decoderPool sync.Pool
-)
-
-func init() {
-	encoderPool = sync.Pool{
-		New: func() interface{} {
-			encoder, err := zstd.NewWriter(nil)
-			if err != nil {
-				logger.Default.Debugf("Error creating zstd encoder: %v", err)
-				return nil
-			}
-			return encoder
-		},
-	}
-
-	decoderPool = sync.Pool{
-		New: func() interface{} {
-			decoder, err := zstd.NewReader(nil)
-			if err != nil {
-				logger.Default.Debugf("Error creating zstd decoder: %v", err)
-				return nil
-			}
-			return decoder
-		},
-	}
-}
 
 func EncodeSlug(stream *StreamInfo) string {
-	jsonData, err := json.Marshal(stream)
-	if err != nil {
-		logger.Default.Debugf("Error json marshal for slug: %v", err)
-		return ""
+	h := sha3.Sum224([]byte(stream.Title))
+	slug := base64.RawURLEncoding.EncodeToString(h[:])
+
+	if err := storeSlugMapping(slug, stream); err != nil {
+		logger.Default.Warnf("Failed to store slug mapping: %v", err)
 	}
 
-	encoder := encoderPool.Get().(*zstd.Encoder)
-	defer encoderPool.Put(encoder)
-	encoder.Reset(nil)
-
-	var compressedData bytes.Buffer
-	encoder.Reset(&compressedData)
-
-	if _, err := encoder.Write(jsonData); err != nil {
-		logger.Default.Debugf("Error zstd compression for slug: %v", err)
-		return ""
-	}
-	encoder.Close()
-
-	encodedData := base64.RawURLEncoding.EncodeToString(compressedData.Bytes())
-	return encodedData
+	return slug
 }
 
-func DecodeSlug(encodedSlug string) (*StreamInfo, error) {
-	decodedData, err := base64.RawURLEncoding.DecodeString(encodedSlug)
+func storeSlugMapping(slug string, stream *StreamInfo) error {
+	slugDir := config.GetNewSlugDirPath()
+	if err := os.MkdirAll(slugDir, 0755); err != nil {
+		return err
+	}
+
+	data, err := json.Marshal(stream)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding Base64 data: %v", err)
+		return err
 	}
 
-	decoder := decoderPool.Get().(*zstd.Decoder)
-	defer decoderPool.Put(decoder)
-	_ = decoder.Reset(bytes.NewReader(decodedData))
+	slugFile := filepath.Join(slugDir, slug)
+	return os.WriteFile(slugFile, data, 0644)
+}
 
-	decompressedData, err := io.ReadAll(decoder)
+func DecodeSlug(slug string) (*StreamInfo, error) {
+	LockSources()
+	defer UnlockSources()
+
+	slugDir := config.GetCurrentSlugDirPath()
+	slugFile := filepath.Join(slugDir, slug)
+
+	data, err := os.ReadFile(slugFile)
 	if err != nil {
-		return nil, fmt.Errorf("error reading decompressed data: %v", err)
+		return nil, fmt.Errorf("slug not found: %v", err)
 	}
 
-	var result StreamInfo
-	if err := json.Unmarshal(decompressedData, &result); err != nil {
-		return nil, fmt.Errorf("error deserializing data: %v", err)
+	var info StreamInfo
+
+	if err := json.Unmarshal(data, &info); err != nil {
+		return nil, fmt.Errorf("error deserializing slug data: %v", err)
 	}
 
-	result.URLs = xsync.NewMapOf[string, map[string]string]()
-	return &result, nil
+	return &info, nil
 }
