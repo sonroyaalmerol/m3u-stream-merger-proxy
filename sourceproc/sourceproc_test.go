@@ -299,36 +299,146 @@ func TestSortingVariations(t *testing.T) {
 		name      string
 		key       string
 		direction string
-		validate  func(t *testing.T, content string)
+		validate  func(t *testing.T, streams []testStreamInfo)
 	}{
 		{
 			name:      "sort by name ascending",
 			key:       "",
 			direction: "asc",
-			validate: func(t *testing.T, content string) {
-				lastFoundIdx := -1
-				channels := []string{"BBC News", "CNN US", "Discovery Channel", "Disney Channel"}
-				for _, channel := range channels {
-					idx := strings.Index(content, channel)
-					assert.Greater(t, idx, lastFoundIdx,
-						"channel %s should come after previous channel", channel)
-					lastFoundIdx = idx
+			validate: func(t *testing.T, streams []testStreamInfo) {
+				// Verify ALL channels are in ascending alphabetical order
+				for i := 1; i < len(streams); i++ {
+					assert.LessOrEqual(t,
+						strings.ToLower(streams[i-1].name),
+						strings.ToLower(streams[i].name),
+						"Channel '%s' should come before '%s' in ascending order",
+						streams[i-1].name, streams[i].name)
 				}
+			},
+		},
+		{
+			name:      "sort by name descending",
+			key:       "",
+			direction: "desc",
+			validate: func(t *testing.T, streams []testStreamInfo) {
+				// Verify ALL channels are in descending alphabetical order
+				for i := 1; i < len(streams); i++ {
+					assert.GreaterOrEqual(t,
+						strings.ToLower(streams[i-1].name),
+						strings.ToLower(streams[i].name),
+						"Channel '%s' should come after '%s' in descending order",
+						streams[i-1].name, streams[i].name)
+				}
+			},
+		},
+		{
+			name:      "sort by channel number ascending",
+			key:       "tvg-chno",
+			direction: "asc",
+			validate: func(t *testing.T, streams []testStreamInfo) {
+				// Verify ALL channel numbers are in ascending order
+				var numbers []int
+				for _, s := range streams {
+					num, err := strconv.Atoi(s.chno)
+					require.NoError(t, err, "Channel number should be numeric: %s", s.chno)
+					numbers = append(numbers, num)
+				}
+
+				for i := 1; i < len(numbers); i++ {
+					assert.LessOrEqual(t, numbers[i-1], numbers[i],
+						"Channel number %d should come before %d in ascending order",
+						numbers[i-1], numbers[i])
+				}
+
+				// Verify we have all expected numbers in order
+				expectedNumbers := []int{1, 2, 100, 101, 200, 201, 300, 301, 400, 401, 500, 501, 600, 601, 602}
+				assert.Equal(t, expectedNumbers, numbers, "Should have all expected channel numbers in ascending order")
 			},
 		},
 		{
 			name:      "sort by channel number descending",
 			key:       "tvg-chno",
 			direction: "desc",
-			validate: func(t *testing.T, content string) {
-				numbers := []string{"602", "601", "600", "501", "500"}
-				lastFoundIdx := -1
-				for _, num := range numbers {
-					idx := strings.Index(content, fmt.Sprintf(`tvg-chno="%s"`, num))
-					assert.Greater(t, idx, lastFoundIdx,
-						"channel number %s should appear before a lower one", num)
-					lastFoundIdx = idx
+			validate: func(t *testing.T, streams []testStreamInfo) {
+				// Verify ALL channel numbers are in descending order
+				var numbers []int
+				for _, s := range streams {
+					num, err := strconv.Atoi(s.chno)
+					require.NoError(t, err, "Channel number should be numeric: %s", s.chno)
+					numbers = append(numbers, num)
 				}
+
+				for i := 1; i < len(numbers); i++ {
+					assert.GreaterOrEqual(t, numbers[i-1], numbers[i],
+						"Channel number %d should come after %d in descending order",
+						numbers[i-1], numbers[i])
+				}
+
+				// Verify we have all expected numbers in reverse order
+				expectedNumbers := []int{602, 601, 600, 501, 500, 401, 400, 301, 300, 201, 200, 101, 100, 2, 1}
+				assert.Equal(t, expectedNumbers, numbers, "Should have all expected channel numbers in descending order")
+			},
+		},
+		{
+			name:      "sort by group ascending",
+			key:       "tvg-group",
+			direction: "asc",
+			validate: func(t *testing.T, streams []testStreamInfo) {
+				// Verify ALL groups are in alphabetical order
+				for i := 1; i < len(streams); i++ {
+					assert.LessOrEqual(t,
+						strings.ToLower(streams[i-1].group),
+						strings.ToLower(streams[i].group),
+						"Group '%s' should come before '%s' in ascending order",
+						streams[i-1].group, streams[i].group)
+				}
+
+				// Verify expected group order
+				expectedGroupOrder := []string{
+					"Documentary", "Documentary", // 2 channels
+					"Entertainment", "Entertainment", // 2 channels
+					"Kids", "Kids", // 2 channels
+					"Movies", "Movies", // 2 channels
+					"Music", "Music", "Music", // 3 channels
+					"News", "News", // 2 channels
+					"Sports", "Sports", // 2 channels
+				}
+				actualGroups := make([]string, len(streams))
+				for i, s := range streams {
+					actualGroups[i] = s.group
+				}
+				assert.Equal(t, expectedGroupOrder, actualGroups, "Groups should be in alphabetical order")
+			},
+		},
+		{
+			name:      "sort by group descending",
+			key:       "tvg-group",
+			direction: "desc",
+			validate: func(t *testing.T, streams []testStreamInfo) {
+				// Verify ALL groups are in reverse alphabetical order
+				for i := 1; i < len(streams); i++ {
+					assert.GreaterOrEqual(t,
+						strings.ToLower(streams[i-1].group),
+						strings.ToLower(streams[i].group),
+						"Group '%s' should come after '%s' in descending order",
+						streams[i-1].group, streams[i].group)
+				}
+
+				// Verify expected group order (reverse)
+				expectedGroupOrder := []string{
+					"Sports", "Sports", // 2 channels
+					"News", "News", // 2 channels
+					"Music", "Music", "Music", // 3 channels
+					"Movies", "Movies", // 2 channels
+					"Kids", "Kids", // 2 channels
+					"Entertainment", "Entertainment", // 2 channels
+					"Documentary", "Documentary", // 2 channels
+				}
+				actualGroups := make([]string, len(streams))
+				for i, s := range streams {
+					actualGroups[i] = s.group
+				}
+				assert.Equal(t, expectedGroupOrder, actualGroups, "Groups should be in reverse alphabetical order")
 			},
 		},
 	}
@@ -338,9 +448,13 @@ func TestSortingVariations(t *testing.T) {
 			cleanup := setupTestEnvironment(t)
 			defer cleanup()
 
-			// Set sorting environment variables.
+			// Set sorting environment variables
 			os.Setenv("SORTING_KEY", tt.key)
 			os.Setenv("SORTING_DIRECTION", tt.direction)
+			defer func() {
+				os.Unsetenv("SORTING_KEY")
+				os.Unsetenv("SORTING_DIRECTION")
+			}()
 
 			req := httptest.NewRequest(http.MethodGet, "http://example.com", nil)
 			processor := NewProcessor()
@@ -351,9 +465,12 @@ func TestSortingVariations(t *testing.T) {
 			require.NoError(t, err)
 
 			content, err := os.ReadFile(processor.GetResultPath())
-
 			require.NoError(t, err)
-			tt.validate(t, string(content))
+
+			streams := parseM3UContent(string(content))
+			require.Equal(t, 15, len(streams), "Should have 15 channels")
+
+			tt.validate(t, streams)
 		})
 	}
 }
