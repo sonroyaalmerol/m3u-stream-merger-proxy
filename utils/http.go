@@ -27,17 +27,31 @@ func CustomHttpRequest(origReq *http.Request, method string, url string) (*http.
 		return nil, err
 	}
 
-	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Accept", accept)
+	origHasUA := false
+	origHasAccept := false
 
 	if origReq != nil {
-		for header, value := range origReq.Header {
-			req.Header.Del(header)
+		for header, values := range origReq.Header {
+			canonicalHeader := http.CanonicalHeaderKey(header)
 
-			for _, v := range value {
+			switch canonicalHeader {
+			case "User-Agent":
+				origHasUA = true
+			case "Accept":
+				origHasAccept = true
+			}
+
+			for _, v := range values {
 				req.Header.Add(header, v)
 			}
 		}
+	}
+
+	if !origHasUA {
+		req.Header.Set("User-Agent", userAgent)
+	}
+	if !origHasAccept {
+		req.Header.Set("Accept", accept)
 	}
 
 	resp, err := HTTPClient.Do(req)

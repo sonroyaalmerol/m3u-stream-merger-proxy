@@ -302,6 +302,9 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 		return nil, fmt.Errorf("HTTP client cannot be nil")
 	}
 
+	userAgent := utils.GetEnv("USER_AGENT")
+	accept := utils.GetEnv("HTTP_ACCEPT")
+
 	sortedSubIndexes := sourceprocSortStreamSubUrls(urls)
 
 	var wg sync.WaitGroup
@@ -342,7 +345,11 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 		go func(subIndex, url, candidateId string) {
 			defer wg.Done()
 
-			req, err := http.NewRequest(req.Method, url, nil)
+			origHasUA := false
+			origHasAccept := false
+			originalHeaders := req.Header.Clone()
+
+			newReq, err := http.NewRequest(req.Method, url, nil)
 			if err != nil {
 				instance.logger.Errorf("Error creating request: %s", err.Error())
 				instance.markTested(streamId, candidateId)
@@ -350,17 +357,30 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 				return
 			}
 
-			if req != nil {
-				for header, value := range req.Header {
-					req.Header.Del(header)
-					for _, v := range value {
-						req.Header.Add(header, v)
-					}
+			for header, values := range originalHeaders {
+				canonicalHeader := http.CanonicalHeaderKey(header)
+
+				switch canonicalHeader {
+				case "User-Agent":
+					origHasUA = true
+				case "Accept":
+					origHasAccept = true
+				}
+
+				for _, v := range values {
+					newReq.Header.Add(header, v)
 				}
 			}
 
+			if !origHasUA {
+				newReq.Header.Set("User-Agent", userAgent)
+			}
+			if !origHasAccept {
+				newReq.Header.Set("Accept", accept)
+			}
+
 			// Do the HTTP request.
-			resp, err := instance.healthClient.Do(req)
+			resp, err := instance.healthClient.Do(newReq)
 			if err != nil {
 				instance.logger.Errorf("Error fetching stream: %s", err.Error())
 				instance.markTested(streamId, candidateId)
