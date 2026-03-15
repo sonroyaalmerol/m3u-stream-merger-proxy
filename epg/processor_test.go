@@ -404,3 +404,42 @@ func TestDecompressIfNeeded_GzipByURL(t *testing.T) {
 		t.Errorf("decompressed content missing expected data, got: %s", got)
 	}
 }
+
+// TestProcessor_Run_DecompressionBombRejected verifies that a gzip-compressed
+// source whose decompressed size exceeds the size limit is rejected rather than
+// written to disk, preventing a decompression-bomb DoS.
+func TestProcessor_Run_DecompressionBombRejected(t *testing.T) {
+	setupTestConfig(t)
+
+	// Override the package-level limit to 1 byte so any real payload triggers it.
+	origMax := maxEPGBytes
+	maxEPGBytes = 1
+	t.Cleanup(func() { maxEPGBytes = origMax })
+
+	bigBody := xmltvSource(
+		[]xmlChannel{{ID: "bomb", DisplayName: "Bomb"}},
+		[]xmlProgramme{{Channel: "bomb", Title: "Boom"}},
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Write(gzipBytes(t, bigBody))
+	}))
+	defer srv.Close()
+
+	t.Setenv("EPG_URL_1", srv.URL+"/epg.xml.gz")
+	utils.ResetCaches()
+
+	p := NewProcessor(logger.Default)
+	err := p.Run(context.Background())
+
+	// With only one source and no cached fallback, Run must return an error.
+	if err == nil {
+		t.Error("expected Run to fail when decompressed size exceeds limit, got nil")
+	}
+
+	// The merged EPG file must not have been created.
+	if _, statErr := os.Stat(config.GetEPGPath()); statErr == nil {
+		t.Error("merged EPG file should not exist after a bomb rejection")
+	}
+}

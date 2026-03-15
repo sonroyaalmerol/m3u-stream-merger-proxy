@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -16,6 +17,22 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
 )
+
+// defaultMaxEPGMB is the upper bound on a decompressed EPG file when
+// EPG_MAX_SIZE_MB is not set.  500 MB comfortably covers large full-day guides
+// while preventing a decompression bomb from filling the disk.
+const defaultMaxEPGMB = 500
+
+// maxEPGBytes returns the decompression size limit in bytes, reading
+// EPG_MAX_SIZE_MB from the environment and falling back to defaultMaxEPGMB.
+var maxEPGBytes = func() int64 {
+	if v := os.Getenv("EPG_MAX_SIZE_MB"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			return n * 1024 * 1024
+		}
+	}
+	return defaultMaxEPGMB * 1024 * 1024
+}()
 
 // Processor downloads EPG sources and merges them into a single XMLTV file.
 type Processor struct {
@@ -128,12 +145,20 @@ func (p *Processor) downloadSource(ctx context.Context, idx string) (string, err
 	}
 	defer body.Close()
 
-	if _, err := io.Copy(f, body); err != nil {
-		f.Close()
+	// Guard against decompression bombs: cap the amount written to disk.
+	// LimitReader returns EOF after maxEPGBytes, so we detect the breach by
+	// comparing the byte count against the limit after the copy.
+	limited := io.LimitReader(body, maxEPGBytes+1)
+	n, err := io.Copy(f, limited)
+	f.Close()
+	if err != nil {
 		os.Remove(tmpPath)
 		return p.fallback(finalPath, fmt.Errorf("write: %w", err))
 	}
-	f.Close()
+	if n > maxEPGBytes {
+		os.Remove(tmpPath)
+		return p.fallback(finalPath, fmt.Errorf("EPG source exceeds maximum allowed size (%d MB)", maxEPGBytes/1024/1024))
+	}
 
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		// Couldn't rename — use the tmp file directly.
