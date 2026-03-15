@@ -101,12 +101,45 @@ func GetFilters(baseEnv string) []string {
 	return envFilters
 }
 
+var (
+	epgChannelMappings     map[string]string
+	epgChannelMappingsOnce = new(sync.Once)
+)
+
+// GetEPGChannelMappings returns a map of EPG channel id → M3U tvg-id built from
+// EPG_CHANNEL_MAP_X environment variables.  Each variable must be of the form
+// "m3u_tvg_id=epg_channel_id".  The returned map is keyed by the EPG id.
+func GetEPGChannelMappings() map[string]string {
+	epgChannelMappingsOnce.Do(func() {
+		epgChannelMappings = make(map[string]string)
+		for _, env := range os.Environ() {
+			pair := strings.SplitN(env, "=", 2)
+			if _, ok := strings.CutPrefix(pair[0], "EPG_CHANNEL_MAP_"); !ok {
+				continue
+			}
+			if len(pair) < 2 {
+				continue
+			}
+			// value format: "m3u_tvg_id=epg_channel_id"
+			parts := strings.SplitN(pair[1], "=", 2)
+			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+				continue
+			}
+			epgChannelMappings[parts[1]] = parts[0] // epgID → tvgID
+		}
+	})
+	return epgChannelMappings
+}
+
 func ResetCaches() {
 	m3uIndexesOnce = new(sync.Once)
 	m3uIndexes = nil
 
 	epgIndexesOnce = new(sync.Once)
 	epgIndexes = nil
+
+	epgChannelMappingsOnce = new(sync.Once)
+	epgChannelMappings = nil
 
 	filterMutex.Lock()
 	filters = make(map[string][]string)

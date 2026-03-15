@@ -115,7 +115,7 @@ func TestMergeXMLTV_Basic(t *testing.T) {
 		[]xmlProgramme{{Channel: "ch2", Title: "Show B"}},
 	)), 0644)
 
-	if err := mergeXMLTV([]string{src1, src2}, out, nil); err != nil {
+	if err := mergeXMLTV([]string{src1, src2}, out, nil, nil); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
@@ -143,7 +143,7 @@ func TestMergeXMLTV_DeduplicatesChannels(t *testing.T) {
 		[]xmlChannel{{ID: "dup", DisplayName: "Second"}}, nil,
 	)), 0644)
 
-	if err := mergeXMLTV([]string{src1, src2}, out, nil); err != nil {
+	if err := mergeXMLTV([]string{src1, src2}, out, nil, nil); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
@@ -173,7 +173,7 @@ func TestMergeXMLTV_ProgrammesFromAllSources(t *testing.T) {
 		[]xmlProgramme{{Channel: "ch1", Title: "Evening News"}},
 	)), 0644)
 
-	if err := mergeXMLTV([]string{src1, src2}, out, nil); err != nil {
+	if err := mergeXMLTV([]string{src1, src2}, out, nil, nil); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
@@ -205,7 +205,7 @@ func TestMergeXMLTV_FilterByTvgIDs(t *testing.T) {
 	)), 0644)
 
 	tvgIDs := map[string]struct{}{"keep": {}}
-	if err := mergeXMLTV([]string{src}, out, tvgIDs); err != nil {
+	if err := mergeXMLTV([]string{src}, out, tvgIDs, nil); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
@@ -230,7 +230,7 @@ func TestMergeXMLTV_NilFilterKeepsAll(t *testing.T) {
 		[]xmlProgramme{{Channel: "c1"}, {Channel: "c2"}},
 	)), 0644)
 
-	if err := mergeXMLTV([]string{src}, out, nil); err != nil {
+	if err := mergeXMLTV([]string{src}, out, nil, nil); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
@@ -441,5 +441,150 @@ func TestProcessor_Run_DecompressionBombRejected(t *testing.T) {
 	// The merged EPG file must not have been created.
 	if _, statErr := os.Stat(config.GetEPGPath()); statErr == nil {
 		t.Error("merged EPG file should not exist after a bomb rejection")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Channel remapping tests
+// ---------------------------------------------------------------------------
+
+// TestMergeXMLTV_ChannelRemapping verifies that an EPG channel id is rewritten
+// to the mapped M3U tvg-id in both channel and programme elements.
+func TestMergeXMLTV_ChannelRemapping(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.xml")
+	out := filepath.Join(dir, "out.xml")
+
+	os.WriteFile(src, []byte(xmltvSource(
+		[]xmlChannel{{ID: "epg.channel.id", DisplayName: "Remapped Channel"}},
+		[]xmlProgramme{{Channel: "epg.channel.id", Title: "Remapped Show"}},
+	)), 0644)
+
+	channelMap := map[string]string{"epg.channel.id": "m3u.tvg.id"}
+	tvgIDs := map[string]struct{}{"m3u.tvg.id": {}}
+
+	if err := mergeXMLTV([]string{src}, out, tvgIDs, channelMap); err != nil {
+		t.Fatalf("mergeXMLTV: %v", err)
+	}
+
+	doc := parseMergedXML(t, out)
+	if len(doc.Channels) != 1 {
+		t.Fatalf("expected 1 channel, got %d", len(doc.Channels))
+	}
+	if doc.Channels[0].ID != "m3u.tvg.id" {
+		t.Errorf("channel id not remapped: got %q, want %q", doc.Channels[0].ID, "m3u.tvg.id")
+	}
+	if len(doc.Programmes) != 1 {
+		t.Fatalf("expected 1 programme, got %d", len(doc.Programmes))
+	}
+	if doc.Programmes[0].Channel != "m3u.tvg.id" {
+		t.Errorf("programme channel not remapped: got %q, want %q", doc.Programmes[0].Channel, "m3u.tvg.id")
+	}
+}
+
+// TestMergeXMLTV_RemappingWithoutFilter verifies that remapping works when
+// tvgIDs is nil (keep-all mode): the attribute is rewritten but nothing is dropped.
+func TestMergeXMLTV_RemappingWithoutFilter(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.xml")
+	out := filepath.Join(dir, "out.xml")
+
+	os.WriteFile(src, []byte(xmltvSource(
+		[]xmlChannel{
+			{ID: "epg.a", DisplayName: "A"},
+			{ID: "epg.b", DisplayName: "B"},
+		},
+		[]xmlProgramme{
+			{Channel: "epg.a", Title: "Show A"},
+			{Channel: "epg.b", Title: "Show B"},
+		},
+	)), 0644)
+
+	channelMap := map[string]string{"epg.a": "tvg.a"} // only remap a
+	if err := mergeXMLTV([]string{src}, out, nil, channelMap); err != nil {
+		t.Fatalf("mergeXMLTV: %v", err)
+	}
+
+	doc := parseMergedXML(t, out)
+	if len(doc.Channels) != 2 {
+		t.Fatalf("expected 2 channels, got %d", len(doc.Channels))
+	}
+	ids := map[string]bool{}
+	for _, ch := range doc.Channels {
+		ids[ch.ID] = true
+	}
+	if !ids["tvg.a"] {
+		t.Error("expected 'tvg.a' in channels after remap")
+	}
+	if !ids["epg.b"] {
+		t.Error("expected 'epg.b' unchanged in channels")
+	}
+}
+
+// TestMergeXMLTV_RemapEnablesFilterPass verifies that an EPG channel whose
+// original id is NOT in tvgIDs but whose remapped id IS in tvgIDs passes
+// through the filter and is rewritten.
+func TestMergeXMLTV_RemapEnablesFilterPass(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.xml")
+	out := filepath.Join(dir, "out.xml")
+
+	os.WriteFile(src, []byte(xmltvSource(
+		[]xmlChannel{
+			{ID: "epg.old", DisplayName: "Old EPG ID"},
+			{ID: "epg.keep", DisplayName: "Already matching"},
+		},
+		[]xmlProgramme{
+			{Channel: "epg.old", Title: "Old Show"},
+			{Channel: "epg.keep", Title: "Keep Show"},
+		},
+	)), 0644)
+
+	// tvgIDs has the M3U ids; epg.old is not there but maps to m3u.new which is.
+	tvgIDs := map[string]struct{}{
+		"m3u.new":  {},
+		"epg.keep": {},
+	}
+	channelMap := map[string]string{"epg.old": "m3u.new"}
+
+	if err := mergeXMLTV([]string{src}, out, tvgIDs, channelMap); err != nil {
+		t.Fatalf("mergeXMLTV: %v", err)
+	}
+
+	doc := parseMergedXML(t, out)
+	if len(doc.Channels) != 2 {
+		t.Fatalf("expected 2 channels, got %d: %+v", len(doc.Channels), doc.Channels)
+	}
+	ids := map[string]bool{}
+	for _, ch := range doc.Channels {
+		ids[ch.ID] = true
+	}
+	if !ids["m3u.new"] {
+		t.Errorf("expected remapped channel 'm3u.new', got channels: %+v", doc.Channels)
+	}
+	if !ids["epg.keep"] {
+		t.Errorf("expected passthrough channel 'epg.keep', got channels: %+v", doc.Channels)
+	}
+	if len(doc.Programmes) != 2 {
+		t.Errorf("expected 2 programmes, got %d", len(doc.Programmes))
+	}
+}
+
+// TestGetEPGChannelMappings verifies that EPG_CHANNEL_MAP_X env vars are
+// parsed correctly into the epgID → tvgID map.
+func TestGetEPGChannelMappings(t *testing.T) {
+	setupTestConfig(t)
+
+	t.Setenv("EPG_CHANNEL_MAP_1", "my.tvg.id=their.epg.id")
+	t.Setenv("EPG_CHANNEL_MAP_2", "another.tvg=another.epg")
+	utils.ResetCaches()
+	t.Cleanup(utils.ResetCaches)
+
+	m := utils.GetEPGChannelMappings()
+	if got := m["their.epg.id"]; got != "my.tvg.id" {
+		t.Errorf("EPG_CHANNEL_MAP_1: got %q, want %q", got, "my.tvg.id")
+	}
+	if got := m["another.epg"]; got != "another.tvg" {
+		t.Errorf("EPG_CHANNEL_MAP_2: got %q, want %q", got, "another.tvg")
 	}
 }

@@ -91,9 +91,10 @@ func (p *Processor) Run(ctx context.Context) error {
 	}
 
 	tvgIDs := loadTvgIDs()
+	channelMap := utils.GetEPGChannelMappings()
 
 	tmpPath := config.GetEPGTmpPath()
-	if err := mergeXMLTV(sources, tmpPath, tvgIDs); err != nil {
+	if err := mergeXMLTV(sources, tmpPath, tvgIDs, channelMap); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("epg: merge: %w", err)
 	}
@@ -242,7 +243,8 @@ func (mc multiCloser) Close() error {
 // Channels are deduplicated by their id attribute (first occurrence wins).
 // When tvgIDs is non-nil only channels/programmes whose id/channel attribute
 // appears in that set are written; a nil map means "keep everything".
-func mergeXMLTV(sources []string, outputPath string, tvgIDs map[string]struct{}) error {
+// channelMap remaps EPG channel ids to M3U tvg-ids (epgID → tvgID); may be nil.
+func mergeXMLTV(sources []string, outputPath string, tvgIDs map[string]struct{}, channelMap map[string]string) error {
 	out, err := os.Create(outputPath)
 	if err != nil {
 		return err
@@ -260,14 +262,14 @@ func mergeXMLTV(sources []string, outputPath string, tvgIDs map[string]struct{})
 
 	// First pass: unique <channel> elements.
 	for _, src := range sources {
-		if err := streamXMLTVElements(src, "channel", seenChannels, tvgIDs, out); err != nil {
+		if err := streamXMLTVElements(src, "channel", seenChannels, tvgIDs, channelMap, out); err != nil {
 			_ = err
 		}
 	}
 
 	// Second pass: all <programme> elements.
 	for _, src := range sources {
-		if err := streamXMLTVElements(src, "programme", nil, tvgIDs, out); err != nil {
+		if err := streamXMLTVElements(src, "programme", nil, tvgIDs, channelMap, out); err != nil {
 			_ = err
 		}
 	}
@@ -281,7 +283,9 @@ func mergeXMLTV(sources []string, outputPath string, tvgIDs map[string]struct{})
 //   - seen: when non-nil, deduplicate by the element's "id" attribute
 //   - tvgIDs: when non-nil, skip elements whose identity attribute (id for
 //     channels, channel for programmes) is not in the set
-func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, tvgIDs map[string]struct{}, out io.Writer) error {
+//   - channelMap: when non-nil, remaps EPG channel ids to M3U tvg-ids before
+//     filtering and deduplication; the identity attribute is rewritten in output
+func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, tvgIDs map[string]struct{}, channelMap map[string]string, out io.Writer) error {
 	f, err := os.Open(srcPath)
 	if err != nil {
 		return err
@@ -318,6 +322,15 @@ func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, tvgI
 			identityAttr = "channel"
 		}
 		identity := attrValue(start, identityAttr)
+
+		// Channel remapping: if the EPG id is mapped to a different M3U tvg-id,
+		// rewrite the identity attribute on the start element before filtering.
+		if channelMap != nil && identity != "" {
+			if mapped, ok := channelMap[identity]; ok {
+				identity = mapped
+				setAttr(&start, identityAttr, mapped)
+			}
+		}
 
 		// Filter: skip elements whose identity is not in the tvg-id set.
 		if tvgIDs != nil && identity != "" {
@@ -380,4 +393,15 @@ func attrValue(el xml.StartElement, name string) string {
 		}
 	}
 	return ""
+}
+
+// setAttr updates the named attribute on el in place, or appends it if absent.
+func setAttr(el *xml.StartElement, name, value string) {
+	for i, a := range el.Attr {
+		if a.Name.Local == name {
+			el.Attr[i].Value = value
+			return
+		}
+	}
+	el.Attr = append(el.Attr, xml.Attr{Name: xml.Name{Local: name}, Value: value})
 }
