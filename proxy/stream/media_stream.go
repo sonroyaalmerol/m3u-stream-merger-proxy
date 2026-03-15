@@ -196,49 +196,34 @@ func (h *StreamHandler) HandleStream(
 	}
 	defer cleanup()
 
-	var bytesWritten int64
-	lastPosition := h.coordinator.Buffer.Prev() // Start from previous to get first new chunk
-
-	// Create a channel to signal client helper goroutine to stop
-	done := make(chan struct{})
-	defer close(done)
-
-	// Create a context for this client
-	readerCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	// Handle context cancellation in a separate goroutine
-	go func() {
-		select {
-		case <-ctx.Done():
-			h.logger.Debugf("Client context cancelled: %s", remoteAddr)
-			cancel()
-		case <-done:
-			return
-		}
-	}()
+	var (
+		bytesWritten int64
+		lastPosition = h.coordinator.InitialPosition()
+		lastSeq      int64
+	)
 
 	for {
 		select {
-		case <-readerCtx.Done():
+		case <-ctx.Done():
 			h.logger.Debugf("Reader context cancelled for client: %s", remoteAddr)
-			return StreamResult{bytesWritten, readerCtx.Err(), proxy.StatusClientClosed}
+			return StreamResult{bytesWritten, ctx.Err(), proxy.StatusClientClosed}
 
 		default:
-			chunks, errChunk, newPos := h.coordinator.ReadChunks(lastPosition)
+			chunks, errChunk, newPos, newSeq := h.coordinator.ReadChunks(ctx, lastPosition, lastSeq)
+			lastSeq = newSeq
 
 			// Process any available chunks first
 			if len(chunks) > 0 {
 				for _, chunk := range chunks {
 					// Check context before each write
-					if readerCtx.Err() != nil {
+					if ctx.Err() != nil {
 						// Clean up remaining chunks
 						for _, c := range chunks {
 							if c != nil {
 								c.Reset()
 							}
 						}
-						return StreamResult{bytesWritten, readerCtx.Err(), proxy.StatusClientClosed}
+						return StreamResult{bytesWritten, ctx.Err(), proxy.StatusClientClosed}
 					}
 
 					if chunk != nil && chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
@@ -249,7 +234,7 @@ func (h *StreamHandler) HandleStream(
 						}
 
 						// ensure headers are set for reader
-						h.coordinator.WaitHeaders(readerCtx)
+						h.coordinator.WaitHeaders(ctx)
 						respHeaders := h.coordinator.WriterRespHeader.Load()
 						if respHeaders == nil {
 							respHeaders = &http.Header{}
