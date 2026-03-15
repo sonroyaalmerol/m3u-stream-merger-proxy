@@ -181,10 +181,7 @@ func (c *StreamCoordinator) getNewSegments(allSegments []string, lastSeq, curren
 		return allSegments
 	}
 
-	skipCount := segmentCount - seqDiff
-	if skipCount < 0 {
-		skipCount = 0
-	}
+	skipCount := max(segmentCount-seqDiff, 0)
 
 	return allSegments[skipCount:]
 }

@@ -64,7 +64,7 @@ func (h *M3UHTTPHandler) handleAuth(r *http.Request) bool {
 
 func (h *M3UHTTPHandler) parseCredentials(raw string) [][]string {
 	var result [][]string
-	for _, item := range strings.Split(raw, "|") {
+	for item := range strings.SplitSeq(raw, "|") {
 		cred := strings.Split(item, ":")
 		if len(cred) == 3 {
 			if d, err := time.ParseInLocation(time.DateOnly, cred[2], time.Local); err != nil {

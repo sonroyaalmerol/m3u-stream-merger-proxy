@@ -89,8 +89,8 @@ func (p *Processor) downloadSource(ctx context.Context, idx string) (string, err
 	}
 
 	// Local file passthrough.
-	if strings.HasPrefix(epgURL, "file://") {
-		return strings.TrimPrefix(epgURL, "file://"), nil
+	if after, ok := strings.CutPrefix(epgURL, "file://"); ok {
+		return after, nil
 	}
 
 	finalPath := config.GetEPGSourcePath(idx)

@@ -54,8 +54,8 @@ func streamDownloadM3USources() chan *SourceDownloaderResult {
 						return
 					}
 
-					if strings.HasPrefix(m3uURL, "file://") {
-						handleLocalFile(strings.TrimPrefix(m3uURL, "file://"), result)
+					if after, ok := strings.CutPrefix(m3uURL, "file://"); ok {
+						handleLocalFile(after, result)
 						return
 					}
 

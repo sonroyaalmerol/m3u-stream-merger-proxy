@@ -20,7 +20,7 @@ var (
 
 func init() {
 	encoderPool = sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			encoder, err := zstd.NewWriter(nil)
 			if err != nil {
 				logger.Default.Debugf("Error creating zstd encoder: %v", err)
@@ -31,7 +31,7 @@ func init() {
 	}
 
 	decoderPool = sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			decoder, err := zstd.NewReader(nil)
 			if err != nil {
 				logger.Default.Debugf("Error creating zstd decoder: %v", err)

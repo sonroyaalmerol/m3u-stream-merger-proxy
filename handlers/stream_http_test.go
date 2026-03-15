@@ -473,7 +473,7 @@ func TestStreamHTTPHandler_DisconnectionConcurrency(t *testing.T) {
 				current, _, _ := cm.GetConcurrencyStatus("m3u_5")
 
 				// Take multiple readings to ensure stability
-				for i := 0; i < 3; i++ {
+				for range 3 {
 					time.Sleep(50 * time.Millisecond)
 					newCurrent, _, _ := cm.GetConcurrencyStatus("m3u_5")
 					if newCurrent != current {

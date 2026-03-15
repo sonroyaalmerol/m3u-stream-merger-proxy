@@ -36,8 +36,8 @@ func GetM3UIndexes() []string {
 	m3uIndexesOnce.Do(func() {
 		for _, env := range os.Environ() {
 			pair := strings.SplitN(env, "=", 2)
-			if strings.HasPrefix(pair[0], "M3U_URL_") {
-				indexString := strings.TrimPrefix(pair[0], "M3U_URL_")
+			if after, ok := strings.CutPrefix(pair[0], "M3U_URL_"); ok {
+				indexString := after
 				m3uIndexes = append(m3uIndexes, indexString)
 			}
 		}
@@ -54,8 +54,8 @@ func GetEPGIndexes() []string {
 	epgIndexesOnce.Do(func() {
 		for _, env := range os.Environ() {
 			pair := strings.SplitN(env, "=", 2)
-			if strings.HasPrefix(pair[0], "EPG_URL_") {
-				indexString := strings.TrimPrefix(pair[0], "EPG_URL_")
+			if after, ok := strings.CutPrefix(pair[0], "EPG_URL_"); ok {
+				indexString := after
 				epgIndexes = append(epgIndexes, indexString)
 			}
 		}
@@ -87,9 +87,9 @@ func GetFilters(baseEnv string) []string {
 	prefix := fmt.Sprintf("%s_", baseEnv)
 	for _, env := range os.Environ() {
 		pair := strings.SplitN(env, "=", 2)
-		if strings.HasPrefix(pair[0], prefix) {
+		if after, ok := strings.CutPrefix(pair[0], prefix); ok {
 			// Remove the prefix (e.g. "FILTER_")
-			indexStr := strings.TrimPrefix(pair[0], prefix)
+			indexStr := after
 			// Ensure the suffix is an integer.
 			if _, err := strconv.Atoi(indexStr); err != nil {
 				continue
