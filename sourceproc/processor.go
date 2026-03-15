@@ -268,7 +268,7 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 	err = p.sortingMgr.GetSortedEntries(func(entry *StreamInfo) {
 		_, writeErr := p.writer.WriteString(formatStreamEntry(baseURL, entry))
 		if writeErr != nil {
-			p.markCriticalError(err)
+			p.markCriticalError(writeErr)
 		}
 		if entry.TvgID != "" {
 			p.tvgIDs[entry.TvgID] = struct{}{}
@@ -280,7 +280,7 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 	}
 
 	if flushErr := p.writer.Flush(); flushErr != nil {
-		p.markCriticalError(err)
+		p.markCriticalError(flushErr)
 		return
 	}
 }

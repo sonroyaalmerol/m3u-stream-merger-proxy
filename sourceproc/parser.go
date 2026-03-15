@@ -67,11 +67,6 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 
 	encodedUrl := base64.StdEncoding.EncodeToString([]byte(cleanUrl))
 
-	if stream.Title == "" {
-		logger.Default.Debugf("Stream missing title, skipping: %s", line)
-		return nil
-	}
-
 	base64Title := base64.StdEncoding.EncodeToString([]byte(stream.Title))
 	h := sha3.Sum224([]byte(cleanUrl))
 	urlHash := hex.EncodeToString(h[:])
