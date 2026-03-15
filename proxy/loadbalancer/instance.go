@@ -94,17 +94,17 @@ func (instance *LoadBalancerInstance) setHealthClient() {
 		healthCheckClient := *originalClient
 
 		if originalTransport, ok := originalClient.Transport.(*http.Transport); ok {
-			// Create a new transport and copy relevant fields from the original transport
+			// Create a new transport and copy relevant fields from the original transport.
+			// DisableKeepAlives is forced true: the health-check client is created fresh
+			// per load-balancer instance, so idle connections would never be reused and
+			// would accumulate as leaked file descriptors.
 			transportCopy := &http.Transport{
 				Proxy:                 originalTransport.Proxy,
 				DialContext:           originalTransport.DialContext,
 				TLSClientConfig:       originalTransport.TLSClientConfig,
 				TLSHandshakeTimeout:   originalTransport.TLSHandshakeTimeout,
-				DisableKeepAlives:     originalTransport.DisableKeepAlives,
+				DisableKeepAlives:     true,
 				DisableCompression:    originalTransport.DisableCompression,
-				MaxIdleConns:          originalTransport.MaxIdleConns,
-				MaxIdleConnsPerHost:   originalTransport.MaxIdleConnsPerHost,
-				IdleConnTimeout:       originalTransport.IdleConnTimeout,
 				ResponseHeaderTimeout: 3 * time.Second,
 				ExpectContinueTimeout: originalTransport.ExpectContinueTimeout,
 				ForceAttemptHTTP2:     originalTransport.ForceAttemptHTTP2,
@@ -113,8 +113,10 @@ func (instance *LoadBalancerInstance) setHealthClient() {
 			// Assign the copied transport to the new client
 			healthCheckClient.Transport = transportCopy
 		} else {
-			// If the transport is not *http.Transport, create a new transport
+			// If the transport is not *http.Transport, create a new transport.
+			// DisableKeepAlives is forced true for the same reason as above.
 			healthCheckClient.Transport = &http.Transport{
+				DisableKeepAlives:     true,
 				ResponseHeaderTimeout: 3 * time.Second,
 			}
 		}
@@ -394,6 +396,7 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 				return
 			}
 			if resp.StatusCode != http.StatusOK {
+				resp.Body.Close()
 				instance.logger.Errorf("Non-200 status %d for %s %s",
 					resp.StatusCode, req.Method, url)
 				instance.markTested(streamId, candidateId)
@@ -405,6 +408,7 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 
 			health, evalErr := evaluateBufferHealth(resp, instance.config.BufferChunk)
 			if evalErr != nil {
+				resp.Body.Close()
 				instance.logger.Errorf("Error evaluating buffer health: %s", evalErr.Error())
 				instance.markTested(streamId, candidateId)
 				resultCh <- &streamTestResult{err: evalErr}
@@ -435,7 +439,12 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 			continue
 		}
 		if bestResult == nil || res.health > bestResult.health {
+			if bestResult != nil {
+				bestResult.result.Response.Body.Close()
+			}
 			bestResult = res
+		} else {
+			res.result.Response.Body.Close()
 		}
 	}
 

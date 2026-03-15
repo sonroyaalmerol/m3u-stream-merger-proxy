@@ -15,6 +15,7 @@ import (
 	"m3u-stream-merger/store"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -407,5 +408,163 @@ func TestStreamInstance_ProxyStream(t *testing.T) {
 				t.Error("ProxyStream() timed out waiting for status")
 			}
 		})
+	}
+}
+
+// --- HandleDirectStream regression tests ---
+// These cover the fixes applied to the per-chunk goroutine spawn pattern and
+// verify correct data forwarding, prompt context cancellation, and absence of
+// goroutine leaks.
+
+// TestHandleDirectStreamForwardsData verifies that all bytes in the response
+// body are forwarded to the client writer in the correct order.
+func TestHandleDirectStreamForwardsData(t *testing.T) {
+	// 3 KB of deterministic content that spans multiple 1 KB reads.
+	content := strings.Repeat("abcdefghij", 307) // 3070 bytes
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(content)),
+		Header:     make(http.Header),
+	}
+
+	cfg := &config.StreamConfig{ChunkSize: 1024, SharedBufferSize: 1}
+	handler := NewStreamHandler(cfg, nil, logger.Default)
+	writer := &mockResponseWriter{}
+	req, _ := http.NewRequest(http.MethodGet, "/stream", nil)
+	streamClient := client.NewStreamClient(writer, req)
+	lbRes := &loadbalancer.LoadBalancerResult{Response: resp}
+
+	result := handler.HandleDirectStream(context.Background(), lbRes, streamClient)
+
+	if result.Status != proxy.StatusEOF {
+		t.Errorf("status = %d, want StatusEOF (%d)", result.Status, proxy.StatusEOF)
+	}
+
+	writer.mu.Lock()
+	got := string(writer.written)
+	writer.mu.Unlock()
+
+	if got != content {
+		t.Errorf("forwarded %d bytes, want %d bytes", len(got), len(content))
+	}
+}
+
+// TestHandleDirectStreamContextCancellation verifies that HandleDirectStream
+// returns promptly with StatusClientClosed when the context is cancelled, even
+// while waiting for the next chunk from a slow upstream.
+func TestHandleDirectStreamContextCancellation(t *testing.T) {
+	pr, pw := io.Pipe()
+
+	// Write some initial data, then hold — simulating an infinite live stream.
+	go func() {
+		pw.Write(bytes.Repeat([]byte("x"), 512))
+		// deliberately does not write more; the next Read will block
+	}()
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       pr,
+		Header:     make(http.Header),
+	}
+
+	cfg := &config.StreamConfig{ChunkSize: 1024, SharedBufferSize: 1}
+	handler := NewStreamHandler(cfg, nil, logger.Default)
+	writer := &mockResponseWriter{}
+	req, _ := http.NewRequest(http.MethodGet, "/stream", nil)
+	streamClient := client.NewStreamClient(writer, req)
+	lbRes := &loadbalancer.LoadBalancerResult{Response: resp}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	resultCh := make(chan StreamResult, 1)
+	go func() {
+		resultCh <- handler.HandleDirectStream(ctx, lbRes, streamClient)
+	}()
+
+	// Give the handler time to consume the initial data and block on the next read.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case result := <-resultCh:
+		if result.Status != proxy.StatusClientClosed {
+			t.Errorf("status = %d, want StatusClientClosed (%d)", result.Status, proxy.StatusClientClosed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("HandleDirectStream did not return within 2 s of context cancellation")
+	}
+
+	pw.Close()
+}
+
+// TestHandleDirectStreamGoroutineCleanup verifies that no goroutines are
+// leaked after HandleDirectStream returns.  The old per-chunk goroutine spawn
+// pattern caused N goroutines to be created for an N-chunk stream; the
+// replacement single-reader goroutine must exit cleanly after the function
+// returns regardless of the cancellation path.
+func TestHandleDirectStreamGoroutineCleanup(t *testing.T) {
+	pr, pw := io.Pipe()
+
+	// Simulate an infinite live stream.
+	go func() {
+		chunk := bytes.Repeat([]byte("a"), 512)
+		for {
+			if _, err := pw.Write(chunk); err != nil {
+				return
+			}
+		}
+	}()
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       pr,
+		Header:     make(http.Header),
+	}
+
+	cfg := &config.StreamConfig{ChunkSize: 1024, SharedBufferSize: 1}
+	handler := NewStreamHandler(cfg, nil, logger.Default)
+	writer := &mockResponseWriter{}
+	req, _ := http.NewRequest(http.MethodGet, "/stream", nil)
+	streamClient := client.NewStreamClient(writer, req)
+	lbRes := &loadbalancer.LoadBalancerResult{Response: resp}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	before := runtime.NumGoroutine()
+
+	resultCh := make(chan StreamResult, 1)
+	go func() {
+		resultCh <- handler.HandleDirectStream(ctx, lbRes, streamClient)
+	}()
+
+	// Stream for a moment, then cancel.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case result := <-resultCh:
+		if result.Status != proxy.StatusClientClosed {
+			t.Errorf("status = %d, want StatusClientClosed (%d)", result.Status, proxy.StatusClientClosed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("HandleDirectStream did not return within 2 s of context cancellation")
+	}
+
+	// Poll until all spawned goroutines have exited (up to 500 ms).
+	// We allow +1 above the pre-test baseline to tolerate the outer test
+	// goroutine briefly remaining on the scheduler.
+	var after int
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		after = runtime.NumGoroutine()
+		if after <= before+1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if after > before+1 {
+		t.Errorf("goroutine leak after HandleDirectStream returned: before=%d after=%d", before, after)
 	}
 }

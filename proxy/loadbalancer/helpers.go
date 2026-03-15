@@ -16,11 +16,19 @@ type streamTestResult struct {
 	err    error
 }
 
+// readCloser combines a Reader and a Closer so that closing releases the
+// underlying transport connection while reading comes from a different source.
+type readCloser struct {
+	io.Reader
+	io.Closer
+}
+
 func evaluateBufferHealth(resp *http.Response, readChunkSize int) (float64, error) {
 	const measureDuration = 2 * time.Second
 
 	start := time.Now()
-	br := bufio.NewReader(resp.Body)
+	originalBody := resp.Body
+	br := bufio.NewReader(originalBody)
 
 	var consumed bytes.Buffer
 	totalBytes := 0
@@ -48,8 +56,11 @@ func evaluateBufferHealth(resp *http.Response, readChunkSize int) (float64, erro
 	}
 	throughput := float64(totalBytes) / elapsed.Seconds()
 
+	// Reconstruct the body so that reads come from the buffered data followed
+	// by the remaining original body, but Close() still releases the underlying
+	// TCP connection.
 	newBody := io.MultiReader(bytes.NewReader(consumed.Bytes()), br)
-	resp.Body = io.NopCloser(newBody)
+	resp.Body = readCloser{Reader: newBody, Closer: originalBody}
 	return throughput, nil
 }
 
