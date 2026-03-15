@@ -15,8 +15,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/valyala/bytebufferpool"
 )
 
 var (
@@ -24,37 +22,12 @@ var (
 	ErrStreamDraining = errors.New("stream is draining")
 )
 
-// ChunkData holds a chunk of streamed data along with metadata.
 type ChunkData struct {
-	Buffer    *bytebufferpool.ByteBuffer
+	Data      []byte
 	Error     error
 	Status    int
 	Timestamp time.Time
-
-	seq int64 // unexported sequence number for internal tracking.
-}
-
-// newChunkData creates a new chunk with a fresh ByteBuffer.
-func newChunkData() *ChunkData {
-	return &ChunkData{
-		Buffer: bytebufferpool.Get(),
-		seq:    0,
-	}
-}
-
-// Reset resets the chunk. It returns the underlying buffer
-// to the pool, obtains a new one, and clears all metadata.
-// Once Reset is called the caller Must not use the old buffer.
-func (c *ChunkData) Reset() {
-	if c.Buffer != nil {
-		c.Buffer.Reset()
-		bytebufferpool.Put(c.Buffer)
-	}
-	c.Buffer = bytebufferpool.Get()
-	c.Error = nil
-	c.Status = 0
-	c.Timestamp = time.Time{}
-	c.seq = 0
+	seq       int64
 }
 
 // Internal state constants.
@@ -117,10 +90,6 @@ func (c *StreamCoordinator) notifySubscribers() {
 func NewStreamCoordinator(streamID string, config *config.StreamConfig, cm *store.ConcurrencyManager, logger logger.Logger) *StreamCoordinator {
 	logger.Debug("Initializing new StreamCoordinator")
 	r := ring.New(config.SharedBufferSize)
-	for i := 0; i < config.SharedBufferSize; i++ {
-		r.Value = newChunkData()
-		r = r.Next()
-	}
 
 	respHeaderChan := make(chan struct{})
 	coord := &StreamCoordinator{
@@ -223,10 +192,6 @@ func (c *StreamCoordinator) shouldRetry(timeout time.Duration) bool {
 	return c.config.TimeoutSeconds == 0 || timeout > 0
 }
 
-// Write performs a zero‑copy write via a buffer swap.
-// Regardless of success or failure, the provided chunk is immediately reset,
-// transferring full buffer ownership to the coordinator and returning the old
-// buffer back to the pool. This prevents any leaks or accidental reuse.
 func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 	if chunk == nil {
 		c.logger.Debug("Write: Received nil chunk")
@@ -234,56 +199,27 @@ func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 	}
 
 	c.Mu.Lock()
-	// If the stream isn't active, we still Must consume (reset) the chunk.
 	if atomic.LoadInt32(&c.state) != stateActive {
 		c.logger.Debug("Write: Stream not active")
 		c.Mu.Unlock()
-		chunk.Reset()
 		return false
 	}
 
-	current, ok := c.Buffer.Value.(*ChunkData)
-	if !ok || current == nil {
-		c.logger.Debug("Write: Current buffer position is nil")
-		c.Mu.Unlock()
-		chunk.Reset()
-		return false
-	}
-
-	// Increment and assign a sequence number.
-	current.seq = atomic.AddInt64(&c.writeSeq, 1)
-
-	// Perform the swap:
-	// - The ring's current chunk now receives the data from the caller's chunk.
-	// - The caller's chunk is given the ring's old buffer.
-	oldBuffer := current.Buffer
-	current.Buffer = chunk.Buffer
-	chunk.Buffer = oldBuffer
-
-	current.Error = chunk.Error
-	current.Status = chunk.Status
-	current.Timestamp = chunk.Timestamp
-
+	chunk.seq = atomic.AddInt64(&c.writeSeq, 1)
+	c.Buffer.Value = chunk
 	c.Buffer = c.Buffer.Next()
 	c.logger.Debug("Write: Advanced buffer position")
 
-	// Mark error state if needed.
-	if current.Error != nil || current.Status != 0 {
+	if chunk.Error != nil || chunk.Status != 0 {
 		if c.LastError.Load() == nil {
-			c.LastError.Store(current)
+			c.LastError.Store(chunk)
 		}
 		atomic.StoreInt32(&c.state, stateDraining)
-		c.logger.Debugf("Write: Setting error state: err=%v, status=%d", current.Error, current.Status)
+		c.logger.Debugf("Write: Setting error state: err=%v, status=%d", chunk.Error, chunk.Status)
 	}
 	c.Mu.Unlock()
 
-	// Notify waiting subscribers.
 	c.notifySubscribers()
-	// Enforce the new ownership rule:
-	// Immediately reset the provided chunk so that its swapped-out buffer is
-	// returned to the pool and the caller does not continue using stale data.
-	chunk.Reset()
-
 	return true
 }
 
@@ -327,31 +263,19 @@ func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.R
 
 	chunks := make([]*ChunkData, 0, c.config.SharedBufferSize)
 	current := fromPosition
-	var errorFound bool
 	var errorChunk *ChunkData
 	newClientSeq := clientSeq
 
 	for current != c.Buffer {
 		if chunk, ok := current.Value.(*ChunkData); ok && chunk != nil {
-			if chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
-				newChunk := &ChunkData{
-					Buffer:    bytebufferpool.Get(),
-					Timestamp: chunk.Timestamp,
-				}
-				_, _ = newChunk.Buffer.Write(chunk.Buffer.Bytes())
-				chunks = append(chunks, newChunk)
+			if len(chunk.Data) > 0 {
+				chunks = append(chunks, chunk)
 				if chunk.seq > newClientSeq {
 					newClientSeq = chunk.seq
 				}
 			}
 			if chunk.Error != nil || chunk.Status != 0 {
-				errorFound = true
-				errorChunk = &ChunkData{
-					Buffer:    nil,
-					Error:     chunk.Error,
-					Status:    chunk.Status,
-					Timestamp: chunk.Timestamp,
-				}
+				errorChunk = chunk
 			}
 		}
 		current = current.Next()
@@ -361,7 +285,7 @@ func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.R
 	}
 	c.Mu.RUnlock()
 
-	if errorFound && errorChunk != nil {
+	if errorChunk != nil {
 		return chunks, errorChunk, current, newClientSeq
 	}
 
@@ -374,16 +298,13 @@ func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.R
 	return chunks, nil, current, newClientSeq
 }
 
-// ClearBuffer resets every chunk in the ring.
 func (c *StreamCoordinator) ClearBuffer() {
 	c.Mu.Lock()
 	defer c.Mu.Unlock()
 
 	current := c.Buffer
 	for i := 0; i < c.config.SharedBufferSize; i++ {
-		if chunk, ok := current.Value.(*ChunkData); ok {
-			chunk.Reset()
-		}
+		current.Value = (*ChunkData)(nil)
 		current = current.Next()
 	}
 }
@@ -396,20 +317,13 @@ func (c *StreamCoordinator) getTimeoutDuration() time.Duration {
 	return time.Duration(c.config.TimeoutSeconds) * time.Second
 }
 
-// writeError writes an error chunk to the stream, consuming the chunk.
 func (c *StreamCoordinator) writeError(err error, status int) {
-	chunk := newChunkData()
-	if chunk == nil {
-		c.logger.Debug("writeError: Failed to create new chunk")
-		return
+	chunk := &ChunkData{
+		Error:     err,
+		Status:    status,
+		Timestamp: time.Now(),
 	}
-	chunk.Error = err
-	chunk.Status = status
-	chunk.Timestamp = time.Now()
-
-	if !c.Write(chunk) {
-		chunk.Reset()
-	}
+	c.Write(chunk)
 	atomic.StoreInt32(&c.state, stateClosed)
 }
 

@@ -232,12 +232,10 @@ func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string
 	}
 
 	return c.readAndWriteStream(ctx, resp.Body, func(b []byte) error {
-		chunk := newChunkData()
-		_, _ = chunk.Buffer.Write(b)
-		chunk.Timestamp = time.Now()
-		if !c.Write(chunk) {
-			chunk.Reset()
-		}
+		c.Write(&ChunkData{
+			Data:      append([]byte(nil), b...),
+			Timestamp: time.Now(),
+		})
 		return nil
 	})
 

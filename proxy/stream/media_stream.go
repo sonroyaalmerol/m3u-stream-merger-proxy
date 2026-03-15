@@ -215,25 +215,16 @@ func (h *StreamHandler) HandleStream(
 			// Process any available chunks first
 			if len(chunks) > 0 {
 				for _, chunk := range chunks {
-					// Check context before each write
 					if ctx.Err() != nil {
-						// Clean up remaining chunks
-						for _, c := range chunks {
-							if c != nil {
-								c.Reset()
-							}
-						}
 						return StreamResult{bytesWritten, ctx.Err(), proxy.StatusClientClosed}
 					}
 
-					if chunk != nil && chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
-						// Protect against nil writer
+					if chunk != nil && len(chunk.Data) > 0 {
 						if !streamClient.IsWritable() {
 							h.logger.Error("Writer is nil")
 							return StreamResult{bytesWritten, fmt.Errorf("writer is nil"), proxy.StatusServerError}
 						}
 
-						// ensure headers are set for reader
 						h.coordinator.WaitHeaders(ctx)
 						respHeaders := h.coordinator.WriterRespHeader.Load()
 						if respHeaders == nil {
@@ -246,26 +237,15 @@ func (h *StreamHandler) HandleStream(
 						}
 						streamClient.ResponseHeaders = *respHeaders
 
-						// Use a separate function for writing to handle panics
-						n, err := h.safeWrite(streamClient, chunk.Buffer.Bytes())
+						n, err := h.safeWrite(streamClient, chunk.Data)
 						if err != nil {
-							// Clean up remaining chunks
-							for _, c := range chunks {
-								if c != nil {
-									c.Reset()
-								}
-							}
 							return StreamResult{bytesWritten, err, proxy.StatusClientClosed}
 						}
 						bytesWritten += int64(n)
 
-						// Protect against panic in flush
 						if err := h.safeFlush(streamClient); err != nil {
 							return StreamResult{bytesWritten, err, proxy.StatusClientClosed}
 						}
-					}
-					if chunk != nil {
-						chunk.Reset()
 					}
 				}
 			}
