@@ -3,6 +3,7 @@ package updater
 import (
 	"context"
 	"m3u-stream-merger/config"
+	"m3u-stream-merger/epg"
 	"m3u-stream-merger/handlers"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/sourceproc"
@@ -19,13 +20,15 @@ type Updater struct {
 	Cron       *cron.Cron
 	logger     logger.Logger
 	m3uHandler *handlers.M3UHTTPHandler
+	epgHandler *handlers.EPGHTTPHandler
 }
 
-func Initialize(ctx context.Context, logger logger.Logger, m3uHandler *handlers.M3UHTTPHandler) (*Updater, error) {
+func Initialize(ctx context.Context, logger logger.Logger, m3uHandler *handlers.M3UHTTPHandler, epgHandler *handlers.EPGHTTPHandler) (*Updater, error) {
 	updateInstance := &Updater{
 		ctx:        ctx,
 		logger:     logger,
 		m3uHandler: m3uHandler,
+		epgHandler: epgHandler,
 	}
 
 	clearOnBoot := os.Getenv("CLEAR_ON_BOOT")
@@ -43,6 +46,11 @@ func Initialize(ctx context.Context, logger logger.Logger, m3uHandler *handlers.
 
 		if err == nil {
 			m3uHandler.SetProcessedPath(latestM3u)
+		}
+
+		// Restore EPG path if a previously merged file exists.
+		if _, err := os.Stat(config.GetEPGPath()); err == nil {
+			epgHandler.SetProcessedPath(config.GetEPGPath())
 		}
 	}
 
@@ -97,6 +105,14 @@ func (instance *Updater) UpdateSources(ctx context.Context) {
 		}
 		if err := processor.Run(ctx, nil); err == nil {
 			instance.m3uHandler.SetProcessedPath(processor.GetResultPath())
+		}
+
+		instance.logger.Log("Background process: Building merged EPG...")
+		epgProcessor := epg.NewProcessor(instance.logger)
+		if err := epgProcessor.Run(ctx); err != nil {
+			instance.logger.Warnf("EPG update failed (non-fatal): %v", err)
+		} else {
+			instance.epgHandler.SetProcessedPath(config.GetEPGPath())
 		}
 	}
 }

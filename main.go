@@ -17,11 +17,12 @@ func main() {
 	defer cancel()
 
 	m3uHandler := handlers.NewM3UHTTPHandler(logger.Default, "")
+	epgHandler := handlers.NewEPGHTTPHandler(m3uHandler)
 	streamHandler := handlers.NewStreamHTTPHandler(handlers.NewDefaultProxyInstance(), logger.Default)
 	passthroughHandler := handlers.NewPassthroughHTTPHandler(logger.Default)
 
 	logger.Default.Log("Starting updater...")
-	_, err := updater.Initialize(ctx, logger.Default, m3uHandler)
+	_, err := updater.Initialize(ctx, logger.Default, m3uHandler, epgHandler)
 	if err != nil {
 		logger.Default.Fatalf("Error initializing updater: %v", err)
 	}
@@ -49,11 +50,15 @@ func main() {
 	http.HandleFunc("/segment/", func(w http.ResponseWriter, r *http.Request) {
 		streamHandler.ServeSegmentHTTP(w, r)
 	})
+	http.HandleFunc("/epg.xml", func(w http.ResponseWriter, r *http.Request) {
+		epgHandler.ServeHTTP(w, r)
+	})
 
 	// Start the server
 	logger.Default.Logf("Server is running on port %s...", os.Getenv("PORT"))
 	logger.Default.Log("Playlist Endpoint is running (`/playlist.m3u`)")
 	logger.Default.Log("Stream Endpoint is running (`/p/{originalBasePath}/{streamID}.{fileExt}`)")
+	logger.Default.Log("EPG Endpoint is running (`/epg.xml`)")
 	err = http.ListenAndServe(fmt.Sprintf(":%s", os.Getenv("PORT")), nil)
 	if err != nil {
 		logger.Default.Fatalf("HTTP server error: %v", err)
