@@ -30,6 +30,7 @@ type LoadBalancerInstance struct {
 	indexProvider IndexProvider
 	slugParser    SlugParser
 	testedIndexes *xsync.MapOf[string, []string]
+	excludedURLs  *xsync.MapOf[string, struct{}]
 }
 
 type LoadBalancerInstanceOption func(*LoadBalancerInstance)
@@ -72,6 +73,7 @@ func NewLoadBalancerInstance(
 		indexProvider: &DefaultIndexProvider{},
 		slugParser:    &DefaultSlugParser{},
 		testedIndexes: xsync.NewMapOf[string, []string](),
+		excludedURLs:  xsync.NewMapOf[string, struct{}](),
 	}
 	instance.setHealthClient()
 
@@ -324,6 +326,11 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 			url = fileContentSplit[1]
 		}
 
+		if _, excluded := instance.excludedURLs.Load(url); excluded {
+			instance.logger.Debugf("Skipping excluded URL for M3U_%s|%s", index, subIndex)
+			continue
+		}
+
 		id := index + "|" + subIndex
 		var alreadyTested bool
 		streamTested, ok := instance.testedIndexes.Load(streamId)
@@ -461,6 +468,10 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 		return bestResult.result, nil
 	}
 	return nil, fmt.Errorf("all urls failed")
+}
+
+func (instance *LoadBalancerInstance) ExcludeURL(url string) {
+	instance.excludedURLs.Store(url, struct{}{})
 }
 
 func (instance *LoadBalancerInstance) markTested(streamId string, id string) {

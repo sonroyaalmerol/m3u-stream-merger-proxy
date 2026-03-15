@@ -24,15 +24,20 @@ import (
 )
 
 type mockStreamManager struct {
-	loadBalancerFunc func(ctx context.Context, req *http.Request) (*loadbalancer.LoadBalancerResult, error)
+	loadBalancerFunc func(ctx context.Context, req *http.Request, instance *loadbalancer.LoadBalancerInstance) (*loadbalancer.LoadBalancerResult, error)
 	proxyStreamFunc  func(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, sClient *client.StreamClient, exitStatus chan<- int)
 	getCmFunc        func() *store.ConcurrencyManager
 	getRegistryFunc  func() *buffer.StreamRegistry
 }
 
-func (m *mockStreamManager) LoadBalancer(ctx context.Context, req *http.Request) (*loadbalancer.LoadBalancerResult, error) {
+func (m *mockStreamManager) NewLBInstance() *loadbalancer.LoadBalancerInstance {
+	cm := store.NewConcurrencyManager()
+	return loadbalancer.NewLoadBalancerInstance(cm, loadbalancer.NewDefaultLBConfig())
+}
+
+func (m *mockStreamManager) LoadBalancer(ctx context.Context, req *http.Request, instance *loadbalancer.LoadBalancerInstance) (*loadbalancer.LoadBalancerResult, error) {
 	if m.loadBalancerFunc != nil {
-		return m.loadBalancerFunc(ctx, req)
+		return m.loadBalancerFunc(ctx, req, instance)
 	}
 	return nil, errors.New("loadBalancerFunc not implemented")
 }
@@ -88,7 +93,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
 
-				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request) (*loadbalancer.LoadBalancerResult, error) {
+				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, instance *loadbalancer.LoadBalancerInstance) (*loadbalancer.LoadBalancerResult, error) {
 					return &loadbalancer.LoadBalancerResult{Response: mockResponse(http.StatusOK, "test content"), URL: "http://example.com", Index: "1", SubIndex: "1"}, nil
 				}
 
@@ -117,7 +122,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 				manager := &mockStreamManager{}
 
 				callCount := 0
-				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request) (*loadbalancer.LoadBalancerResult, error) {
+				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, instance *loadbalancer.LoadBalancerInstance) (*loadbalancer.LoadBalancerResult, error) {
 					callCount++
 					if callCount == 1 {
 						return &loadbalancer.LoadBalancerResult{Response: mockResponse(http.StatusOK, "retry content"), URL: "http://retry.com", Index: "1", SubIndex: "1"}, nil
@@ -155,7 +160,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
 
-				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request) (*loadbalancer.LoadBalancerResult, error) {
+				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, instance *loadbalancer.LoadBalancerInstance) (*loadbalancer.LoadBalancerResult, error) {
 					return &loadbalancer.LoadBalancerResult{Response: mockResponse(http.StatusOK, "timeout content"), URL: "http://timeout.com", Index: "1", SubIndex: "1"}, nil
 				}
 
@@ -208,7 +213,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
 
-				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request) (*loadbalancer.LoadBalancerResult, error) {
+				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, instance *loadbalancer.LoadBalancerInstance) (*loadbalancer.LoadBalancerResult, error) {
 					return nil, errors.New("network connection error")
 				}
 
@@ -235,7 +240,7 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
 
-				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request) (*loadbalancer.LoadBalancerResult, error) {
+				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, instance *loadbalancer.LoadBalancerInstance) (*loadbalancer.LoadBalancerResult, error) {
 					return &loadbalancer.LoadBalancerResult{Response: mockResponse(http.StatusInternalServerError, "server error"), URL: "http://error.com", Index: "1", SubIndex: "1"}, nil
 				}
 
@@ -307,7 +312,7 @@ func TestStreamHTTPHandler_DisconnectionConcurrency(t *testing.T) {
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
 
-				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request) (*loadbalancer.LoadBalancerResult, error) {
+				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, instance *loadbalancer.LoadBalancerInstance) (*loadbalancer.LoadBalancerResult, error) {
 					return &loadbalancer.LoadBalancerResult{Response: mockResponse(http.StatusOK, "test content"), URL: "http://example.com", Index: "1", SubIndex: "m3u_1"}, nil
 				}
 
@@ -351,7 +356,7 @@ func TestStreamHTTPHandler_DisconnectionConcurrency(t *testing.T) {
 				var streamWG sync.WaitGroup
 				streamWG.Add(5) // Wait for 5 streams to be active
 
-				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request) (*loadbalancer.LoadBalancerResult, error) {
+				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, instance *loadbalancer.LoadBalancerInstance) (*loadbalancer.LoadBalancerResult, error) {
 					return &loadbalancer.LoadBalancerResult{Response: mockResponse(http.StatusOK, "test content"), URL: "http://example.com", Index: "1", SubIndex: "m3u_2"}, nil
 				}
 
@@ -388,7 +393,7 @@ func TestStreamHTTPHandler_DisconnectionConcurrency(t *testing.T) {
 
 				completionCount := int32(0)
 
-				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request) (*loadbalancer.LoadBalancerResult, error) {
+				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, instance *loadbalancer.LoadBalancerInstance) (*loadbalancer.LoadBalancerResult, error) {
 					count := atomic.AddInt32(&completionCount, 1)
 					// Alternate between different m3u indices to test cross-stream impacts
 					m3uIndex := fmt.Sprintf("m3u_%d", count%2+3)
@@ -446,7 +451,7 @@ func TestStreamHTTPHandler_DisconnectionConcurrency(t *testing.T) {
 			setupMocks: func() *mockStreamManager {
 				manager := &mockStreamManager{}
 
-				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request) (*loadbalancer.LoadBalancerResult, error) {
+				manager.loadBalancerFunc = func(ctx context.Context, req *http.Request, instance *loadbalancer.LoadBalancerInstance) (*loadbalancer.LoadBalancerResult, error) {
 					return &loadbalancer.LoadBalancerResult{Response: mockResponse(http.StatusOK, "test content"), URL: "http://example.com", Index: "1", SubIndex: "m3u_5"}, nil
 				}
 

@@ -61,6 +61,7 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, streamClient *clie
 	}
 
 	coordinator := h.manager.GetStreamRegistry().GetOrCreateCoordinator(streamURL)
+	lbInstance := h.manager.NewLBInstance()
 
 	for {
 		lbResult := coordinator.GetWriterLBResult()
@@ -68,7 +69,7 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, streamClient *clie
 		if lbResult == nil {
 			h.logger.Debugf("No existing shared buffer found for %s", streamURL)
 			h.logger.Debugf("Client %s executing load balancer.", r.RemoteAddr)
-			lbResult, err = h.manager.LoadBalancer(ctx, r)
+			lbResult, err = h.manager.LoadBalancer(ctx, r, lbInstance)
 			if err != nil {
 				h.logger.Logf("Load balancer error (%s): %v", r.URL.Path, err)
 				return
@@ -88,15 +89,20 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, streamClient *clie
 			h.manager.ProxyStream(proxyCtx, coordinator, lbResult, streamClient, exitStatus)
 		}()
 
+		var code int
 		select {
 		case <-ctx.Done():
 			h.logger.Logf("Client has closed the stream: %s", r.RemoteAddr)
 			return
-		case code := <-exitStatus:
-			if h.handleExitCode(code, r) {
-				return
-			}
-			// Otherwise, retry with a new lbResult.
+		case code = <-exitStatus:
+		}
+
+		if h.shouldExcludeURL(code) {
+			lbInstance.ExcludeURL(lbResult.URL)
+		}
+
+		if h.handleExitCode(code, r) {
+			return
 		}
 
 		select {
@@ -105,6 +111,15 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, streamClient *clie
 			return
 		case <-time.After(500 * time.Millisecond):
 		}
+	}
+}
+
+func (h *StreamHTTPHandler) shouldExcludeURL(code int) bool {
+	switch code {
+	case proxy.StatusEOF, proxy.StatusServerError, proxy.StatusIncompatible, proxy.StatusM3U8ParseError:
+		return true
+	default:
+		return false
 	}
 }
 
