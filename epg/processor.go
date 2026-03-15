@@ -1,6 +1,7 @@
 package epg
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/xml"
 	"fmt"
@@ -117,7 +118,15 @@ func (p *Processor) downloadSource(ctx context.Context, idx string) (string, err
 		return p.fallback(finalPath, fmt.Errorf("create tmp: %w", err))
 	}
 
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	body, err := decompressIfNeeded(resp, epgURL)
+	if err != nil {
+		f.Close()
+		os.Remove(tmpPath)
+		return p.fallback(finalPath, fmt.Errorf("decompress: %w", err))
+	}
+	defer body.Close()
+
+	if _, err := io.Copy(f, body); err != nil {
 		f.Close()
 		os.Remove(tmpPath)
 		return p.fallback(finalPath, fmt.Errorf("write: %w", err))
@@ -138,6 +147,51 @@ func (p *Processor) fallback(cachedPath string, origErr error) (string, error) {
 		return cachedPath, nil
 	}
 	return "", origErr
+}
+
+// decompressIfNeeded wraps resp.Body in a gzip reader when the response
+// appears to be gzip-compressed but is NOT already transparently decompressed
+// by Go's HTTP transport (i.e. the body is a raw .gz file rather than one
+// signalled with Content-Encoding: gzip).
+//
+// Detection order:
+//  1. URL path ends with ".gz"
+//  2. Content-Type is application/gzip or application/x-gzip
+//
+// Note: Go's http.Transport handles Content-Encoding: gzip transparently, so
+// we only need to take action for the "file body is gzip" case.
+func decompressIfNeeded(resp *http.Response, rawURL string) (io.ReadCloser, error) {
+	ct := resp.Header.Get("Content-Type")
+	urlPath := strings.ToLower(strings.SplitN(rawURL, "?", 2)[0])
+
+	needsGzip := strings.HasSuffix(urlPath, ".gz") ||
+		strings.Contains(ct, "application/gzip") ||
+		strings.Contains(ct, "application/x-gzip")
+
+	if !needsGzip {
+		return resp.Body, nil
+	}
+
+	gr, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("gzip reader: %w", err)
+	}
+	// Return a ReadCloser that closes both the gzip reader and the underlying body.
+	return struct {
+		io.Reader
+		io.Closer
+	}{gr, multiCloser{gr, resp.Body}}, nil
+}
+
+type multiCloser [2]io.Closer
+
+func (mc multiCloser) Close() error {
+	err1 := mc[0].Close()
+	err2 := mc[1].Close()
+	if err1 != nil {
+		return err1
+	}
+	return err2
 }
 
 // mergeXMLTV merges multiple XMLTV source files into a single output file.
