@@ -186,7 +186,7 @@ func loadTvgIDs() map[string]struct{} {
 		return nil // no filter
 	}
 	ids := make(map[string]struct{})
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 		if line != "" {
 			ids[line] = struct{}{}
 		}
