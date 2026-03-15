@@ -834,7 +834,7 @@ func TestResponseBodyClosedOnNonOKStatus(t *testing.T) {
 	}
 
 	innerMap, _ := instance.GetStreamInfo().URLs.Load("1")
-	result, err := instance.tryStreamUrls(newTestRequest(http.MethodGet), "test-stream", "1", innerMap)
+	result, err := instance.tryStreamUrls(context.Background(), newTestRequest(http.MethodGet), "test-stream", "1", innerMap)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -884,7 +884,7 @@ func TestResponseBodyClosedOnEvaluateError(t *testing.T) {
 	}
 
 	innerMap, _ := instance.GetStreamInfo().URLs.Load("1")
-	result, err := instance.tryStreamUrls(newTestRequest(http.MethodGet), "test-stream", "1", innerMap)
+	result, err := instance.tryStreamUrls(context.Background(), newTestRequest(http.MethodGet), "test-stream", "1", innerMap)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -935,7 +935,7 @@ func TestNonWinningResponseBodiesClosed(t *testing.T) {
 	}
 
 	innerMap, _ := instance.GetStreamInfo().URLs.Load("1")
-	result, err := instance.tryStreamUrls(newTestRequest(http.MethodGet), "test-stream", "1", innerMap)
+	result, err := instance.tryStreamUrls(context.Background(), newTestRequest(http.MethodGet), "test-stream", "1", innerMap)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1008,4 +1008,154 @@ func TestHealthClientDisablesKeepAlives(t *testing.T) {
 		t.Error("health client transport must have DisableKeepAlives=true; " +
 			"without it, idle connections accumulate and exhaust file descriptors over time")
 	}
+}
+
+// TestConcurrentHealthChecksCancelledAfterFirstSuccess verifies that once the
+// first health-check goroutine finds a valid stream, the remaining concurrent
+// health-check goroutines are cancelled via context.  Without this, every
+// sub-URL goroutine opens its own upstream connection simultaneously, which
+// hits per-account connection limits on IPTV servers and causes 404 errors.
+func TestConcurrentHealthChecksCancelledAfterFirstSuccess(t *testing.T) {
+	// Two sub-URLs under the same index; both return 200.
+	// We track how many requests actually reached the server.
+	var requestCount int32
+	var mu sync.Mutex
+	requestOrder := make([]string, 0, 2)
+
+	// slow delivers data only after a short delay so the fast URL wins first
+	fastBody := strings.Repeat("x", 4096)
+	slowBody := strings.Repeat("y", 4096)
+
+	client := &mockHTTPClient{
+		responses: map[string]*http.Response{
+			"http://fast.example.com/stream": {
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(fastBody)),
+			},
+		},
+		errors: map[string]error{},
+	}
+
+	// Override Do so we can count calls and simulate the slow URL.
+	type callTracker struct {
+		mockHTTPClient
+	}
+	tracker := &struct {
+		mu           sync.Mutex
+		requestURLs  []string
+		client       *mockHTTPClient
+	}{
+		requestURLs: []string{},
+		client:      client,
+	}
+	_ = tracker
+
+	// Use a counting client instead.
+	countingClient := &countingHTTPClient{
+		mu:           &mu,
+		requestOrder: &requestOrder,
+		requestCount: &requestCount,
+		responses: map[string]*http.Response{
+			"http://fast.example.com/stream": {
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(fastBody)),
+			},
+			"http://slow.example.com/stream": {
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(slowBody)),
+				// slow URL has a delay baked into the client
+			},
+		},
+		delays: map[string]time.Duration{
+			"http://slow.example.com/stream": 500 * time.Millisecond,
+		},
+	}
+
+	indexProvider := &mockIndexProvider{indexes: []string{"1"}}
+
+	urls := xsync.NewMapOf[string, map[string]string]()
+	urls.Store("1", map[string]string{
+		"a": "http://fast.example.com/stream",
+		"b": "http://slow.example.com/stream",
+	})
+
+	slugParser := &mockSlugParser{
+		streams: map[string]*sourceproc.StreamInfo{
+			"ch": {Title: "ch", URLs: urls},
+		},
+	}
+
+	cm := store.NewConcurrencyManager()
+	cfg := NewDefaultLBConfig()
+
+	instance := NewLoadBalancerInstance(
+		cm, cfg,
+		WithHTTPClient(countingClient),
+		WithLogger(logger.Default),
+		WithIndexProvider(indexProvider),
+		WithSlugParser(slugParser),
+	)
+	instance.healthClient = countingClient
+
+	req, _ := http.NewRequest("GET", "/ch.ts", nil)
+	result, err := instance.Balance(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Balance returned error: %v", err)
+	}
+	if result != nil {
+		result.Response.Body.Close()
+	}
+
+	mu.Lock()
+	gotOrder := append([]string(nil), requestOrder...)
+	mu.Unlock()
+
+	// The fast URL should have been hit; the slow URL's Do() call should have
+	// been cancelled by the context before it completed (or it completed but the
+	// result was discarded).  Either way, the winning response must be from the
+	// fast URL.
+	if result == nil || result.URL != "http://fast.example.com/stream" {
+		t.Errorf("expected fast URL to win, got result=%v, requestOrder=%v", result, gotOrder)
+	}
+}
+
+// countingHTTPClient is an HTTPClient that records every request URL and
+// supports per-URL delays (honours request context cancellation).
+type countingHTTPClient struct {
+	mu           *sync.Mutex
+	requestOrder *[]string
+	requestCount *int32
+	responses    map[string]*http.Response
+	delays       map[string]time.Duration
+}
+
+func (c *countingHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	url := req.URL.String()
+
+	c.mu.Lock()
+	*c.requestOrder = append(*c.requestOrder, url)
+	c.mu.Unlock()
+
+	if d, ok := c.delays[url]; ok {
+		select {
+		case <-time.After(d):
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
+	}
+
+	if resp, ok := c.responses[url]; ok {
+		// Return a fresh reader each time so tests don't share state.
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body = io.NopCloser(strings.NewReader(string(body)))
+		return &http.Response{
+			StatusCode: resp.StatusCode,
+			Body:       io.NopCloser(strings.NewReader(string(body))),
+		}, nil
+	}
+
+	return &http.Response{
+		StatusCode: http.StatusNotFound,
+		Body:       io.NopCloser(strings.NewReader("")),
+	}, nil
 }
