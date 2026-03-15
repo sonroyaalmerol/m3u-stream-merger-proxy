@@ -136,7 +136,14 @@ func TestStreamHTTPHandler(t *testing.T) {
 		line := scanner.Text()
 		if isUrl := strings.HasPrefix(line, "http"); isUrl {
 			t.Run(line, func(t *testing.T) {
-				req := httptest.NewRequest(http.MethodGet, line, nil)
+				testDuration := 2 * time.Second
+
+				// Cancel the request slightly after the observation window so
+				// the handler exits and pw.Close() unblocks any pending read.
+				ctx, cancel := context.WithTimeout(context.Background(), testDuration+2*time.Second)
+				defer cancel()
+
+				req := httptest.NewRequest(http.MethodGet, line, nil).WithContext(ctx)
 				pr, pw := io.Pipe()
 				defer pr.Close()
 
@@ -145,22 +152,31 @@ func TestStreamHTTPHandler(t *testing.T) {
 					header: make(http.Header),
 				}
 
-				// Create a channel to coordinate test completion
-				done := make(chan struct{})
-
-				// Start the stream handler in a goroutine
+				// Start the stream handler in a goroutine; close pw when it
+				// exits so any blocked pr.Read returns immediately.
 				go func() {
 					streamHandler.ServeHTTP(rw, req)
-					close(done)
+					pw.Close()
 				}()
 
-				// Read and compare streams for a set duration
-				testDuration := 2 * time.Second
+				// Use a goroutine for the read so that the timer select case
+				// can fire even while a read is in progress (pr.Read blocks).
+				type readResult struct {
+					n   int
+					err error
+				}
+				readCh := make(chan readResult, 1)
+				startRead := func() {
+					buf := make([]byte, 32*1024)
+					go func() {
+						n, err := pr.Read(buf)
+						readCh <- readResult{n, err}
+					}()
+				}
+
 				timer := time.NewTimer(testDuration)
-
-				buffer2 := make([]byte, 32*1024)
-
 				var totalBytes2 int64
+				startRead()
 
 				for {
 					select {
@@ -168,30 +184,23 @@ func TestStreamHTTPHandler(t *testing.T) {
 						t.Logf("Test completed after %v", testDuration)
 						t.Logf("Total bytes read: %d", totalBytes2)
 						if totalBytes2 == 0 {
-							t.Logf("No data received from one or both streams")
+							t.Logf("No data received from stream")
 							success = false
 						}
 						return
-					default:
-						// Read from response stream
-						n2, err2 := pr.Read(buffer2)
-						if err2 != nil && err2 != io.EOF {
-							t.Logf("Error reading response stream: %v", err2)
-							success = false
+					case res := <-readCh:
+						if res.err != nil {
+							if res.err != io.EOF {
+								t.Logf("Error reading response stream: %v", res.err)
+								success = false
+							}
 							return
 						}
-
-						if n2 > 0 {
-							totalBytes2 += int64(n2)
+						if res.n > 0 {
+							totalBytes2 += int64(res.n)
+							t.Logf("Received data: %d bytes", res.n)
 						}
-
-						// Verify data is being received
-						if n2 > 0 {
-							t.Logf("Received data: %d bytes", n2)
-						}
-
-						// Small delay to prevent tight loop
-						time.Sleep(10 * time.Millisecond)
+						startRead()
 					}
 				}
 			})
