@@ -1136,6 +1136,116 @@ type countingHTTPClient struct {
 	delays       map[string]time.Duration
 }
 
+// contextCapturingHTTPClient records the context of every request it receives,
+// keyed by URL. Used to verify that the winning health-check request is made
+// with the caller's ctx (not the internal healthCtx that gets cancelled when a
+// winner is found).
+type contextCapturingHTTPClient struct {
+	mu        sync.Mutex
+	contexts  map[string]context.Context
+	responses map[string]string
+	delays    map[string]time.Duration
+}
+
+func (c *contextCapturingHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	c.mu.Lock()
+	c.contexts[req.URL.String()] = req.Context()
+	c.mu.Unlock()
+
+	if d, ok := c.delays[req.URL.String()]; ok {
+		select {
+		case <-time.After(d):
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
+	}
+
+	content, ok := c.responses[req.URL.String()]
+	if !ok {
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Body:       io.NopCloser(strings.NewReader("")),
+		}, nil
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(content)),
+	}, nil
+}
+
+func (c *contextCapturingHTTPClient) getContext(url string) context.Context {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.contexts[url]
+}
+
+// TestWinnerContextNotCancelledAfterHealthCheck is a regression test for the
+// bug introduced in commit 263eb08: the health-check HTTP request was created
+// with healthCtx instead of ctx. When the winner called healthCancel() to abort
+// remaining goroutines, it also cancelled its own request's context, tearing
+// down the underlying TCP connection. Subsequent reads from result.Response.Body
+// returned context.Canceled (surfaced as EOF by the stream writer), triggering
+// an immediate and infinite failover loop.
+func TestWinnerContextNotCancelledAfterHealthCheck(t *testing.T) {
+	const winnerURL = "http://winner.test/stream"
+	const loserURL = "http://loser.test/stream"
+
+	client := &contextCapturingHTTPClient{
+		contexts: make(map[string]context.Context),
+		responses: map[string]string{
+			winnerURL: strings.Repeat("x", 512),
+			loserURL:  strings.Repeat("y", 512),
+		},
+		delays: map[string]time.Duration{
+			loserURL: 200 * time.Millisecond,
+		},
+	}
+
+	urls := xsync.NewMapOf[string, map[string]string]()
+	urls.Store("1", map[string]string{
+		"a": winnerURL,
+		"b": loserURL,
+	})
+	slugParser := &mockSlugParser{
+		streams: map[string]*sourceproc.StreamInfo{
+			"ch": {Title: "ch", URLs: urls},
+		},
+	}
+
+	cm := store.NewConcurrencyManager()
+	cfg := &LBConfig{MaxRetries: 1, RetryWait: 0, BufferChunk: 512}
+	instance := NewLoadBalancerInstance(cm, cfg,
+		WithHTTPClient(client),
+		WithLogger(logger.Default),
+		WithIndexProvider(&mockIndexProvider{indexes: []string{"1"}}),
+		WithSlugParser(slugParser),
+	)
+	instance.healthClient = client
+	if err := instance.fetchBackendUrls("ch"); err != nil {
+		t.Fatalf("fetchBackendUrls: %v", err)
+	}
+
+	innerMap, _ := instance.GetStreamInfo().URLs.Load("1")
+	result, err := instance.tryStreamUrls(context.Background(), newTestRequest(http.MethodGet), "ch", "1", innerMap)
+	if err != nil {
+		t.Fatalf("tryStreamUrls error: %v", err)
+	}
+	defer result.Response.Body.Close()
+
+	// After tryStreamUrls returns, healthCancel() has been called internally.
+	// The winning request must have been made with the parent ctx (not healthCtx),
+	// so its context must still be valid.
+	winnerCtx := client.getContext(result.URL)
+	if winnerCtx == nil {
+		t.Fatal("no context captured for winner URL")
+	}
+	if err := winnerCtx.Err(); err != nil {
+		t.Errorf("winner request context was cancelled after tryStreamUrls returned: %v\n"+
+			"regression: health-check request was created with healthCtx instead of ctx,\n"+
+			"so healthCancel() tears down the winner's connection, causing immediate EOF", err)
+	}
+}
+
 func (c *countingHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	url := req.URL.String()
 

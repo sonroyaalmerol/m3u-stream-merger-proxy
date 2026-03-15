@@ -358,7 +358,7 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 			origHasAccept := false
 			originalHeaders := req.Header.Clone()
 
-			newReq, err := http.NewRequestWithContext(healthCtx, req.Method, url, nil)
+			newReq, err := http.NewRequestWithContext(ctx, req.Method, url, nil)
 			if err != nil {
 				instance.logger.Errorf("Error creating request: %s", err.Error())
 				instance.markTested(streamId, candidateId)
