@@ -19,6 +19,48 @@ import (
 	"github.com/puzpuzpuz/xsync/v3"
 )
 
+// trackingBody wraps a ReadCloser and records whether Close has been called.
+// Used in tests to verify that response bodies are properly closed on all
+// code paths, preventing TCP connection leaks.
+type trackingBody struct {
+	io.ReadCloser
+	mu     sync.Mutex
+	closed bool
+}
+
+func newTrackingBody(content string) *trackingBody {
+	return &trackingBody{ReadCloser: io.NopCloser(strings.NewReader(content))}
+}
+
+func (b *trackingBody) Close() error {
+	b.mu.Lock()
+	b.closed = true
+	b.mu.Unlock()
+	return b.ReadCloser.Close()
+}
+
+func (b *trackingBody) IsClosed() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.closed
+}
+
+// errorOnReadBody is a ReadCloser whose Read always returns an error, used to
+// trigger the evaluateBufferHealth error path.
+type errorOnReadBody struct {
+	trackingBody
+}
+
+func newErrorOnReadBody() *errorOnReadBody {
+	b := &errorOnReadBody{}
+	b.ReadCloser = io.NopCloser(strings.NewReader(""))
+	return b
+}
+
+func (b *errorOnReadBody) Read(_ []byte) (int, error) {
+	return 0, fmt.Errorf("simulated read error")
+}
+
 // Helper function to create test requests
 func newTestRequest(method string) *http.Request {
 	req, _ := http.NewRequest(method, "/test-stream.m3u8", nil)
@@ -746,5 +788,224 @@ func TestLoadBalancerConcurrencyPriority(t *testing.T) {
 			os.Unsetenv("M3U_MAX_CONCURRENCY_2")
 			os.Unsetenv("M3U_MAX_CONCURRENCY_3")
 		})
+	}
+}
+
+// --- Resource-leak regression tests ---
+// These tests guard against the gradual degradation bug where HTTP response
+// bodies were left open, eventually exhausting file descriptors / connections.
+
+// TestResponseBodyClosedOnNonOKStatus verifies that when a health-check
+// request returns a non-200 status, the response body is closed so the
+// underlying TCP connection is returned to the pool.
+func TestResponseBodyClosedOnNonOKStatus(t *testing.T) {
+	body404 := newTrackingBody("not found")
+	body200 := newTrackingBody(strings.Repeat("x", 512))
+
+	client := &mockHTTPClient{
+		responses: map[string]*http.Response{
+			"http://primary.test/stream": {StatusCode: http.StatusNotFound, Body: body404},
+			"http://backup.test/stream":  {StatusCode: http.StatusOK, Body: body200},
+		},
+		errors: make(map[string]error),
+	}
+
+	urls := xsync.NewMapOf[string, map[string]string]()
+	urls.Store("1", map[string]string{
+		"a": "http://primary.test/stream",
+		"b": "http://backup.test/stream",
+	})
+	slugParser := &mockSlugParser{
+		streams: map[string]*sourceproc.StreamInfo{
+			"test-stream": {Title: "Test Stream", URLs: urls},
+		},
+	}
+
+	cm := store.NewConcurrencyManager()
+	cfg := &LBConfig{MaxRetries: 1, RetryWait: 0, BufferChunk: 512}
+	instance := NewLoadBalancerInstance(cm, cfg,
+		WithHTTPClient(client),
+		WithLogger(logger.Default),
+		WithIndexProvider(&mockIndexProvider{indexes: []string{"1"}}),
+		WithSlugParser(slugParser),
+	)
+	if err := instance.fetchBackendUrls("test-stream"); err != nil {
+		t.Fatalf("fetchBackendUrls: %v", err)
+	}
+
+	innerMap, _ := instance.GetStreamInfo().URLs.Load("1")
+	result, err := instance.tryStreamUrls(newTestRequest(http.MethodGet), "test-stream", "1", innerMap)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	result.Response.Body.Close()
+
+	if !body404.IsClosed() {
+		t.Error("body for non-200 response was not closed; this leaks a TCP connection")
+	}
+}
+
+// TestResponseBodyClosedOnEvaluateError verifies that when evaluateBufferHealth
+// returns an error (e.g. the upstream stream errors mid-read), the response
+// body is closed so the TCP connection is not leaked.
+func TestResponseBodyClosedOnEvaluateError(t *testing.T) {
+	badBody := newErrorOnReadBody()
+	goodBody := newTrackingBody(strings.Repeat("x", 512))
+
+	client := &mockHTTPClient{
+		responses: map[string]*http.Response{
+			"http://bad.test/stream":  {StatusCode: http.StatusOK, Body: badBody},
+			"http://good.test/stream": {StatusCode: http.StatusOK, Body: goodBody},
+		},
+		errors: make(map[string]error),
+	}
+
+	urls := xsync.NewMapOf[string, map[string]string]()
+	urls.Store("1", map[string]string{
+		"a": "http://bad.test/stream",
+		"b": "http://good.test/stream",
+	})
+	slugParser := &mockSlugParser{
+		streams: map[string]*sourceproc.StreamInfo{
+			"test-stream": {Title: "Test Stream", URLs: urls},
+		},
+	}
+
+	cm := store.NewConcurrencyManager()
+	cfg := &LBConfig{MaxRetries: 1, RetryWait: 0, BufferChunk: 512}
+	instance := NewLoadBalancerInstance(cm, cfg,
+		WithHTTPClient(client),
+		WithLogger(logger.Default),
+		WithIndexProvider(&mockIndexProvider{indexes: []string{"1"}}),
+		WithSlugParser(slugParser),
+	)
+	if err := instance.fetchBackendUrls("test-stream"); err != nil {
+		t.Fatalf("fetchBackendUrls: %v", err)
+	}
+
+	innerMap, _ := instance.GetStreamInfo().URLs.Load("1")
+	result, err := instance.tryStreamUrls(newTestRequest(http.MethodGet), "test-stream", "1", innerMap)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	result.Response.Body.Close()
+
+	if !badBody.IsClosed() {
+		t.Error("body for stream that errored during health check was not closed; this leaks a TCP connection")
+	}
+}
+
+// TestNonWinningResponseBodiesClosed verifies that when multiple candidate
+// streams pass the health check concurrently, only the best one is returned
+// and all others have their response bodies closed.
+func TestNonWinningResponseBodiesClosed(t *testing.T) {
+	// Both bodies return data quickly (EOF), so both pass evaluateBufferHealth.
+	body1 := newTrackingBody(strings.Repeat("a", 512))
+	body2 := newTrackingBody(strings.Repeat("b", 512))
+
+	client := &mockHTTPClient{
+		responses: map[string]*http.Response{
+			"http://stream1.test/s": {StatusCode: http.StatusOK, Body: body1},
+			"http://stream2.test/s": {StatusCode: http.StatusOK, Body: body2},
+		},
+		errors: make(map[string]error),
+	}
+
+	urls := xsync.NewMapOf[string, map[string]string]()
+	urls.Store("1", map[string]string{
+		"a": "http://stream1.test/s",
+		"b": "http://stream2.test/s",
+	})
+	slugParser := &mockSlugParser{
+		streams: map[string]*sourceproc.StreamInfo{
+			"test-stream": {Title: "Test Stream", URLs: urls},
+		},
+	}
+
+	cm := store.NewConcurrencyManager()
+	cfg := &LBConfig{MaxRetries: 1, RetryWait: 0, BufferChunk: 512}
+	instance := NewLoadBalancerInstance(cm, cfg,
+		WithHTTPClient(client),
+		WithLogger(logger.Default),
+		WithIndexProvider(&mockIndexProvider{indexes: []string{"1"}}),
+		WithSlugParser(slugParser),
+	)
+	if err := instance.fetchBackendUrls("test-stream"); err != nil {
+		t.Fatalf("fetchBackendUrls: %v", err)
+	}
+
+	innerMap, _ := instance.GetStreamInfo().URLs.Load("1")
+	result, err := instance.tryStreamUrls(newTestRequest(http.MethodGet), "test-stream", "1", innerMap)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Before we close the winner: exactly one body should already be closed
+	// (the loser was discarded by tryStreamUrls).
+	loserClosed := body1.IsClosed() || body2.IsClosed()
+	if !loserClosed {
+		t.Error("non-winning response body was not closed by tryStreamUrls; this leaks a TCP connection")
+	}
+
+	winnerStillOpen := !body1.IsClosed() || !body2.IsClosed()
+	if !winnerStillOpen {
+		t.Error("winning response body was closed prematurely by tryStreamUrls")
+	}
+
+	// Closing the winner should close the remaining body.
+	result.Response.Body.Close()
+	if !body1.IsClosed() || !body2.IsClosed() {
+		t.Error("not all response bodies were closed after winner was closed")
+	}
+}
+
+// TestEvaluateBufferHealthBodyClose verifies that after evaluateBufferHealth
+// reconstructs resp.Body (to prepend already-read bytes), calling Close on
+// the returned body actually closes the original underlying body — i.e. the
+// io.NopCloser replacement bug is gone.
+func TestEvaluateBufferHealthBodyClose(t *testing.T) {
+	original := newTrackingBody(strings.Repeat("x", 2048))
+	resp := &http.Response{Body: original}
+
+	_, err := evaluateBufferHealth(resp, 512)
+	if err != nil {
+		t.Fatalf("evaluateBufferHealth returned error: %v", err)
+	}
+
+	if original.IsClosed() {
+		t.Fatal("original body was closed during measurement (should only be closed by caller)")
+	}
+
+	// Simulates what the caller does with the winning response.
+	resp.Body.Close()
+
+	if !original.IsClosed() {
+		t.Error("closing resp.Body after evaluateBufferHealth did not close the original body; " +
+			"the underlying TCP connection is leaked")
+	}
+}
+
+// TestHealthClientDisablesKeepAlives verifies that the health-check HTTP
+// client always has DisableKeepAlives set. The health client is created fresh
+// per load-balancer instance, so idle connections would never be reused —
+// without DisableKeepAlives they accumulate as open file descriptors.
+func TestHealthClientDisablesKeepAlives(t *testing.T) {
+	cm := store.NewConcurrencyManager()
+	cfg := NewDefaultLBConfig()
+	instance := NewLoadBalancerInstance(cm, cfg)
+
+	hc, ok := instance.healthClient.(*http.Client)
+	if !ok {
+		t.Fatal("healthClient is not *http.Client")
+	}
+
+	transport, ok := hc.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("healthClient.Transport is not *http.Transport")
+	}
+
+	if !transport.DisableKeepAlives {
+		t.Error("health client transport must have DisableKeepAlives=true; " +
+			"without it, idle connections accumulate and exhaust file descriptors over time")
 	}
 }
