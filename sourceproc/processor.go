@@ -3,6 +3,7 @@ package sourceproc
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"math"
 	"net/http"
 	"os"
@@ -250,7 +251,12 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 		close(p.revalidatingDone)
 	}()
 
-	_, err := p.writer.WriteString("#EXTM3U\n")
+	header := "#EXTM3U"
+	if len(utils.GetEPGIndexes()) > 0 {
+		header += fmt.Sprintf(` url-tvg="%s/epg.xml"`, baseURL)
+	}
+	header += "\n"
+	_, err := p.writer.WriteString(header)
 	if err != nil {
 		p.markCriticalError(err)
 		return
