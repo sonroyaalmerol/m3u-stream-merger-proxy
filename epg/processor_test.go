@@ -115,7 +115,7 @@ func TestMergeXMLTV_Basic(t *testing.T) {
 		[]xmlProgramme{{Channel: "ch2", Title: "Show B"}},
 	)), 0644)
 
-	if err := mergeXMLTV([]string{src1, src2}, out); err != nil {
+	if err := mergeXMLTV([]string{src1, src2}, out, nil); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
@@ -143,7 +143,7 @@ func TestMergeXMLTV_DeduplicatesChannels(t *testing.T) {
 		[]xmlChannel{{ID: "dup", DisplayName: "Second"}}, nil,
 	)), 0644)
 
-	if err := mergeXMLTV([]string{src1, src2}, out); err != nil {
+	if err := mergeXMLTV([]string{src1, src2}, out, nil); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
@@ -173,7 +173,7 @@ func TestMergeXMLTV_ProgrammesFromAllSources(t *testing.T) {
 		[]xmlProgramme{{Channel: "ch1", Title: "Evening News"}},
 	)), 0644)
 
-	if err := mergeXMLTV([]string{src1, src2}, out); err != nil {
+	if err := mergeXMLTV([]string{src1, src2}, out, nil); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
@@ -183,6 +183,63 @@ func TestMergeXMLTV_ProgrammesFromAllSources(t *testing.T) {
 	}
 	if len(doc.Programmes) != 2 {
 		t.Errorf("expected 2 programmes (one per source), got %d", len(doc.Programmes))
+	}
+}
+
+// TestMergeXMLTV_FilterByTvgIDs verifies that channels and programmes whose
+// id/channel attribute is not in the tvg-id set are dropped from the output.
+func TestMergeXMLTV_FilterByTvgIDs(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.xml")
+	out := filepath.Join(dir, "out.xml")
+
+	os.WriteFile(src, []byte(xmltvSource(
+		[]xmlChannel{
+			{ID: "keep", DisplayName: "Keep Me"},
+			{ID: "drop", DisplayName: "Drop Me"},
+		},
+		[]xmlProgramme{
+			{Channel: "keep", Title: "Kept Show"},
+			{Channel: "drop", Title: "Dropped Show"},
+		},
+	)), 0644)
+
+	tvgIDs := map[string]struct{}{"keep": {}}
+	if err := mergeXMLTV([]string{src}, out, tvgIDs); err != nil {
+		t.Fatalf("mergeXMLTV: %v", err)
+	}
+
+	doc := parseMergedXML(t, out)
+	if len(doc.Channels) != 1 || doc.Channels[0].ID != "keep" {
+		t.Errorf("expected only 'keep' channel, got %+v", doc.Channels)
+	}
+	if len(doc.Programmes) != 1 || doc.Programmes[0].Title != "Kept Show" {
+		t.Errorf("expected only 'Kept Show' programme, got %+v", doc.Programmes)
+	}
+}
+
+// TestMergeXMLTV_NilFilterKeepsAll verifies that a nil tvg-id map keeps
+// all channels and programmes (backwards-compatible / no-filter behaviour).
+func TestMergeXMLTV_NilFilterKeepsAll(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.xml")
+	out := filepath.Join(dir, "out.xml")
+
+	os.WriteFile(src, []byte(xmltvSource(
+		[]xmlChannel{{ID: "c1"}, {ID: "c2"}},
+		[]xmlProgramme{{Channel: "c1"}, {Channel: "c2"}},
+	)), 0644)
+
+	if err := mergeXMLTV([]string{src}, out, nil); err != nil {
+		t.Fatalf("mergeXMLTV: %v", err)
+	}
+
+	doc := parseMergedXML(t, out)
+	if len(doc.Channels) != 2 {
+		t.Errorf("expected 2 channels with nil filter, got %d", len(doc.Channels))
+	}
+	if len(doc.Programmes) != 2 {
+		t.Errorf("expected 2 programmes with nil filter, got %d", len(doc.Programmes))
 	}
 }
 

@@ -73,8 +73,10 @@ func (p *Processor) Run(ctx context.Context) error {
 		return fmt.Errorf("epg: all sources failed to download")
 	}
 
+	tvgIDs := loadTvgIDs()
+
 	tmpPath := config.GetEPGTmpPath()
-	if err := mergeXMLTV(sources, tmpPath); err != nil {
+	if err := mergeXMLTV(sources, tmpPath, tvgIDs); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("epg: merge: %w", err)
 	}
@@ -149,6 +151,23 @@ func (p *Processor) fallback(cachedPath string, origErr error) (string, error) {
 	return "", origErr
 }
 
+// loadTvgIDs reads the tvg-id set persisted by the M3U processor.  When the
+// file doesn't exist (e.g. EPG ran before any M3U sync) an empty map is
+// returned, which disables filtering so all channels are kept.
+func loadTvgIDs() map[string]struct{} {
+	data, err := os.ReadFile(config.GetEPGTvgIDsPath())
+	if err != nil {
+		return nil // no filter
+	}
+	ids := make(map[string]struct{})
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line != "" {
+			ids[line] = struct{}{}
+		}
+	}
+	return ids
+}
+
 // decompressIfNeeded wraps resp.Body in a gzip reader when the response
 // appears to be gzip-compressed but is NOT already transparently decompressed
 // by Go's HTTP transport (i.e. the body is a raw .gz file rather than one
@@ -196,8 +215,9 @@ func (mc multiCloser) Close() error {
 
 // mergeXMLTV merges multiple XMLTV source files into a single output file.
 // Channels are deduplicated by their id attribute (first occurrence wins).
-// Programmes from all sources are included as-is.
-func mergeXMLTV(sources []string, outputPath string) error {
+// When tvgIDs is non-nil only channels/programmes whose id/channel attribute
+// appears in that set are written; a nil map means "keep everything".
+func mergeXMLTV(sources []string, outputPath string, tvgIDs map[string]struct{}) error {
 	out, err := os.Create(outputPath)
 	if err != nil {
 		return err
@@ -215,15 +235,14 @@ func mergeXMLTV(sources []string, outputPath string) error {
 
 	// First pass: unique <channel> elements.
 	for _, src := range sources {
-		if err := streamXMLTVElements(src, "channel", seenChannels, out); err != nil {
-			// Non-fatal: log at caller level, continue with other sources.
+		if err := streamXMLTVElements(src, "channel", seenChannels, tvgIDs, out); err != nil {
 			_ = err
 		}
 	}
 
 	// Second pass: all <programme> elements.
 	for _, src := range sources {
-		if err := streamXMLTVElements(src, "programme", nil, out); err != nil {
+		if err := streamXMLTVElements(src, "programme", nil, tvgIDs, out); err != nil {
 			_ = err
 		}
 	}
@@ -233,9 +252,11 @@ func mergeXMLTV(sources []string, outputPath string) error {
 }
 
 // streamXMLTVElements reads srcPath and copies every top-level element with the
-// given local name to out.  When seen is non-nil it is used to deduplicate by
-// the element's "id" attribute (first occurrence wins).
-func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, out io.Writer) error {
+// given local name to out.
+//   - seen: when non-nil, deduplicate by the element's "id" attribute
+//   - tvgIDs: when non-nil, skip elements whose identity attribute (id for
+//     channels, channel for programmes) is not in the set
+func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, tvgIDs map[string]struct{}, out io.Writer) error {
 	f, err := os.Open(srcPath)
 	if err != nil {
 		return err
@@ -266,18 +287,32 @@ func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, out 
 			continue
 		}
 
-		// Deduplicate channels by id attribute.
-		if seen != nil {
-			id := attrValue(start, "id")
-			if id != "" {
-				if seen[id] {
-					if err := dec.Skip(); err != nil {
-						return err
-					}
-					continue
+		// For channels the identity attr is "id"; for programmes it is "channel".
+		identityAttr := "id"
+		if elementName == "programme" {
+			identityAttr = "channel"
+		}
+		identity := attrValue(start, identityAttr)
+
+		// Filter: skip elements whose identity is not in the tvg-id set.
+		if tvgIDs != nil && identity != "" {
+			if _, ok := tvgIDs[identity]; !ok {
+				if err := dec.Skip(); err != nil {
+					return err
 				}
-				seen[id] = true
+				continue
 			}
+		}
+
+		// Deduplicate channels by id attribute.
+		if seen != nil && identity != "" {
+			if seen[identity] {
+				if err := dec.Skip(); err != nil {
+					return err
+				}
+				continue
+			}
+			seen[identity] = true
 		}
 
 		if err := copyElement(dec, enc, start); err != nil {
