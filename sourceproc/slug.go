@@ -1,6 +1,7 @@
 package sourceproc
 
 import (
+	"crypto/sha3"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -10,7 +11,6 @@ import (
 	"m3u-stream-merger/logger"
 
 	"github.com/goccy/go-json"
-	"golang.org/x/crypto/sha3"
 )
 
 func EncodeSlug(stream *StreamInfo) string {

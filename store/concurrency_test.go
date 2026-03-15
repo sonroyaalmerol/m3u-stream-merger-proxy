@@ -89,14 +89,12 @@ func TestConcurrencyManagerRaceConditions(t *testing.T) {
 	successCount := int32(0)
 
 	// Start 150 concurrent requests (50 should fail)
-	for i := 0; i < 150; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 150 {
+		wg.Go(func() {
 			if cm.UpdateConcurrency("STRESS", true) {
 				atomic.AddInt32(&successCount, 1)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -111,12 +109,10 @@ func TestConcurrencyManagerRaceConditions(t *testing.T) {
 	}
 
 	// Decrement all
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 100 {
+		wg.Go(func() {
 			cm.UpdateConcurrency("STRESS", false)
-		}()
+		})
 	}
 
 	wg.Wait()

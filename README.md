@@ -28,6 +28,12 @@ Uses the channel title or `tvg-name` (as fallback) to merge multiple identical c
    - **Playlist Endpoint (`/playlist.m3u`):**
      - Access the merged M3U playlist containing streams from different sources.
 
+   - **EPG Endpoint (`/epg.xml`):**
+     - Access the merged XMLTV Electronic Program Guide.
+     - Configure one or more EPG sources via `EPG_URL_X` environment variables.
+     - Channels are deduplicated by their `id` attribute (first source wins); programme entries from every source are included.
+     - Falls back to a locally cached copy if a source is temporarily unreachable.
+
    - **Stream Endpoint (`/p/{originalBasePath}/{streamToken}.{fileExt}`):**
      - Request video streams for specific stream IDs.
      - `originalBasePath`: Parsed from one of the original source. This is to prevent clients to miscategorize the stream due to a missing keyword (e.g. live, vod, etc.).
@@ -80,6 +86,8 @@ services:
       - M3U_URL_2=https://iptvprovider2.com/playlist.m3u
       - M3U_MAX_CONCURRENCY_2=1
       - M3U_URL_X=
+      - EPG_URL_1=https://iptvprovider1.com/epg.xml
+      - EPG_URL_X=
     restart: always
     # [OPTIONAL] Cache persistence: This will allow you to reuse the M3U cache across container recreates.
     # volumes:
@@ -116,6 +124,11 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | SYNC_CRON                   | Set cron schedule expression of the background updates. | 0 0 * * *   |  Any valid cron expression    |
 | SYNC_ON_BOOT                | Set if an initial background syncing will be executed on boot | true    | true/false   |
 | CLEAR_ON_BOOT                | Set if an initial database clearing will be executed on boot | false   | true/false   |
+
+### EPG Source Configs
+| ENV VAR                     | Description                                              | Default Value | Possible Values                                |
+|-----------------------------|----------------------------------------------------------|---------------|------------------------------------------------|
+| EPG_URL_1, EPG_URL_2, EPG_URL_X | Set XMLTV EPG source URLs. The merged guide is served at `/epg.xml`. Omit entirely to disable EPG proxying. | N/A | Any valid XMLTV URL or `file:///path/to/epg.xml` |
 
 ### Load Balancer Configs
 | ENV VAR                     | Description                                              | Default Value | Possible Values                                |

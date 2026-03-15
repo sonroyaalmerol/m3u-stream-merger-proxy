@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -191,7 +192,7 @@ func (m *SortingManager) writeShard(shardIndex uint64, entries map[string]*Strea
 }
 
 func (m *SortingManager) GetSortedEntries(callback func(*StreamInfo)) error {
-	for shardIndex := 0; shardIndex < mutexShards; shardIndex++ {
+	for shardIndex := range mutexShards {
 		index := uint64(shardIndex)
 		m.shardMap.Compute(index, func(oldVal *shardData, loaded bool) (*shardData, bool) {
 			if oldVal == nil {
@@ -206,7 +207,7 @@ func (m *SortingManager) GetSortedEntries(callback func(*StreamInfo)) error {
 
 	entries := make([]*StreamInfo, 0, 1_000_000)
 
-	for shardIndex := 0; shardIndex < mutexShards; shardIndex++ {
+	for shardIndex := range mutexShards {
 		shardFile := filepath.Join(m.basePath, fmt.Sprintf(shardFileTemplate, shardIndex))
 
 		file, err := os.Open(shardFile)
@@ -298,9 +299,7 @@ func mergeStreamInfoAttributes(base, new *StreamInfo) *StreamInfo {
 			if oldValue == nil {
 				oldValue = value
 			} else {
-				for subKey, subValue := range value {
-					oldValue[subKey] = subValue
-				}
+				maps.Copy(oldValue, value)
 			}
 
 			return oldValue, false

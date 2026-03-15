@@ -109,3 +109,23 @@ func GetSourcesDirPath() string {
 func GetSortDirPath() string {
 	return filepath.Join(globalConfig.TempPath, "sorter/")
 }
+
+func GetEPGDirPath() string {
+	return filepath.Join(globalConfig.DataPath, "epg/")
+}
+
+func GetEPGPath() string {
+	return filepath.Join(GetEPGDirPath(), "epg.xml")
+}
+
+func GetEPGTmpPath() string {
+	return filepath.Join(GetEPGDirPath(), "epg.xml.tmp")
+}
+
+func GetEPGSourcePath(index string) string {
+	return filepath.Join(GetEPGDirPath(), "source_"+index+".xml")
+}
+
+func GetEPGSourceTmpPath(index string) string {
+	return filepath.Join(GetEPGDirPath(), "source_"+index+".xml.tmp")
+}
