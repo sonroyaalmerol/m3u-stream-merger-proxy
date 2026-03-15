@@ -152,7 +152,7 @@ func (h *StreamHTTPHandler) handleSegmentStream(streamClient *client.StreamClien
 		h.logger.Errorf("Segment parsing error %s: %s",
 			r.RemoteAddr, r.URL.Path)
 		_ = streamClient.WriteHeader(http.StatusInternalServerError)
-		_, _ = streamClient.Write([]byte(fmt.Sprintf("Segment parsing error: %v", err)))
+		_, _ = streamClient.Write(fmt.Appendf(nil, "Segment parsing error: %v", err))
 		return
 	}
 
@@ -160,7 +160,7 @@ func (h *StreamHTTPHandler) handleSegmentStream(streamClient *client.StreamClien
 	if err != nil {
 		h.logger.Errorf("Failed to fetch URL: %v", err)
 		_ = streamClient.WriteHeader(http.StatusInternalServerError)
-		_, _ = streamClient.Write([]byte(fmt.Sprintf("Failed to fetch URL: %v", err)))
+		_, _ = streamClient.Write(fmt.Appendf(nil, "Failed to fetch URL: %v", err))
 		return
 	}
 	defer resp.Body.Close()

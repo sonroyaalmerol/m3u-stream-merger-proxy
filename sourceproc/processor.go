@@ -53,10 +53,7 @@ func (p *M3UProcessor) Start(r *http.Request) {
 			logger.Default.Errorf("Error while processing stream: %v", err)
 		}
 		processCount++
-		batch := int(math.Pow(10, math.Floor(math.Log10(float64(processCount)))))
-		if batch < 100 {
-			batch = 100
-		}
+		batch := max(int(math.Pow(10, math.Floor(math.Log10(float64(processCount))))), 100)
 		if processCount%batch == 0 {
 			logger.Default.Logf("Processed %d streams so far", processCount)
 		}
@@ -176,7 +173,7 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 		var wgWorkers sync.WaitGroup
 		wgWorkers.Add(numWorkers)
 
-		for i := 0; i < numWorkers; i++ {
+		for range numWorkers {
 			go func() {
 				defer wgWorkers.Done()
 				for stream := range streamCh {

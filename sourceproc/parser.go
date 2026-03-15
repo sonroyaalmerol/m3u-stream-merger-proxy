@@ -1,6 +1,7 @@
 package sourceproc
 
 import (
+	"crypto/sha3"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -13,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/puzpuzpuz/xsync/v3"
-	"golang.org/x/crypto/sha3"
 )
 
 var (

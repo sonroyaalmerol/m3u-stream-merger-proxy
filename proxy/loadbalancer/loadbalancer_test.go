@@ -478,7 +478,7 @@ func TestConcurrentAccess(t *testing.T) {
 	results := make(chan string, numGoroutines)
 	errorsCh := make(chan error, numGoroutines)
 
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(id int) {
 			defer wg.Done()
 
@@ -1041,9 +1041,9 @@ func TestConcurrentHealthChecksCancelledAfterFirstSuccess(t *testing.T) {
 		mockHTTPClient
 	}
 	tracker := &struct {
-		mu           sync.Mutex
-		requestURLs  []string
-		client       *mockHTTPClient
+		mu          sync.Mutex
+		requestURLs []string
+		client      *mockHTTPClient
 	}{
 		requestURLs: []string{},
 		client:      client,

@@ -271,7 +271,7 @@ func TestConcurrentAccess(t *testing.T) {
 	require.NoError(t, err)
 
 	// Make concurrent requests
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		go func() {
 			content, err := os.ReadFile(processor.GetResultPath())
 			require.NoError(t, err)
@@ -284,7 +284,7 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 
 	// Wait for all goroutines
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		select {
 		case <-done:
 			// Success
