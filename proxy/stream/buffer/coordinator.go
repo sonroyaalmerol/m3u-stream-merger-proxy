@@ -287,8 +287,15 @@ func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 	return true
 }
 
+// InitialPosition returns the ring position a new reader should start from.
+func (c *StreamCoordinator) InitialPosition() *ring.Ring {
+	c.Mu.RLock()
+	defer c.Mu.RUnlock()
+	return c.Buffer.Prev()
+}
+
 // ReadChunks retrieves chunks from the ring for a client, given a starting position.
-func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) (
+func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.Ring) (
 	[]*ChunkData, *ChunkData, *ring.Ring,
 ) {
 	c.Mu.RLock()
@@ -296,7 +303,6 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) (
 		c.logger.Debug("ReadChunks: fromPosition is nil, using current buffer")
 		fromPosition = c.Buffer
 	}
-	// Check if the client's pointer is too far behind.
 	if cd, ok := fromPosition.Value.(*ChunkData); ok && cd != nil {
 		currentWriteSeq := atomic.LoadInt64(&c.writeSeq)
 		minSeq := currentWriteSeq - int64(c.config.SharedBufferSize)
@@ -306,11 +312,14 @@ func (c *StreamCoordinator) ReadChunks(fromPosition *ring.Ring) (
 		}
 	}
 
-	// Wait if the client has caught up with the writer and the stream is active.
 	for fromPosition == c.Buffer && atomic.LoadInt32(&c.state) == stateActive {
 		c.Mu.RUnlock()
 		ch := c.subscribe()
-		<-ch
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return nil, nil, fromPosition
+		}
 		c.Mu.RLock()
 	}
 
