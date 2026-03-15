@@ -46,6 +46,24 @@ func GetM3UIndexes() []string {
 }
 
 var (
+	epgIndexes     []string
+	epgIndexesOnce = new(sync.Once)
+)
+
+func GetEPGIndexes() []string {
+	epgIndexesOnce.Do(func() {
+		for _, env := range os.Environ() {
+			pair := strings.SplitN(env, "=", 2)
+			if strings.HasPrefix(pair[0], "EPG_URL_") {
+				indexString := strings.TrimPrefix(pair[0], "EPG_URL_")
+				epgIndexes = append(epgIndexes, indexString)
+			}
+		}
+	})
+	return epgIndexes
+}
+
+var (
 	filters     = make(map[string][]string)
 	filterMutex sync.RWMutex
 )
@@ -86,6 +104,9 @@ func GetFilters(baseEnv string) []string {
 func ResetCaches() {
 	m3uIndexesOnce = new(sync.Once)
 	m3uIndexes = nil
+
+	epgIndexesOnce = new(sync.Once)
+	epgIndexes = nil
 
 	filterMutex.Lock()
 	filters = make(map[string][]string)
