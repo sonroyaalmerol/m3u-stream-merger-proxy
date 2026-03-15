@@ -974,7 +974,7 @@ func TestEvaluateBufferHealthBodyClose(t *testing.T) {
 	original := newTrackingBody(strings.Repeat("x", 2048))
 	resp := &http.Response{Body: original}
 
-	_, err := evaluateBufferHealth(resp, 512)
+	_, err := evaluateBufferHealth(context.Background(), resp, 512)
 	if err != nil {
 		t.Fatalf("evaluateBufferHealth returned error: %v", err)
 	}

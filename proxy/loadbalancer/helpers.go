@@ -3,6 +3,7 @@ package loadbalancer
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,7 +24,7 @@ type readCloser struct {
 	io.Closer
 }
 
-func evaluateBufferHealth(resp *http.Response, readChunkSize int) (float64, error) {
+func evaluateBufferHealth(ctx context.Context, resp *http.Response, readChunkSize int) (float64, error) {
 	const measureDuration = 2 * time.Second
 
 	start := time.Now()
@@ -37,6 +38,9 @@ func evaluateBufferHealth(resp *http.Response, readChunkSize int) (float64, erro
 	deadline := time.Now().Add(measureDuration)
 
 	for time.Now().Before(deadline) {
+		if ctx.Err() != nil {
+			break
+		}
 		n, err := br.Read(temp)
 		if n > 0 {
 			totalBytes += n
