@@ -408,13 +408,13 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 				resultCh <- &streamTestResult{err: fmt.Errorf("nil response")}
 				return
 			}
-			if resp.StatusCode != http.StatusOK {
+			if !isAcceptableStreamStatus(resp.StatusCode) {
 				resp.Body.Close()
-				instance.logger.Errorf("Non-200 status %d for %s %s",
+				instance.logger.Errorf("Unacceptable status %d for %s %s",
 					resp.StatusCode, req.Method, url)
 				instance.markTested(streamId, candidateId)
 				resultCh <- &streamTestResult{
-					err: fmt.Errorf("non-200 status: %d", resp.StatusCode),
+					err: fmt.Errorf("unacceptable status: %d", resp.StatusCode),
 				}
 				return
 			}

@@ -68,6 +68,18 @@ func evaluateBufferHealth(ctx context.Context, resp *http.Response, readChunkSiz
 	return throughput, nil
 }
 
+// isAcceptableStreamStatus returns true for HTTP status codes that indicate a
+// usable stream body.  Besides the standard 200 OK, 206 Partial Content is
+// included because many IPTV servers return it even without a Range header.
+func isAcceptableStreamStatus(code int) bool {
+	switch code {
+	case http.StatusOK, http.StatusPartialContent:
+		return true
+	default:
+		return false
+	}
+}
+
 func sourceprocSortStreamSubUrls(urls map[string]string) []string {
 	keys := make([]string, 0, len(urls))
 	for k := range urls {
