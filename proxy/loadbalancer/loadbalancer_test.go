@@ -80,10 +80,11 @@ func (m *mockSlugParser) GetStreamBySlug(slug string) (*sourceproc.StreamInfo, e
 }
 
 type mockHTTPClient struct {
-	responses map[string]*http.Response
-	errors    map[string]error
-	delay     time.Duration
-	mu        sync.RWMutex
+	responses   map[string]*http.Response
+	bodyStrings map[string]string
+	errors      map[string]error
+	delay       time.Duration
+	mu          sync.RWMutex
 }
 
 func (m *mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
@@ -102,6 +103,13 @@ func (m *mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
 
 	if err := m.errors[req.URL.String()]; err != nil {
 		return nil, err
+	}
+
+	if content, ok := m.bodyStrings[req.URL.String()]; ok {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(content)),
+		}, nil
 	}
 
 	resp := m.responses[req.URL.String()]
@@ -465,9 +473,8 @@ func TestConcurrentAccess(t *testing.T) {
 	client.mu.Lock()
 	client.responses = make(map[string]*http.Response)
 	client.errors = make(map[string]error)
-	client.responses["http://test1.com/stream"] = &http.Response{
-		StatusCode: http.StatusOK,
-		Body:       io.NopCloser(strings.NewReader("dummy stream content")),
+	client.bodyStrings = map[string]string{
+		"http://test1.com/stream": "dummy stream content",
 	}
 	client.mu.Unlock()
 
