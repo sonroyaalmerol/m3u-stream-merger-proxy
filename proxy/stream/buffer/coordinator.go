@@ -295,19 +295,21 @@ func (c *StreamCoordinator) InitialPosition() *ring.Ring {
 }
 
 // ReadChunks retrieves chunks from the ring for a client, given a starting position.
-func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.Ring) (
-	[]*ChunkData, *ChunkData, *ring.Ring,
+// clientSeq is the sequence number of the last chunk the client successfully read;
+// pass 0 on the first call. The returned int64 is the updated sequence to pass next time.
+func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.Ring, clientSeq int64) (
+	[]*ChunkData, *ChunkData, *ring.Ring, int64,
 ) {
 	c.Mu.RLock()
 	if fromPosition == nil {
 		c.logger.Debug("ReadChunks: fromPosition is nil, using current buffer")
 		fromPosition = c.Buffer
 	}
-	if cd, ok := fromPosition.Value.(*ChunkData); ok && cd != nil {
+
+	if clientSeq > 0 {
 		currentWriteSeq := atomic.LoadInt64(&c.writeSeq)
-		minSeq := currentWriteSeq - int64(c.config.SharedBufferSize)
-		if cd.seq < minSeq {
-			c.logger.Debug("ReadChunks: Client pointer is stale; resetting to the latest chunk")
+		if clientSeq < currentWriteSeq-int64(c.config.SharedBufferSize) {
+			c.logger.Debug("ReadChunks: Client is stale; resetting to latest chunk")
 			fromPosition = c.Buffer
 		}
 	}
@@ -318,7 +320,7 @@ func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.R
 		select {
 		case <-ch:
 		case <-ctx.Done():
-			return nil, nil, fromPosition
+			return nil, nil, fromPosition, clientSeq
 		}
 		c.Mu.RLock()
 	}
@@ -327,8 +329,8 @@ func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.R
 	current := fromPosition
 	var errorFound bool
 	var errorChunk *ChunkData
+	newClientSeq := clientSeq
 
-	// Iterate until we reach the writer’s current position.
 	for current != c.Buffer {
 		if chunk, ok := current.Value.(*ChunkData); ok && chunk != nil {
 			if chunk.Buffer != nil && chunk.Buffer.Len() > 0 {
@@ -338,6 +340,9 @@ func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.R
 				}
 				_, _ = newChunk.Buffer.Write(chunk.Buffer.Bytes())
 				chunks = append(chunks, newChunk)
+				if chunk.seq > newClientSeq {
+					newClientSeq = chunk.seq
+				}
 			}
 			if chunk.Error != nil || chunk.Status != 0 {
 				errorFound = true
@@ -357,16 +362,16 @@ func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.R
 	c.Mu.RUnlock()
 
 	if errorFound && errorChunk != nil {
-		return chunks, errorChunk, current
+		return chunks, errorChunk, current, newClientSeq
 	}
 
 	if lastErr := c.LastError.Load(); lastErr != nil {
 		if errChunk, ok := lastErr.(*ChunkData); ok && errChunk != nil {
-			return chunks, errChunk, current
+			return chunks, errChunk, current, newClientSeq
 		}
 	}
 
-	return chunks, nil, current
+	return chunks, nil, current, newClientSeq
 }
 
 // ClearBuffer resets every chunk in the ring.

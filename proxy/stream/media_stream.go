@@ -196,8 +196,11 @@ func (h *StreamHandler) HandleStream(
 	}
 	defer cleanup()
 
-	var bytesWritten int64
-	lastPosition := h.coordinator.InitialPosition()
+	var (
+		bytesWritten int64
+		lastPosition = h.coordinator.InitialPosition()
+		lastSeq      int64
+	)
 
 	for {
 		select {
@@ -206,7 +209,8 @@ func (h *StreamHandler) HandleStream(
 			return StreamResult{bytesWritten, ctx.Err(), proxy.StatusClientClosed}
 
 		default:
-			chunks, errChunk, newPos := h.coordinator.ReadChunks(ctx, lastPosition)
+			chunks, errChunk, newPos, newSeq := h.coordinator.ReadChunks(ctx, lastPosition, lastSeq)
+			lastSeq = newSeq
 
 			// Process any available chunks first
 			if len(chunks) > 0 {
