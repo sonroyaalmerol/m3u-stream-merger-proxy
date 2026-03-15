@@ -187,9 +187,11 @@ func (instance *LoadBalancerInstance) Balance(ctx context.Context, req *http.Req
 
 		instance.clearTested(streamId)
 
+		timer := time.NewTimer(backoff.Next())
 		select {
-		case <-time.After(backoff.Next()):
+		case <-timer.C:
 		case <-ctx.Done():
+			timer.Stop()
 			return nil, fmt.Errorf("cancelling load balancer")
 		}
 	}
@@ -254,43 +256,33 @@ func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, req *ht
 	case <-ctx.Done():
 		return nil, context.Canceled
 	default:
-		done := make(map[string]bool)
-		initialCount := len(m3uIndexes)
+	}
 
-		for len(done) < initialCount {
-			sort.Slice(m3uIndexes, func(i, j int) bool {
-				return instance.Cm.ConcurrencyPriorityValue(m3uIndexes[i]) > instance.Cm.ConcurrencyPriorityValue(m3uIndexes[j])
-			})
+	sorted := make([]string, len(m3uIndexes))
+	copy(sorted, m3uIndexes)
+	sort.Slice(sorted, func(i, j int) bool {
+		return instance.Cm.ConcurrencyPriorityValue(sorted[i]) > instance.Cm.ConcurrencyPriorityValue(sorted[j])
+	})
 
-			var index string
-			for _, idx := range m3uIndexes {
-				if !done[idx] {
-					index = idx
-					break
-				}
-			}
+	for _, index := range sorted {
+		select {
+		case <-ctx.Done():
+			return nil, context.Canceled
+		default:
+		}
 
-			done[index] = true
+		innerMap, ok := instance.GetStreamInfo().URLs.Load(index)
+		if !ok {
+			instance.logger.Errorf("Channel not found from M3U_%s: %s", index, instance.GetStreamInfo().Title)
+			continue
+		}
 
-			innerMap, ok := instance.GetStreamInfo().URLs.Load(index)
-			if !ok {
-				instance.logger.Errorf("Channel not found from M3U_%s: %s", index, instance.GetStreamInfo().Title)
-				continue
-			}
-
-			result, err := instance.tryStreamUrls(ctx, req, streamId, index, innerMap)
-			if err == nil {
-				return result, nil
-			}
-
-			select {
-			case <-ctx.Done():
-				return nil, context.Canceled
-			default:
-				continue
-			}
+		result, err := instance.tryStreamUrls(ctx, req, streamId, index, innerMap)
+		if err == nil {
+			return result, nil
 		}
 	}
+
 	return nil, fmt.Errorf("no available streams")
 }
 
@@ -420,7 +412,7 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 				return
 			}
 
-			health, evalErr := evaluateBufferHealth(resp, instance.config.BufferChunk)
+			health, evalErr := evaluateBufferHealth(healthCtx, resp, instance.config.BufferChunk)
 			if evalErr != nil {
 				resp.Body.Close()
 				instance.logger.Errorf("Error evaluating buffer health: %s", evalErr.Error())
