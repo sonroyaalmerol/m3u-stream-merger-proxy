@@ -32,7 +32,9 @@ Uses the channel title or `tvg-name` (as fallback) to merge multiple identical c
      - Access the merged XMLTV Electronic Program Guide.
      - Configure one or more EPG sources via `EPG_URL_X` environment variables.
      - Channels are deduplicated by their `id` attribute (first source wins); programme entries from every source are included.
+     - Only channels and programmes whose `id`/`channel` attribute matches a `tvg-id` present in the merged M3U are kept, dramatically reducing file size for large EPG sources.
      - Falls back to a locally cached copy if a source is temporarily unreachable.
+     - Gzip-compressed sources (`.gz` URL or `application/gzip` content type) are decompressed automatically.
 
    - **Stream Endpoint (`/p/{originalBasePath}/{streamToken}.{fileExt}`):**
      - Request video streams for specific stream IDs.
@@ -128,7 +130,8 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 ### EPG Source Configs
 | ENV VAR                     | Description                                              | Default Value | Possible Values                                |
 |-----------------------------|----------------------------------------------------------|---------------|------------------------------------------------|
-| EPG_URL_1, EPG_URL_2, EPG_URL_X | Set XMLTV EPG source URLs. The merged guide is served at `/epg.xml`. Omit entirely to disable EPG proxying. | N/A | Any valid XMLTV URL or `file:///path/to/epg.xml` |
+| EPG_URL_1, EPG_URL_2, EPG_URL_X | Set XMLTV EPG source URLs. The merged guide is served at `/epg.xml`. Omit entirely to disable EPG proxying. When at least one EPG URL is set the generated `/playlist.m3u` automatically includes a `url-tvg` attribute pointing to `/epg.xml`. Sources that serve gzip-compressed XML (`.gz` URLs or `application/gzip` content type) are decompressed automatically. | N/A | Any valid XMLTV URL or `file:///path/to/epg.xml` |
+| EPG_SYNC_CRON | Set an independent cron schedule for EPG refresh. When unset the EPG is rebuilt immediately after every M3U sync (same cron as `SYNC_CRON`). Set to a different expression to decouple EPG updates from M3U updates. | Same as `SYNC_CRON` | Any valid cron expression |
 
 ### Load Balancer Configs
 | ENV VAR                     | Description                                              | Default Value | Possible Values                                |
