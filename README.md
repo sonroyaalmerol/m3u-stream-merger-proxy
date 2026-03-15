@@ -35,6 +35,7 @@ Uses the channel title or `tvg-name` (as fallback) to merge multiple identical c
      - Only channels and programmes whose `id`/`channel` attribute matches a `tvg-id` present in the merged M3U are kept, dramatically reducing file size for large EPG sources.
      - Falls back to a locally cached copy if a source is temporarily unreachable.
      - Gzip-compressed sources (`.gz` URL or `application/gzip` content type) are decompressed automatically.
+     - EPG channel ids can be remapped to M3U `tvg-id` values via `EPG_CHANNEL_MAP_X` variables, allowing EPG sources with different identifiers to match your playlist.
 
    - **Stream Endpoint (`/p/{originalBasePath}/{streamToken}.{fileExt}`):**
      - Request video streams for specific stream IDs.
@@ -133,6 +134,7 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | EPG_URL_1, EPG_URL_2, EPG_URL_X | Set XMLTV EPG source URLs. The merged guide is served at `/epg.xml`. Omit entirely to disable EPG proxying. When at least one EPG URL is set the generated `/playlist.m3u` automatically includes a `url-tvg` attribute pointing to `/epg.xml`. Sources that serve gzip-compressed XML (`.gz` URLs or `application/gzip` content type) are decompressed automatically. | N/A | Any valid XMLTV URL or `file:///path/to/epg.xml` |
 | EPG_SYNC_CRON | Set an independent cron schedule for EPG refresh. When unset the EPG is rebuilt immediately after every M3U sync (same cron as `SYNC_CRON`). Set to a different expression to decouple EPG updates from M3U updates. | Same as `SYNC_CRON` | Any valid cron expression |
 | EPG_MAX_SIZE_MB | Maximum allowed decompressed size of a single EPG source file in megabytes. Sources that exceed this limit are rejected (with fallback to cache) to prevent decompression-bomb denial-of-service attacks. | 500 | Any positive integer |
+| EPG_CHANNEL_MAP_1, EPG_CHANNEL_MAP_2, EPG_CHANNEL_MAP_X | Remap an EPG channel id to a different M3U `tvg-id`. Format: `m3u_tvg_id=epg_channel_id`. When set, any channel or programme element whose EPG id matches `epg_channel_id` is rewritten to `m3u_tvg_id` in the merged output. This lets you link EPG sources that use different channel identifiers than your M3U playlist. | N/A | e.g. `MyChannel=provider.channel.id` |
 
 ### Load Balancer Configs
 | ENV VAR                     | Description                                              | Default Value | Possible Values                                |
