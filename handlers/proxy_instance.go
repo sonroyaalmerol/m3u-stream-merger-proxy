@@ -18,7 +18,8 @@ import (
 type ProxyInstance interface {
 	GetConcurrencyManager() *store.ConcurrencyManager
 	GetStreamRegistry() *buffer.StreamRegistry
-	LoadBalancer(ctx context.Context, req *http.Request) (*loadbalancer.LoadBalancerResult, error)
+	NewLBInstance() *loadbalancer.LoadBalancerInstance
+	LoadBalancer(ctx context.Context, req *http.Request, instance *loadbalancer.LoadBalancerInstance) (*loadbalancer.LoadBalancerResult, error)
 	ProxyStream(ctx context.Context, coordinator *buffer.StreamCoordinator,
 		lbResult *loadbalancer.LoadBalancerResult, sClient *client.StreamClient,
 		exitStatus chan<- int)
@@ -44,8 +45,11 @@ func NewDefaultProxyInstance() *DefaultProxyInstance {
 	}
 }
 
-func (sm *DefaultProxyInstance) LoadBalancer(ctx context.Context, req *http.Request) (*loadbalancer.LoadBalancerResult, error) {
-	instance := loadbalancer.NewLoadBalancerInstance(sm.cm, sm.lbConfig, loadbalancer.WithLogger(sm.logger))
+func (sm *DefaultProxyInstance) NewLBInstance() *loadbalancer.LoadBalancerInstance {
+	return loadbalancer.NewLoadBalancerInstance(sm.cm, sm.lbConfig, loadbalancer.WithLogger(sm.logger))
+}
+
+func (sm *DefaultProxyInstance) LoadBalancer(ctx context.Context, req *http.Request, instance *loadbalancer.LoadBalancerInstance) (*loadbalancer.LoadBalancerResult, error) {
 	return instance.Balance(ctx, req)
 }
 
