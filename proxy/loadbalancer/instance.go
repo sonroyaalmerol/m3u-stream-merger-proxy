@@ -278,7 +278,7 @@ func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, req *ht
 				continue
 			}
 
-			result, err := instance.tryStreamUrls(req, streamId, index, innerMap)
+			result, err := instance.tryStreamUrls(ctx, req, streamId, index, innerMap)
 			if err == nil {
 				return result, nil
 			}
@@ -295,6 +295,7 @@ func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, req *ht
 }
 
 func (instance *LoadBalancerInstance) tryStreamUrls(
+	ctx context.Context,
 	req *http.Request,
 	streamId string,
 	index string,
@@ -308,6 +309,13 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 	accept := utils.GetEnv("HTTP_ACCEPT")
 
 	sortedSubIndexes := sourceprocSortStreamSubUrls(urls)
+
+	// healthCtx is cancelled as soon as the first successful stream is found,
+	// so that all remaining concurrent health-check goroutines stop opening new
+	// upstream connections.  This prevents hitting per-account connection limits
+	// on IPTV servers that reject extra connections with 404.
+	healthCtx, healthCancel := context.WithCancel(ctx)
+	defer healthCancel()
 
 	var wg sync.WaitGroup
 	resultCh := make(chan *streamTestResult, len(sortedSubIndexes))
@@ -351,7 +359,7 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 			origHasAccept := false
 			originalHeaders := req.Header.Clone()
 
-			newReq, err := http.NewRequest(req.Method, url, nil)
+			newReq, err := http.NewRequestWithContext(healthCtx, req.Method, url, nil)
 			if err != nil {
 				instance.logger.Errorf("Error creating request: %s", err.Error())
 				instance.markTested(streamId, candidateId)
@@ -384,6 +392,12 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 			// Do the HTTP request.
 			resp, err := instance.healthClient.Do(newReq)
 			if err != nil {
+				// If the context was cancelled (because another goroutine already
+				// found a good stream), this is not a real failure — don't mark tested.
+				if healthCtx.Err() != nil {
+					resultCh <- &streamTestResult{err: err}
+					return
+				}
 				instance.logger.Errorf("Error fetching stream: %s", err.Error())
 				instance.markTested(streamId, candidateId)
 				resultCh <- &streamTestResult{err: err}
@@ -414,6 +428,9 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 				resultCh <- &streamTestResult{err: evalErr}
 				return
 			}
+
+			// Cancel all remaining health-check goroutines: we have a winner.
+			healthCancel()
 
 			instance.logger.Debugf("Successful stream from %s (health: %f)",
 				url, health)
