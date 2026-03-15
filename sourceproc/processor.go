@@ -3,6 +3,7 @@ package sourceproc
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"math"
 	"net/http"
 	"os"
@@ -25,6 +26,7 @@ type M3UProcessor struct {
 	revalidatingDone      chan struct{}
 	sortingMgr            *SortingManager
 	criticalErrorOccurred atomic.Bool
+	tvgIDs                map[string]struct{}
 }
 
 func NewProcessor() *M3UProcessor {
@@ -84,6 +86,7 @@ func (p *M3UProcessor) Wait(ctx context.Context) error {
 		}
 		p.applyNewRemoteFiles()
 		p.clearOldResults()
+		p.saveTvgIDs()
 	} else {
 		logger.Default.Errorf("Revalidation failed, keeping old data.")
 		os.Remove(p.file.Name())
@@ -250,16 +253,25 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 		close(p.revalidatingDone)
 	}()
 
-	_, err := p.writer.WriteString("#EXTM3U\n")
+	header := "#EXTM3U"
+	if len(utils.GetEPGIndexes()) > 0 {
+		header += fmt.Sprintf(` url-tvg="%s/epg.xml"`, baseURL)
+	}
+	header += "\n"
+	_, err := p.writer.WriteString(header)
 	if err != nil {
 		p.markCriticalError(err)
 		return
 	}
 
+	p.tvgIDs = make(map[string]struct{})
 	err = p.sortingMgr.GetSortedEntries(func(entry *StreamInfo) {
 		_, writeErr := p.writer.WriteString(formatStreamEntry(baseURL, entry))
 		if writeErr != nil {
 			p.markCriticalError(err)
+		}
+		if entry.TvgID != "" {
+			p.tvgIDs[entry.TvgID] = struct{}{}
 		}
 	})
 	if err != nil {
@@ -308,6 +320,32 @@ func (p *M3UProcessor) handleDownloaded(result *SourceDownloaderResult, streamCh
 			currentLine = ""
 		}
 	}
+}
+
+// saveTvgIDs writes the collected tvg-id set to disk so the EPG processor can
+// filter out channels and programmes not present in the merged playlist.
+func (p *M3UProcessor) saveTvgIDs() {
+	if len(p.tvgIDs) == 0 {
+		return
+	}
+	if err := os.MkdirAll(config.GetEPGDirPath(), 0755); err != nil {
+		logger.Default.Warnf("saveTvgIDs: mkdir: %v", err)
+		return
+	}
+	var sb strings.Builder
+	for id := range p.tvgIDs {
+		sb.WriteString(id)
+		sb.WriteByte('\n')
+	}
+	if err := os.WriteFile(config.GetEPGTvgIDsPath(), []byte(sb.String()), 0644); err != nil {
+		logger.Default.Warnf("saveTvgIDs: write: %v", err)
+	}
+}
+
+// GetTvgIDs returns the set of tvg-id values seen in the last successful
+// M3U compilation.  Returns nil when no compilation has run yet.
+func (p *M3UProcessor) GetTvgIDs() map[string]struct{} {
+	return p.tvgIDs
 }
 
 func createResultFile(path string) (*os.File, error) {

@@ -1,6 +1,7 @@
 package epg
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/xml"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -15,6 +17,22 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
 )
+
+// defaultMaxEPGMB is the upper bound on a decompressed EPG file when
+// EPG_MAX_SIZE_MB is not set.  500 MB comfortably covers large full-day guides
+// while preventing a decompression bomb from filling the disk.
+const defaultMaxEPGMB = 500
+
+// maxEPGBytes returns the decompression size limit in bytes, reading
+// EPG_MAX_SIZE_MB from the environment and falling back to defaultMaxEPGMB.
+var maxEPGBytes = func() int64 {
+	if v := os.Getenv("EPG_MAX_SIZE_MB"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			return n * 1024 * 1024
+		}
+	}
+	return defaultMaxEPGMB * 1024 * 1024
+}()
 
 // Processor downloads EPG sources and merges them into a single XMLTV file.
 type Processor struct {
@@ -72,8 +90,10 @@ func (p *Processor) Run(ctx context.Context) error {
 		return fmt.Errorf("epg: all sources failed to download")
 	}
 
+	tvgIDs := loadTvgIDs()
+
 	tmpPath := config.GetEPGTmpPath()
-	if err := mergeXMLTV(sources, tmpPath); err != nil {
+	if err := mergeXMLTV(sources, tmpPath, tvgIDs); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("epg: merge: %w", err)
 	}
@@ -117,12 +137,28 @@ func (p *Processor) downloadSource(ctx context.Context, idx string) (string, err
 		return p.fallback(finalPath, fmt.Errorf("create tmp: %w", err))
 	}
 
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	body, err := decompressIfNeeded(resp, epgURL)
+	if err != nil {
 		f.Close()
+		os.Remove(tmpPath)
+		return p.fallback(finalPath, fmt.Errorf("decompress: %w", err))
+	}
+	defer body.Close()
+
+	// Guard against decompression bombs: cap the amount written to disk.
+	// LimitReader returns EOF after maxEPGBytes, so we detect the breach by
+	// comparing the byte count against the limit after the copy.
+	limited := io.LimitReader(body, maxEPGBytes+1)
+	n, err := io.Copy(f, limited)
+	f.Close()
+	if err != nil {
 		os.Remove(tmpPath)
 		return p.fallback(finalPath, fmt.Errorf("write: %w", err))
 	}
-	f.Close()
+	if n > maxEPGBytes {
+		os.Remove(tmpPath)
+		return p.fallback(finalPath, fmt.Errorf("EPG source exceeds maximum allowed size (%d MB)", maxEPGBytes/1024/1024))
+	}
 
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		// Couldn't rename — use the tmp file directly.
@@ -140,10 +176,73 @@ func (p *Processor) fallback(cachedPath string, origErr error) (string, error) {
 	return "", origErr
 }
 
+// loadTvgIDs reads the tvg-id set persisted by the M3U processor.  When the
+// file doesn't exist (e.g. EPG ran before any M3U sync) an empty map is
+// returned, which disables filtering so all channels are kept.
+func loadTvgIDs() map[string]struct{} {
+	data, err := os.ReadFile(config.GetEPGTvgIDsPath())
+	if err != nil {
+		return nil // no filter
+	}
+	ids := make(map[string]struct{})
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line != "" {
+			ids[line] = struct{}{}
+		}
+	}
+	return ids
+}
+
+// decompressIfNeeded wraps resp.Body in a gzip reader when the response
+// appears to be gzip-compressed but is NOT already transparently decompressed
+// by Go's HTTP transport (i.e. the body is a raw .gz file rather than one
+// signalled with Content-Encoding: gzip).
+//
+// Detection order:
+//  1. URL path ends with ".gz"
+//  2. Content-Type is application/gzip or application/x-gzip
+//
+// Note: Go's http.Transport handles Content-Encoding: gzip transparently, so
+// we only need to take action for the "file body is gzip" case.
+func decompressIfNeeded(resp *http.Response, rawURL string) (io.ReadCloser, error) {
+	ct := resp.Header.Get("Content-Type")
+	urlPath := strings.ToLower(strings.SplitN(rawURL, "?", 2)[0])
+
+	needsGzip := strings.HasSuffix(urlPath, ".gz") ||
+		strings.Contains(ct, "application/gzip") ||
+		strings.Contains(ct, "application/x-gzip")
+
+	if !needsGzip {
+		return resp.Body, nil
+	}
+
+	gr, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("gzip reader: %w", err)
+	}
+	// Return a ReadCloser that closes both the gzip reader and the underlying body.
+	return struct {
+		io.Reader
+		io.Closer
+	}{gr, multiCloser{gr, resp.Body}}, nil
+}
+
+type multiCloser [2]io.Closer
+
+func (mc multiCloser) Close() error {
+	err1 := mc[0].Close()
+	err2 := mc[1].Close()
+	if err1 != nil {
+		return err1
+	}
+	return err2
+}
+
 // mergeXMLTV merges multiple XMLTV source files into a single output file.
 // Channels are deduplicated by their id attribute (first occurrence wins).
-// Programmes from all sources are included as-is.
-func mergeXMLTV(sources []string, outputPath string) error {
+// When tvgIDs is non-nil only channels/programmes whose id/channel attribute
+// appears in that set are written; a nil map means "keep everything".
+func mergeXMLTV(sources []string, outputPath string, tvgIDs map[string]struct{}) error {
 	out, err := os.Create(outputPath)
 	if err != nil {
 		return err
@@ -161,15 +260,14 @@ func mergeXMLTV(sources []string, outputPath string) error {
 
 	// First pass: unique <channel> elements.
 	for _, src := range sources {
-		if err := streamXMLTVElements(src, "channel", seenChannels, out); err != nil {
-			// Non-fatal: log at caller level, continue with other sources.
+		if err := streamXMLTVElements(src, "channel", seenChannels, tvgIDs, out); err != nil {
 			_ = err
 		}
 	}
 
 	// Second pass: all <programme> elements.
 	for _, src := range sources {
-		if err := streamXMLTVElements(src, "programme", nil, out); err != nil {
+		if err := streamXMLTVElements(src, "programme", nil, tvgIDs, out); err != nil {
 			_ = err
 		}
 	}
@@ -179,9 +277,11 @@ func mergeXMLTV(sources []string, outputPath string) error {
 }
 
 // streamXMLTVElements reads srcPath and copies every top-level element with the
-// given local name to out.  When seen is non-nil it is used to deduplicate by
-// the element's "id" attribute (first occurrence wins).
-func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, out io.Writer) error {
+// given local name to out.
+//   - seen: when non-nil, deduplicate by the element's "id" attribute
+//   - tvgIDs: when non-nil, skip elements whose identity attribute (id for
+//     channels, channel for programmes) is not in the set
+func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, tvgIDs map[string]struct{}, out io.Writer) error {
 	f, err := os.Open(srcPath)
 	if err != nil {
 		return err
@@ -212,18 +312,32 @@ func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, out 
 			continue
 		}
 
-		// Deduplicate channels by id attribute.
-		if seen != nil {
-			id := attrValue(start, "id")
-			if id != "" {
-				if seen[id] {
-					if err := dec.Skip(); err != nil {
-						return err
-					}
-					continue
+		// For channels the identity attr is "id"; for programmes it is "channel".
+		identityAttr := "id"
+		if elementName == "programme" {
+			identityAttr = "channel"
+		}
+		identity := attrValue(start, identityAttr)
+
+		// Filter: skip elements whose identity is not in the tvg-id set.
+		if tvgIDs != nil && identity != "" {
+			if _, ok := tvgIDs[identity]; !ok {
+				if err := dec.Skip(); err != nil {
+					return err
 				}
-				seen[id] = true
+				continue
 			}
+		}
+
+		// Deduplicate channels by id attribute.
+		if seen != nil && identity != "" {
+			if seen[identity] {
+				if err := dec.Skip(); err != nil {
+					return err
+				}
+				continue
+			}
+			seen[identity] = true
 		}
 
 		if err := copyElement(dec, enc, start); err != nil {

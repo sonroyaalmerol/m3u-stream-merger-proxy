@@ -1,6 +1,8 @@
 package epg
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/xml"
 	"fmt"
@@ -19,8 +21,8 @@ import (
 
 // xmltvDoc is a minimal helper for parsing the merged output in tests.
 type xmltvDoc struct {
-	XMLName    xml.Name      `xml:"tv"`
-	Channels   []xmlChannel  `xml:"channel"`
+	XMLName    xml.Name       `xml:"tv"`
+	Channels   []xmlChannel   `xml:"channel"`
 	Programmes []xmlProgramme `xml:"programme"`
 }
 
@@ -49,8 +51,8 @@ func parseMergedXML(t *testing.T, path string) xmltvDoc {
 	return doc
 }
 
-// setupTestConfig sets data and temp paths to temporary directories so tests
-// don't touch the real /m3u-proxy/data path.
+// setupTestConfig redirects data/temp paths to a temp dir so tests never touch
+// /m3u-proxy/data.  It also resets the EPG index cache on cleanup.
 func setupTestConfig(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
@@ -58,6 +60,7 @@ func setupTestConfig(t *testing.T) {
 		DataPath: filepath.Join(dir, "data") + "/",
 		TempPath: filepath.Join(dir, "tmp") + "/",
 	})
+	t.Cleanup(utils.ResetCaches)
 }
 
 func xmltvSource(channels []xmlChannel, programmes []xmlProgramme) string {
@@ -76,6 +79,24 @@ func xmltvSource(channels []xmlChannel, programmes []xmlProgramme) string {
 	return sb.String()
 }
 
+// gzipBytes compresses data with gzip and returns the compressed bytes.
+func gzipBytes(t *testing.T, data string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	if _, err := w.Write([]byte(data)); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// ---------------------------------------------------------------------------
+// mergeXMLTV unit tests
+// ---------------------------------------------------------------------------
+
 // TestMergeXMLTV_Basic verifies that channels and programmes from two sources
 // end up in the merged output.
 func TestMergeXMLTV_Basic(t *testing.T) {
@@ -89,18 +110,16 @@ func TestMergeXMLTV_Basic(t *testing.T) {
 		[]xmlChannel{{ID: "ch1", DisplayName: "Channel 1"}},
 		[]xmlProgramme{{Channel: "ch1", Title: "Show A"}},
 	)), 0644)
-
 	os.WriteFile(src2, []byte(xmltvSource(
 		[]xmlChannel{{ID: "ch2", DisplayName: "Channel 2"}},
 		[]xmlProgramme{{Channel: "ch2", Title: "Show B"}},
 	)), 0644)
 
-	if err := mergeXMLTV([]string{src1, src2}, out); err != nil {
+	if err := mergeXMLTV([]string{src1, src2}, out, nil); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
 	doc := parseMergedXML(t, out)
-
 	if len(doc.Channels) != 2 {
 		t.Errorf("expected 2 channels, got %d", len(doc.Channels))
 	}
@@ -113,21 +132,18 @@ func TestMergeXMLTV_Basic(t *testing.T) {
 // two sources results in only one channel entry (first wins).
 func TestMergeXMLTV_DeduplicatesChannels(t *testing.T) {
 	dir := t.TempDir()
-
 	src1 := filepath.Join(dir, "src1.xml")
 	src2 := filepath.Join(dir, "src2.xml")
 	out := filepath.Join(dir, "out.xml")
 
 	os.WriteFile(src1, []byte(xmltvSource(
-		[]xmlChannel{{ID: "dup", DisplayName: "First"}},
-		nil,
+		[]xmlChannel{{ID: "dup", DisplayName: "First"}}, nil,
 	)), 0644)
 	os.WriteFile(src2, []byte(xmltvSource(
-		[]xmlChannel{{ID: "dup", DisplayName: "Second"}},
-		nil,
+		[]xmlChannel{{ID: "dup", DisplayName: "Second"}}, nil,
 	)), 0644)
 
-	if err := mergeXMLTV([]string{src1, src2}, out); err != nil {
+	if err := mergeXMLTV([]string{src1, src2}, out, nil); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
@@ -144,7 +160,6 @@ func TestMergeXMLTV_DeduplicatesChannels(t *testing.T) {
 // from every source even when a channel is duplicated.
 func TestMergeXMLTV_ProgrammesFromAllSources(t *testing.T) {
 	dir := t.TempDir()
-
 	src1 := filepath.Join(dir, "src1.xml")
 	src2 := filepath.Join(dir, "src2.xml")
 	out := filepath.Join(dir, "out.xml")
@@ -158,7 +173,7 @@ func TestMergeXMLTV_ProgrammesFromAllSources(t *testing.T) {
 		[]xmlProgramme{{Channel: "ch1", Title: "Evening News"}},
 	)), 0644)
 
-	if err := mergeXMLTV([]string{src1, src2}, out); err != nil {
+	if err := mergeXMLTV([]string{src1, src2}, out, nil); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
@@ -170,6 +185,67 @@ func TestMergeXMLTV_ProgrammesFromAllSources(t *testing.T) {
 		t.Errorf("expected 2 programmes (one per source), got %d", len(doc.Programmes))
 	}
 }
+
+// TestMergeXMLTV_FilterByTvgIDs verifies that channels and programmes whose
+// id/channel attribute is not in the tvg-id set are dropped from the output.
+func TestMergeXMLTV_FilterByTvgIDs(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.xml")
+	out := filepath.Join(dir, "out.xml")
+
+	os.WriteFile(src, []byte(xmltvSource(
+		[]xmlChannel{
+			{ID: "keep", DisplayName: "Keep Me"},
+			{ID: "drop", DisplayName: "Drop Me"},
+		},
+		[]xmlProgramme{
+			{Channel: "keep", Title: "Kept Show"},
+			{Channel: "drop", Title: "Dropped Show"},
+		},
+	)), 0644)
+
+	tvgIDs := map[string]struct{}{"keep": {}}
+	if err := mergeXMLTV([]string{src}, out, tvgIDs); err != nil {
+		t.Fatalf("mergeXMLTV: %v", err)
+	}
+
+	doc := parseMergedXML(t, out)
+	if len(doc.Channels) != 1 || doc.Channels[0].ID != "keep" {
+		t.Errorf("expected only 'keep' channel, got %+v", doc.Channels)
+	}
+	if len(doc.Programmes) != 1 || doc.Programmes[0].Title != "Kept Show" {
+		t.Errorf("expected only 'Kept Show' programme, got %+v", doc.Programmes)
+	}
+}
+
+// TestMergeXMLTV_NilFilterKeepsAll verifies that a nil tvg-id map keeps
+// all channels and programmes (backwards-compatible / no-filter behaviour).
+func TestMergeXMLTV_NilFilterKeepsAll(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.xml")
+	out := filepath.Join(dir, "out.xml")
+
+	os.WriteFile(src, []byte(xmltvSource(
+		[]xmlChannel{{ID: "c1"}, {ID: "c2"}},
+		[]xmlProgramme{{Channel: "c1"}, {Channel: "c2"}},
+	)), 0644)
+
+	if err := mergeXMLTV([]string{src}, out, nil); err != nil {
+		t.Fatalf("mergeXMLTV: %v", err)
+	}
+
+	doc := parseMergedXML(t, out)
+	if len(doc.Channels) != 2 {
+		t.Errorf("expected 2 channels with nil filter, got %d", len(doc.Channels))
+	}
+	if len(doc.Programmes) != 2 {
+		t.Errorf("expected 2 programmes with nil filter, got %d", len(doc.Programmes))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Processor.Run unit tests (httptest server)
+// ---------------------------------------------------------------------------
 
 // TestProcessor_Run_NoEPGURLs verifies that Run is a no-op when no EPG_URL_X
 // env vars are set.
@@ -183,7 +259,7 @@ func TestProcessor_Run_NoEPGURLs(t *testing.T) {
 }
 
 // TestProcessor_Run_DownloadsAndMerges spins up a local HTTP server serving
-// two XMLTV files and verifies the processor produces a merged output.
+// two plain XMLTV files and verifies the processor produces a merged output.
 func TestProcessor_Run_DownloadsAndMerges(t *testing.T) {
 	setupTestConfig(t)
 
@@ -210,8 +286,6 @@ func TestProcessor_Run_DownloadsAndMerges(t *testing.T) {
 
 	t.Setenv("EPG_URL_1", srv.URL+"/epg1.xml")
 	t.Setenv("EPG_URL_2", srv.URL+"/epg2.xml")
-
-	// Reset cached index list so Setenv is picked up.
 	utils.ResetCaches()
 
 	p := NewProcessor(logger.Default)
@@ -229,5 +303,143 @@ func TestProcessor_Run_DownloadsAndMerges(t *testing.T) {
 	}
 	if len(doc.Programmes) != 2 {
 		t.Errorf("expected 2 programmes, got %d", len(doc.Programmes))
+	}
+}
+
+// TestProcessor_Run_GzippedSource verifies that a source served as a
+// gzip-compressed file (Content-Type: application/gzip, URL ending in .gz)
+// is transparently decompressed before being merged.
+func TestProcessor_Run_GzippedSource(t *testing.T) {
+	setupTestConfig(t)
+
+	plainBody := xmltvSource(
+		[]xmlChannel{{ID: "gz1", DisplayName: "Gzip Channel"}},
+		[]xmlProgramme{{Channel: "gz1", Title: "Gzip Show"}},
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/epg.xml.gz":
+			w.Header().Set("Content-Type", "application/gzip")
+			w.Write(gzipBytes(t, plainBody))
+		case "/epg_ct.xml":
+			// Content-Type signals gzip even though URL doesn't end in .gz
+			w.Header().Set("Content-Type", "application/x-gzip")
+			w.Write(gzipBytes(t, plainBody))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"gz URL extension", "/epg.xml.gz"},
+		{"application/x-gzip content-type", "/epg_ct.xml"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			setupTestConfig(t)
+			t.Setenv("EPG_URL_1", srv.URL+tc.path)
+			utils.ResetCaches()
+
+			p := NewProcessor(logger.Default)
+			if err := p.Run(context.Background()); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			doc := parseMergedXML(t, config.GetEPGPath())
+			if len(doc.Channels) != 1 || doc.Channels[0].ID != "gz1" {
+				t.Errorf("unexpected channels: %+v", doc.Channels)
+			}
+			if len(doc.Programmes) != 1 || doc.Programmes[0].Title != "Gzip Show" {
+				t.Errorf("unexpected programmes: %+v", doc.Programmes)
+			}
+		})
+	}
+}
+
+// TestDecompressIfNeeded_PlainPassthrough ensures plain XML responses are not
+// touched by decompressIfNeeded.
+func TestDecompressIfNeeded_PlainPassthrough(t *testing.T) {
+	body := io.NopCloser(strings.NewReader("<tv></tv>"))
+	resp := &http.Response{
+		Header: http.Header{"Content-Type": []string{"application/xml"}},
+		Body:   body,
+	}
+	rc, err := decompressIfNeeded(resp, "http://example.com/epg.xml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rc != body {
+		t.Error("expected plain body to be returned unchanged")
+	}
+}
+
+// TestDecompressIfNeeded_GzipByURL ensures a .gz URL triggers decompression.
+func TestDecompressIfNeeded_GzipByURL(t *testing.T) {
+	data := xmltvSource(
+		[]xmlChannel{{ID: "c1", DisplayName: "C1"}}, nil,
+	)
+	compressed := gzipBytes(t, data)
+
+	resp := &http.Response{
+		Header: http.Header{"Content-Type": []string{"application/octet-stream"}},
+		Body:   io.NopCloser(bytes.NewReader(compressed)),
+	}
+	rc, err := decompressIfNeeded(resp, "http://example.com/epg.xml.gz")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer rc.Close()
+
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(got), "C1") {
+		t.Errorf("decompressed content missing expected data, got: %s", got)
+	}
+}
+
+// TestProcessor_Run_DecompressionBombRejected verifies that a gzip-compressed
+// source whose decompressed size exceeds the size limit is rejected rather than
+// written to disk, preventing a decompression-bomb DoS.
+func TestProcessor_Run_DecompressionBombRejected(t *testing.T) {
+	setupTestConfig(t)
+
+	// Override the package-level limit to 1 byte so any real payload triggers it.
+	origMax := maxEPGBytes
+	maxEPGBytes = 1
+	t.Cleanup(func() { maxEPGBytes = origMax })
+
+	bigBody := xmltvSource(
+		[]xmlChannel{{ID: "bomb", DisplayName: "Bomb"}},
+		[]xmlProgramme{{Channel: "bomb", Title: "Boom"}},
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Write(gzipBytes(t, bigBody))
+	}))
+	defer srv.Close()
+
+	t.Setenv("EPG_URL_1", srv.URL+"/epg.xml.gz")
+	utils.ResetCaches()
+
+	p := NewProcessor(logger.Default)
+	err := p.Run(context.Background())
+
+	// With only one source and no cached fallback, Run must return an error.
+	if err == nil {
+		t.Error("expected Run to fail when decompressed size exceeds limit, got nil")
+	}
+
+	// The merged EPG file must not have been created.
+	if _, statErr := os.Stat(config.GetEPGPath()); statErr == nil {
+		t.Error("merged EPG file should not exist after a bomb rejection")
 	}
 }
