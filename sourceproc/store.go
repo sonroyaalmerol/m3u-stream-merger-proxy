@@ -211,12 +211,7 @@ func NewStreamStoreWriter() (*StreamStoreWriter, error) {
 	}, nil
 }
 
-func (w *StreamStoreWriter) Add(stream *StreamInfo) error {
-	key, err := slugKey(EncodeSlug(stream))
-	if err != nil {
-		return err
-	}
-
+func (w *StreamStoreWriter) Add(key uint64, stream *StreamInfo) error {
 	payload, err := json.Marshal(stream)
 	if err != nil {
 		return err

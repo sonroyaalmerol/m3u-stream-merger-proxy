@@ -3,32 +3,48 @@ package sourceproc
 import (
 	"crypto/sha3"
 	"encoding/hex"
-	"regexp"
 	"strings"
 
-	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
 )
 
-var (
-	// attributeRegex matches M3U attributes in the format key="value"
-	attributeRegex = regexp.MustCompile(`([a-zA-Z0-9_-]+)="([^"]*)"`)
-)
+func isKeyChar(c byte) bool {
+	return c == '-' || c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// forEachAttr walks k="v" pairs left to right, non-overlapping, matching attributeRegex.
+func forEachAttr(s string, fn func(key, val string)) {
+	i := 0
+	for i < len(s) {
+		off := strings.Index(s[i:], `="`)
+		if off < 0 {
+			return
+		}
+		pos := i + off
+		ks := pos
+		for ks > i && isKeyChar(s[ks-1]) {
+			ks--
+		}
+		if ks == pos {
+			i = pos + 2
+			continue
+		}
+		end := strings.IndexByte(s[pos+2:], '"')
+		if end < 0 {
+			return
+		}
+		fn(s[ks:pos], s[pos+2:pos+2+end])
+		i = pos + 2 + end + 1
+	}
+}
 
 // parseLine parses a single M3U line into a StreamInfo
 func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo {
-	logger.Default.Debugf("Parsing line: %s", line)
-	logger.Default.Debugf("Next line: %s", nextLine.Content)
-
 	cleanUrl := strings.TrimSpace(nextLine.Content)
 	stream := &StreamInfo{}
 
-	matches := attributeRegex.FindAllStringSubmatch(line, -1)
-	lineWithoutPairs := line
-
-	for _, match := range matches {
-		key := strings.TrimSpace(match[1])
-		value := strings.TrimSpace(match[2])
+	forEachAttr(line, func(key, value string) {
+		value = strings.TrimSpace(value)
 
 		switch strings.ToLower(key) {
 		case "tvg-id":
@@ -44,11 +60,10 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 		case "tvg-logo":
 			stream.LogoURL = utils.TvgLogoParser(value)
 		}
-		lineWithoutPairs = strings.Replace(lineWithoutPairs, match[0], "", 1)
-	}
+	})
 
-	if commaSplit := strings.SplitN(lineWithoutPairs, ",", 2); len(commaSplit) > 1 {
-		stream.Title = utils.TvgNameParser(strings.TrimSpace(commaSplit[1]))
+	if commaIdx := indexUnquotedComma(line); commaIdx >= 0 {
+		stream.Title = utils.TvgNameParser(strings.TrimSpace(line[commaIdx+1:]))
 	}
 
 	if stream.Title == "" {
@@ -65,9 +80,27 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 	return stream
 }
 
+// indexUnquotedComma finds the attribute-section terminator, the first comma outside quoted values.
+func indexUnquotedComma(s string) int {
+	inQuote := false
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '"':
+			inQuote = !inQuote
+		case ',':
+			if !inQuote {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
 // formatStreamEntry formats a stream entry for M3U output
-func formatStreamEntry(baseURL string, stream *StreamInfo) string {
+func formatStreamEntry(baseURL, slug string, stream *StreamInfo) string {
 	var entry strings.Builder
+	entry.Grow(96 + len(baseURL) + len(slug) + 2*len(stream.Title) + len(stream.LogoURL) +
+		2*len(stream.Group) + len(stream.TvgID) + len(stream.TvgType) + len(stream.TvgChNo))
 
 	writeTag := func(key, value string) {
 		if value == "" {
@@ -92,7 +125,9 @@ func formatStreamEntry(baseURL string, stream *StreamInfo) string {
 	entry.WriteString(",")
 	entry.WriteString(stream.Title)
 	entry.WriteString("\n")
-	entry.WriteString(GenerateStreamURL(baseURL, stream))
+	entry.WriteString(baseURL)
+	entry.WriteString("/p/stream/")
+	entry.WriteString(slug)
 	entry.WriteString("\n")
 
 	return entry.String()

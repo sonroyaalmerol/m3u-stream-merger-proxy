@@ -149,9 +149,8 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 	results := streamDownloadM3USources()
 	baseURL := utils.DetermineBaseURL(r)
 
-	// Increase channel buffer sizes
-	errors := make(chan error, 1000)         // Increased error buffer
-	streamCh := make(chan *StreamInfo, 1000) // Larger stream buffer
+	streamCh := make(chan pendingStream, 4096)
+	errors := make(chan error, 4096)
 
 	go func() {
 		defer close(errors)
@@ -166,13 +165,11 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 			}(result)
 		}
 
-		// Close streamCh after all producers finish
 		go func() {
 			wgProducers.Wait()
 			close(streamCh)
 		}()
 
-		// Worker pool to process streams concurrently
 		numWorkers := runtime.NumCPU() * 2
 		var wgWorkers sync.WaitGroup
 		wgWorkers.Add(numWorkers)
@@ -180,7 +177,11 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 		for range numWorkers {
 			go func() {
 				defer wgWorkers.Done()
-				for stream := range streamCh {
+				for ps := range streamCh {
+					stream := parseLine(ps.extinf, &ps.urlLine, ps.m3uIndex)
+					if stream == nil || !checkFilter(stream) {
+						continue
+					}
 					err := p.addStream(stream)
 					if err != nil {
 						p.markCriticalError(err)
@@ -195,7 +196,7 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 			}()
 		}
 
-		wgWorkers.Wait() // Wait for all streams to be processed
+		wgWorkers.Wait()
 
 		p.compileM3U(baseURL)
 	}()
@@ -282,11 +283,12 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 
 	p.tvgIDs = make(map[string]struct{})
 	err = p.sortingMgr.GetSortedEntries(func(entry *StreamInfo) {
-		_, writeErr := p.writer.WriteString(formatStreamEntry(baseURL, entry))
+		key, slug := slugParts(entry.Title)
+		_, writeErr := p.writer.WriteString(formatStreamEntry(baseURL, slug, entry))
 		if writeErr != nil {
 			p.markCriticalError(writeErr)
 		}
-		if storeErr := storeWriter.Add(entry); storeErr != nil {
+		if storeErr := storeWriter.Add(key, entry); storeErr != nil {
 			p.markCriticalError(storeErr)
 		}
 		if entry.TvgID != "" {
@@ -313,10 +315,16 @@ func (p *M3UProcessor) cleanup() {
 	}
 }
 
-func (p *M3UProcessor) handleDownloaded(result *SourceDownloaderResult, streamCh chan<- *StreamInfo) {
+// pendingStream carries one raw EXTINF/URL pair from the producer to the worker pool.
+type pendingStream struct {
+	extinf   string
+	urlLine  LineDetails
+	m3uIndex string
+}
+
+func (p *M3UProcessor) handleDownloaded(result *SourceDownloaderResult, streamCh chan<- pendingStream) {
 	var currentLine string
 
-	// Handle errors asynchronously
 	go func() {
 		for err := range result.Error {
 			if err != nil {
@@ -325,17 +333,12 @@ func (p *M3UProcessor) handleDownloaded(result *SourceDownloaderResult, streamCh
 		}
 	}()
 
-	// Process lines as they come in
 	for lineInfo := range result.Lines {
 		line := strings.TrimSpace(lineInfo.Content)
 		if strings.HasPrefix(line, "#EXTINF:") {
 			currentLine = line
 		} else if currentLine != "" && !strings.HasPrefix(line, "#") {
-			if streamInfo := parseLine(currentLine, lineInfo, result.Index); streamInfo != nil {
-				if checkFilter(streamInfo) {
-					streamCh <- streamInfo
-				}
-			}
+			streamCh <- pendingStream{extinf: currentLine, urlLine: *lineInfo, m3uIndex: result.Index}
 			currentLine = ""
 		}
 	}

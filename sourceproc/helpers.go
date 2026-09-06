@@ -18,10 +18,6 @@ func GetStreamBySlug(slug string) (*StreamInfo, error) {
 	return streamInfo, nil
 }
 
-func GenerateStreamURL(baseUrl string, stream *StreamInfo) string {
-	return fmt.Sprintf("%s/p/stream/%s", baseUrl, EncodeSlug(stream))
-}
-
 func ClearProcessedM3Us() {
 	err := os.RemoveAll(config.GetProcessedDirPath())
 	if err != nil {

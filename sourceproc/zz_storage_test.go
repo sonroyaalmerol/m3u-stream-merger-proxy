@@ -33,7 +33,9 @@ func buildStore(tb testing.TB, n int) {
 		tb.Fatal(err)
 	}
 	for i := range n {
-		if err := w.Add(storeStream(i)); err != nil {
+		s := storeStream(i)
+		key, _ := slugParts(s.Title)
+		if err := w.Add(key, s); err != nil {
 			tb.Fatal(err)
 		}
 	}
