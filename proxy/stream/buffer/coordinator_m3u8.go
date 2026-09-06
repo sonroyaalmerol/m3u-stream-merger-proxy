@@ -45,7 +45,9 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 	c.WriterRespHeader.Store(nil)
 
 	newHeaderChan := make(chan struct{})
-	c.respHeaderSet.Store(&newHeaderChan)
+	if old := c.respHeaderSet.Swap(&newHeaderChan); old != nil {
+		close(*old)
+	}
 	c.m3uHeaderSet.Store(false)
 	c.logger.Debug("StartHLSWriter: Beginning read loop")
 
@@ -231,14 +233,7 @@ func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string
 		}
 	}
 
-	return c.readAndWriteStream(ctx, resp.Body, func(b []byte) error {
-		c.Write(&ChunkData{
-			Data:      append([]byte(nil), b...),
-			Timestamp: time.Now(),
-		})
-		return nil
-	})
-
+	return c.readAndWriteStream(ctx, resp.Body, c.writeChunk)
 }
 
 func (c *StreamCoordinator) parsePlaylist(mediaURL string, content string) (*PlaylistMetadata, error) {

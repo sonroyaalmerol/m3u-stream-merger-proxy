@@ -1,6 +1,7 @@
 package config
 
 import (
+	"m3u-stream-merger/logger"
 	"os"
 	"strconv"
 	"time"
@@ -16,6 +17,7 @@ type StreamConfig struct {
 }
 
 func NewDefaultStreamConfig() *StreamConfig {
+	chunkSize := 1024 * 1024
 	finalBufferSize := 8
 	finalTimeoutSeconds := 3
 	finalMaxRetries := 5
@@ -53,9 +55,23 @@ func NewDefaultStreamConfig() *StreamConfig {
 		}
 	}
 
+	if finalBufferSize < 2 {
+		logger.Default.Warnf("BUFFER_CHUNK_NUM must be at least 2; falling back to 2")
+		finalBufferSize = 2
+	}
+	if finalTimeoutSeconds < 1 {
+		logger.Default.Warnf("STREAM_TIMEOUT must be at least 1; falling back to 1")
+		finalTimeoutSeconds = 1
+	}
+	if finalExpectedThroughput > 0 &&
+		int64(finalTimeoutSeconds)*finalExpectedThroughput > int64(finalBufferSize)*int64(chunkSize) {
+		logger.Default.Warnf("STREAM_TIMEOUT (%ds) at MINIMUM_THROUGHPUT (%d Bps) needs more buffered content than BUFFER_CHUNK_NUM=%d chunks hold; clients may freeze before failover completes",
+			finalTimeoutSeconds, finalExpectedThroughput, finalBufferSize)
+	}
+
 	return &StreamConfig{
 		SharedBufferSize:   finalBufferSize,
-		ChunkSize:          1024 * 1024,
+		ChunkSize:          chunkSize,
 		TimeoutSeconds:     finalTimeoutSeconds,
 		InitialBackoff:     200 * time.Millisecond,
 		MaxRetries:         finalMaxRetries,

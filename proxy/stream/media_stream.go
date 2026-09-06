@@ -141,6 +141,7 @@ func (h *StreamHandler) HandleStream(
 		if h.coordinator.WriterCtx == nil {
 			h.coordinator.WriterCtx, h.coordinator.WriterCancel = context.WithCancel(context.Background())
 		}
+		writerCtx := h.coordinator.WriterCtx
 		h.coordinator.WriterCtxMu.Unlock()
 
 		h.coordinator.LastError.Store((*buffer.ChunkData)(nil))
@@ -155,9 +156,9 @@ func (h *StreamHandler) HandleStream(
 				h.coordinator.InitializationMu.Unlock()
 			}()
 			if utils.IsAnM3U8Media(lbResult.Response) {
-				h.coordinator.StartHLSWriter(h.coordinator.WriterCtx, lbResult, streamClient)
+				h.coordinator.StartHLSWriter(writerCtx, lbResult, streamClient)
 			} else {
-				h.coordinator.StartMediaWriter(h.coordinator.WriterCtx, lbResult)
+				h.coordinator.StartMediaWriter(writerCtx, lbResult)
 			}
 		}()
 	}
@@ -181,17 +182,12 @@ func (h *StreamHandler) HandleStream(
 				h.logger.Debug("Stopping writer - no clients remaining")
 				h.coordinator.WriterCancel()
 				h.coordinator.WriterCancel = nil
-				h.coordinator.WriterCtx = nil
 			}
 			h.coordinator.WriterCtx = nil
 			h.coordinator.WriterCtxMu.Unlock()
 
 			h.coordinator.LastError.Store((*buffer.ChunkData)(nil))
 			h.coordinator.ClearBuffer()
-
-			h.coordinator.Mu.Lock()
-			h.coordinator.WriterChan = make(chan struct{}, 1)
-			h.coordinator.Mu.Unlock()
 		}
 	}
 	defer cleanup()

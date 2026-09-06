@@ -44,7 +44,6 @@ type StreamCoordinator struct {
 	ClientCount  int32
 	WriterCtx    context.Context
 	WriterCancel context.CancelFunc
-	WriterChan   chan struct{}
 	WriterCtxMu  sync.Mutex
 	WriterActive atomic.Bool
 
@@ -66,24 +65,23 @@ type StreamCoordinator struct {
 	LBResultOnWrite  atomic.Pointer[loadbalancer.LoadBalancerResult]
 	lastProcessedSeq atomic.Int64
 
-	// writeSeq is an atomic counter to track the order of chunks.
 	writeSeq int64
+
+	droppedChunks  atomic.Int64
+	capacityWarned atomic.Bool
 }
 
-// subscribe returns the current broadcast channel.
-func (c *StreamCoordinator) subscribe() <-chan struct{} {
-	c.Mu.RLock()
-	ch := c.broadcast
-	c.Mu.RUnlock()
-	return ch
+// notifyLocked wakes waiting readers. Caller must already hold c.Mu for writing.
+func (c *StreamCoordinator) notifyLocked() {
+	close(c.broadcast)
+	c.broadcast = make(chan struct{})
 }
 
 // notifySubscribers closes the current broadcast channel and
 // creates a new one so waiting clients can be notified.
 func (c *StreamCoordinator) notifySubscribers() {
 	c.Mu.Lock()
-	close(c.broadcast)
-	c.broadcast = make(chan struct{})
+	c.notifyLocked()
 	c.Mu.Unlock()
 }
 
@@ -93,13 +91,12 @@ func NewStreamCoordinator(streamID string, config *config.StreamConfig, cm *stor
 
 	respHeaderChan := make(chan struct{})
 	coord := &StreamCoordinator{
-		Buffer:     r,
-		WriterChan: make(chan struct{}, 1),
-		logger:     logger,
-		config:     config,
-		cm:         cm,
-		streamID:   streamID,
-		broadcast:  make(chan struct{}),
+		Buffer:    r,
+		logger:    logger,
+		config:    config,
+		cm:        cm,
+		streamID:  streamID,
+		broadcast: make(chan struct{}),
 	}
 	coord.respHeaderSet.Store(&respHeaderChan)
 	atomic.StoreInt32(&coord.state, stateActive)
@@ -111,14 +108,16 @@ func NewStreamCoordinator(streamID string, config *config.StreamConfig, cm *stor
 }
 
 func (c *StreamCoordinator) WaitHeaders(ctx context.Context) {
-	ch := c.respHeaderSet.Load()
-	if ch == nil {
-		return // Headers channel not initialized
-	}
-
-	select {
-	case <-*ch:
-	case <-ctx.Done():
+	for c.WriterRespHeader.Load() == nil {
+		ch := c.respHeaderSet.Load()
+		if ch == nil {
+			return
+		}
+		select {
+		case <-*ch:
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
@@ -144,9 +143,10 @@ func (c *StreamCoordinator) RegisterClient() error {
 		// Reset error state
 		c.LastError.Store((*ChunkData)(nil))
 
-		// Reset header channel
 		newHeaderChan := make(chan struct{})
-		c.respHeaderSet.Store(&newHeaderChan)
+		if old := c.respHeaderSet.Swap(&newHeaderChan); old != nil {
+			close(*old)
+		}
 	}
 
 	count := atomic.AddInt32(&c.ClientCount, 1)
@@ -161,13 +161,6 @@ func (c *StreamCoordinator) UnregisterClient() {
 	if count == 0 {
 		c.logger.Log("Last client unregistered, cleaning up resources")
 		atomic.StoreInt32(&c.state, stateDraining)
-		// Signal the writer to shut down.
-		select {
-		case c.WriterChan <- struct{}{}:
-			c.logger.Debug("Sent shutdown signal to writer")
-		default:
-			c.logger.Debug("Writer channel already has shutdown signal")
-		}
 		c.WriterRespHeader.Store(nil)
 		c.ClearBuffer()
 		c.notifySubscribers()
@@ -217,10 +210,16 @@ func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 		atomic.StoreInt32(&c.state, stateDraining)
 		c.logger.Debugf("Write: Setting error state: err=%v, status=%d", chunk.Error, chunk.Status)
 	}
-	c.Mu.Unlock()
 
-	c.notifySubscribers()
+	c.notifyLocked()
+	c.Mu.Unlock()
 	return true
+}
+
+// writeChunk publishes b and takes ownership of it; the caller must not reuse b.
+func (c *StreamCoordinator) writeChunk(b []byte) error {
+	c.Write(&ChunkData{Data: b, Timestamp: time.Now()})
+	return nil
 }
 
 // InitialPosition returns the ring position a new reader should start from.
@@ -245,14 +244,17 @@ func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.R
 	if clientSeq > 0 {
 		currentWriteSeq := atomic.LoadInt64(&c.writeSeq)
 		if clientSeq < currentWriteSeq-int64(c.config.SharedBufferSize) {
-			c.logger.Debug("ReadChunks: Client is stale; resetting to latest chunk")
+			jumped := currentWriteSeq - clientSeq
+			c.droppedChunks.Add(jumped)
+			c.logger.Logf("Stream %s: reader lagged behind by %d chunks; rejoining at live edge",
+				c.streamID, jumped)
 			fromPosition = c.Buffer
 		}
 	}
 
 	for fromPosition == c.Buffer && atomic.LoadInt32(&c.state) == stateActive {
+		ch := c.broadcast
 		c.Mu.RUnlock()
-		ch := c.subscribe()
 		select {
 		case <-ch:
 		case <-ctx.Done():
@@ -261,7 +263,7 @@ func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.R
 		c.Mu.RLock()
 	}
 
-	chunks := make([]*ChunkData, 0, c.config.SharedBufferSize)
+	var chunks []*ChunkData
 	current := fromPosition
 	var errorChunk *ChunkData
 	newClientSeq := clientSeq
@@ -269,6 +271,9 @@ func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.R
 	for current != c.Buffer {
 		if chunk, ok := current.Value.(*ChunkData); ok && chunk != nil {
 			if len(chunk.Data) > 0 {
+				if chunks == nil {
+					chunks = make([]*ChunkData, 0, c.config.SharedBufferSize)
+				}
 				chunks = append(chunks, chunk)
 				if chunk.seq > newClientSeq {
 					newClientSeq = chunk.seq
@@ -332,7 +337,7 @@ func (c *StreamCoordinator) readAndWriteStream(
 	body io.ReadCloser,
 	processChunk func([]byte) error,
 ) error {
-	buffer := make([]byte, c.config.ChunkSize)
+	var slab []byte
 	timeout := c.getTimeoutDuration()
 	backoff := proxy.NewBackoffStrategy(c.config.InitialBackoff,
 		time.Duration(c.config.TimeoutSeconds-1)*time.Second)
@@ -342,7 +347,6 @@ func (c *StreamCoordinator) readAndWriteStream(
 	zeroReads := 0
 
 	var totalBytesRead int64
-	readingStartTime := time.Now()
 	lastHealthLog := time.Now()
 
 	for atomic.LoadInt32(&c.state) == stateActive {
@@ -354,8 +358,15 @@ func (c *StreamCoordinator) readAndWriteStream(
 				return ErrStreamTimeout
 			}
 
-			n, err := body.Read(buffer)
+			if len(slab) < c.config.ChunkSize/4+1 {
+				slab = make([]byte, c.config.ChunkSize)
+			}
+
+			n, err := body.Read(slab)
 			if n == 0 {
+				if err != nil {
+					return err
+				}
 				zeroReads++
 				if zeroReads > 10 {
 					return io.EOF
@@ -368,23 +379,34 @@ func (c *StreamCoordinator) readAndWriteStream(
 			zeroReads = 0
 			totalBytesRead += int64(n)
 
-			if time.Since(lastHealthLog) >= 2*time.Second {
-				elapsed := time.Since(readingStartTime).Seconds()
-				avgThroughput := float64(totalBytesRead) / elapsed
-				c.logger.Debugf("Buffer health: average throughput = %.2f Bps", avgThroughput)
+			if window := time.Since(lastHealthLog); window >= 2*time.Second {
+				windowThroughput := float64(totalBytesRead) / window.Seconds()
+				c.logger.Debugf("Buffer health: throughput = %.2f Bps (2s window)", windowThroughput)
+				totalBytesRead = 0
 				lastHealthLog = time.Now()
 
 				if c.config.ExpectedThroughput > 0 &&
-					avgThroughput < float64(c.config.ExpectedThroughput) {
-					c.logger.Warnf("Low buffer health: average throughput %.2f Bps below expected %d Bps",
-						avgThroughput, c.config.ExpectedThroughput,
+					windowThroughput < float64(c.config.ExpectedThroughput) {
+					c.logger.Warnf("Low buffer health: throughput %.2f Bps below expected %d Bps",
+						windowThroughput, c.config.ExpectedThroughput,
 					)
-					return fmt.Errorf("low buffer health: %.2f Bps", avgThroughput)
+					return fmt.Errorf("low buffer health: %.2f Bps", windowThroughput)
+				}
+
+				ringBytes := int64(c.config.SharedBufferSize) * int64(c.config.ChunkSize)
+				if need := int64(windowThroughput * timeout.Seconds()); need > ringBytes && !c.capacityWarned.Swap(true) {
+					suggested := (need + int64(c.config.ChunkSize) - 1) / int64(c.config.ChunkSize)
+					c.logger.Warnf("Stream %s: sustained ~%.0f Bps needs ~%.0fs of buffer but the ring holds only %.1fs; raise BUFFER_CHUNK_NUM to >= %d or lower STREAM_TIMEOUT",
+						c.streamID, windowThroughput, timeout.Seconds(),
+						float64(ringBytes)/windowThroughput, suggested)
 				}
 			}
 
+			chunk := slab[:n:n]
+			slab = slab[n:]
+
 			if err == io.EOF && n > 0 {
-				if err = processChunk(buffer[:n]); err != nil {
+				if err = processChunk(chunk); err != nil {
 					return err
 				}
 				return io.EOF
@@ -399,11 +421,10 @@ func (c *StreamCoordinator) readAndWriteStream(
 				return err
 			}
 
-			if err = processChunk(buffer[:n]); err != nil {
+			if err = processChunk(chunk); err != nil {
 				return err
 			}
 
-			// Reset backoff if at least one second has passed.
 			if time.Since(lastErr) >= time.Second {
 				backoff.Reset()
 				lastErr = time.Now()

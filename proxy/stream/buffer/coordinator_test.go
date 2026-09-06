@@ -3,9 +3,12 @@ package buffer
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,6 +22,115 @@ import (
 )
 
 // ── test helpers ──────────────────────────────────────────────────────────────
+
+// A notify landing between the reader's unlock and subscribe must not be lost.
+func TestReadChunks_NoMissedWakeup(t *testing.T) {
+	const readers = 64
+
+	for i := range 300 {
+		coord := newCoordForTest(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
+		_, _, pos, seq := coord.ReadChunks(ctx, coord.InitialPosition(), 0)
+
+		var wg sync.WaitGroup
+		for range readers {
+			wg.Go(func() {
+				coord.ReadChunks(ctx, pos, seq)
+			})
+		}
+
+		for range i % 5 {
+			runtime.Gosched()
+		}
+		coord.Write(&ChunkData{Data: []byte("x"), Timestamp: time.Now()})
+
+		woke := make(chan struct{})
+		go func() { wg.Wait(); close(woke) }()
+
+		select {
+		case <-woke:
+		case <-time.After(2 * time.Second):
+			cancel()
+			t.Fatalf("iteration %d: a reader missed the wakeup and stalled", i)
+		}
+		cancel()
+	}
+}
+
+// A channel swap mid-wait must not return WaitHeaders before headers exist.
+func TestWaitHeaders_SurvivesChannelSwap(t *testing.T) {
+	for i := range 200 {
+		coord := newCoordForTest(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		done := make(chan struct{})
+		go func() {
+			coord.WaitHeaders(ctx)
+			close(done)
+		}()
+
+		fresh := make(chan struct{})
+		old := coord.respHeaderSet.Swap(&fresh)
+		if old != nil {
+			close(*old)
+		}
+
+		select {
+		case <-done:
+			t.Fatalf("iteration %d: WaitHeaders returned before headers were set", i)
+		case <-time.After(20 * time.Millisecond):
+		}
+
+		coord.WriterRespHeader.Store(&http.Header{"Content-Type": []string{"video/mp2t"}})
+		close(fresh)
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("iteration %d: WaitHeaders never woke after headers were set", i)
+		}
+	}
+}
+
+// Writers, readers and client churn together surface lock-order deadlocks.
+func TestCoordinatorConcurrentChurn(t *testing.T) {
+	coord := newCoordForTest(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+
+	wg.Go(func() {
+		for ctx.Err() == nil {
+			coord.Write(&ChunkData{Data: bytes.Repeat([]byte("a"), 512), Timestamp: time.Now()})
+		}
+	})
+
+	for range 8 {
+		wg.Go(func() {
+			_, _ = clientRead(ctx, coord)
+		})
+	}
+
+	wg.Go(func() {
+		for ctx.Err() == nil {
+			if err := coord.RegisterClient(); err == nil {
+				coord.UnregisterClient()
+			}
+		}
+	})
+
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("deadlock: goroutines did not finish after context expiry")
+	}
+}
 
 func newCoordForTest(t *testing.T) *StreamCoordinator {
 	t.Helper()
@@ -481,4 +593,211 @@ func firstDiff(a, b []byte) int {
 		}
 	}
 	return n
+}
+
+type eofReader struct{ sent bool }
+
+func (r *eofReader) Read(p []byte) (int, error) {
+	if r.sent {
+		return 0, io.EOF
+	}
+	r.sent = true
+	return copy(p, bytes.Repeat([]byte("x"), 16)), nil
+}
+
+func (r *eofReader) Close() error { return nil }
+
+type scriptedReader struct {
+	chunks [][]byte
+	i      int
+	off    int
+}
+
+// Read resumes mid-chunk when p is short, instead of dropping the tail.
+func (r *scriptedReader) Read(p []byte) (int, error) {
+	if r.i >= len(r.chunks) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.chunks[r.i][r.off:])
+	r.off += n
+	if r.off >= len(r.chunks[r.i]) {
+		r.i++
+		r.off = 0
+	}
+	return n, nil
+}
+
+func (r *scriptedReader) Close() error { return nil }
+
+func TestReadAndWriteStream_ReturnsPromptlyOnEOF(t *testing.T) {
+	c := newCoordForTest(t)
+	if err := c.RegisterClient(); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	err := c.readAndWriteStream(context.Background(), &eofReader{}, c.writeChunk)
+	elapsed := time.Since(start)
+
+	if err != io.EOF {
+		t.Fatalf("got err %v, want io.EOF", err)
+	}
+	if elapsed > 20*time.Millisecond {
+		t.Fatalf("EOF took %v, want prompt return", elapsed)
+	}
+}
+
+func TestReadAndWriteStream_ChunkNotAliasedAcrossReads(t *testing.T) {
+	c := newCoordForTest(t)
+	if err := c.RegisterClient(); err != nil {
+		t.Fatal(err)
+	}
+
+	payloads := [][]byte{
+		bytes.Repeat([]byte("a"), 300),
+		bytes.Repeat([]byte("b"), 300),
+		bytes.Repeat([]byte("c"), 300),
+	}
+
+	var got [][]byte
+	err := c.readAndWriteStream(context.Background(), &scriptedReader{chunks: payloads}, func(b []byte) error {
+		got = append(got, b)
+		return nil
+	})
+	if err != io.EOF {
+		t.Fatalf("got err %v, want io.EOF", err)
+	}
+
+	var gotAll, wantAll []byte
+	for _, g := range got {
+		gotAll = append(gotAll, g...)
+	}
+	for _, w := range payloads {
+		wantAll = append(wantAll, w...)
+	}
+	if !bytes.Equal(gotAll, wantAll) {
+		t.Fatalf("stream corrupted at byte %d: got %d bytes, want %d",
+			firstDiff(gotAll, wantAll), len(gotAll), len(wantAll))
+	}
+}
+
+// degradingReader delivers fastLen bytes instantly, then throttles to one Read per delay.
+type degradingReader struct {
+	data    []byte
+	off     int
+	fastLen int
+	delay   time.Duration
+}
+
+func (r *degradingReader) Read(p []byte) (int, error) {
+	if r.off >= r.fastLen {
+		time.Sleep(r.delay)
+	}
+	if r.off >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[r.off:])
+	r.off += n
+	return n, nil
+}
+
+func (r *degradingReader) Close() error { return nil }
+
+func TestReadAndWriteStream_RollingWindowDetectsLateDegradation(t *testing.T) {
+	c := NewStreamCoordinator(t.Name(), &config.StreamConfig{
+		SharedBufferSize:   64,
+		ChunkSize:          512,
+		TimeoutSeconds:     0,
+		ExpectedThroughput: 10_000,
+	}, store.NewConcurrencyManager(), logger.Default)
+	if err := c.RegisterClient(); err != nil {
+		t.Fatal(err)
+	}
+
+	body := &degradingReader{
+		data:    append(bytes.Repeat([]byte{1}, 200_000), bytes.Repeat([]byte{2}, 8_192)...),
+		fastLen: 200_000,
+		delay:   400 * time.Millisecond,
+	}
+
+	start := time.Now()
+	err := c.readAndWriteStream(context.Background(), body, c.writeChunk)
+	elapsed := time.Since(start)
+
+	if err == nil || !strings.Contains(err.Error(), "low buffer health") {
+		t.Fatalf("err = %v, want low buffer health error", err)
+	}
+	if elapsed < 3*time.Second || elapsed > 10*time.Second {
+		t.Fatalf("detected after %v, want within the first degraded window (~4s)", elapsed)
+	}
+}
+
+type warnRecorder struct {
+	mu       sync.Mutex
+	warnings []string
+}
+
+func (w *warnRecorder) Log(string)          {}
+func (w *warnRecorder) Logf(string, ...any) {}
+func (w *warnRecorder) Warn(string)         {}
+func (w *warnRecorder) Warnf(format string, v ...any) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.warnings = append(w.warnings, fmt.Sprintf(format, v...))
+}
+
+func (w *warnRecorder) Debug(string)          {}
+func (w *warnRecorder) Debugf(string, ...any) {}
+func (w *warnRecorder) Error(string)          {}
+func (w *warnRecorder) Errorf(string, ...any) {}
+func (w *warnRecorder) Fatal(string)          {}
+func (w *warnRecorder) Fatalf(string, ...any) {}
+
+func TestReadAndWriteStream_WarnsWhenRingSmallerThanTimeoutWindow(t *testing.T) {
+	rec := &warnRecorder{}
+	c := NewStreamCoordinator(t.Name(), &config.StreamConfig{
+		SharedBufferSize: 2,
+		ChunkSize:        512,
+		TimeoutSeconds:   3,
+	}, store.NewConcurrencyManager(), rec)
+	if err := c.RegisterClient(); err != nil {
+		t.Fatal(err)
+	}
+
+	body := &degradingReader{
+		data:    append(bytes.Repeat([]byte{7}, 4096), bytes.Repeat([]byte{8}, 512)...),
+		fastLen: 4096,
+		delay:   2200 * time.Millisecond,
+	}
+
+	_ = c.readAndWriteStream(context.Background(), body, c.writeChunk)
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.warnings) == 0 || !strings.Contains(rec.warnings[0], "BUFFER_CHUNK_NUM") {
+		t.Fatalf("expected a ring capacity warning, got %v", rec.warnings)
+	}
+}
+
+func TestReadChunks_CountsDroppedChunks(t *testing.T) {
+	c := NewStreamCoordinator(t.Name(), &config.StreamConfig{
+		SharedBufferSize: 4,
+		ChunkSize:        512,
+		TimeoutSeconds:   0,
+	}, store.NewConcurrencyManager(), logger.Default)
+
+	payload := bytes.Repeat([]byte{0xAB}, 64)
+	for range 10 {
+		c.Write(&ChunkData{Data: payload, Timestamp: time.Now()})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, _, pos, _ := c.ReadChunks(ctx, nil, 1)
+	if pos != c.Buffer {
+		t.Fatal("stale reader was not reset to the live edge")
+	}
+	if got := c.droppedChunks.Load(); got != 9 {
+		t.Fatalf("droppedChunks = %d, want 9 (seq 1 through 10, ring of 4)", got)
+	}
 }
