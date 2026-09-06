@@ -44,7 +44,6 @@ type StreamCoordinator struct {
 	ClientCount  int32
 	WriterCtx    context.Context
 	WriterCancel context.CancelFunc
-	WriterChan   chan struct{}
 	WriterCtxMu  sync.Mutex
 	WriterActive atomic.Bool
 
@@ -70,14 +69,6 @@ type StreamCoordinator struct {
 	writeSeq int64
 }
 
-// subscribe returns the current broadcast channel.
-func (c *StreamCoordinator) subscribe() <-chan struct{} {
-	c.Mu.RLock()
-	ch := c.broadcast
-	c.Mu.RUnlock()
-	return ch
-}
-
 // notifyLocked wakes waiting readers. Caller must already hold c.Mu for writing.
 func (c *StreamCoordinator) notifyLocked() {
 	close(c.broadcast)
@@ -98,13 +89,12 @@ func NewStreamCoordinator(streamID string, config *config.StreamConfig, cm *stor
 
 	respHeaderChan := make(chan struct{})
 	coord := &StreamCoordinator{
-		Buffer:     r,
-		WriterChan: make(chan struct{}, 1),
-		logger:     logger,
-		config:     config,
-		cm:         cm,
-		streamID:   streamID,
-		broadcast:  make(chan struct{}),
+		Buffer:    r,
+		logger:    logger,
+		config:    config,
+		cm:        cm,
+		streamID:  streamID,
+		broadcast: make(chan struct{}),
 	}
 	coord.respHeaderSet.Store(&respHeaderChan)
 	atomic.StoreInt32(&coord.state, stateActive)
@@ -116,14 +106,16 @@ func NewStreamCoordinator(streamID string, config *config.StreamConfig, cm *stor
 }
 
 func (c *StreamCoordinator) WaitHeaders(ctx context.Context) {
-	ch := c.respHeaderSet.Load()
-	if ch == nil {
-		return // Headers channel not initialized
-	}
-
-	select {
-	case <-*ch:
-	case <-ctx.Done():
+	for c.WriterRespHeader.Load() == nil {
+		ch := c.respHeaderSet.Load()
+		if ch == nil {
+			return
+		}
+		select {
+		case <-*ch:
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
@@ -149,9 +141,10 @@ func (c *StreamCoordinator) RegisterClient() error {
 		// Reset error state
 		c.LastError.Store((*ChunkData)(nil))
 
-		// Reset header channel
 		newHeaderChan := make(chan struct{})
-		c.respHeaderSet.Store(&newHeaderChan)
+		if old := c.respHeaderSet.Swap(&newHeaderChan); old != nil {
+			close(*old)
+		}
 	}
 
 	count := atomic.AddInt32(&c.ClientCount, 1)
@@ -166,13 +159,6 @@ func (c *StreamCoordinator) UnregisterClient() {
 	if count == 0 {
 		c.logger.Log("Last client unregistered, cleaning up resources")
 		atomic.StoreInt32(&c.state, stateDraining)
-		// Signal the writer to shut down.
-		select {
-		case c.WriterChan <- struct{}{}:
-			c.logger.Debug("Sent shutdown signal to writer")
-		default:
-			c.logger.Debug("Writer channel already has shutdown signal")
-		}
 		c.WriterRespHeader.Store(nil)
 		c.ClearBuffer()
 		c.notifySubscribers()
@@ -262,8 +248,8 @@ func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.R
 	}
 
 	for fromPosition == c.Buffer && atomic.LoadInt32(&c.state) == stateActive {
+		ch := c.broadcast
 		c.Mu.RUnlock()
-		ch := c.subscribe()
 		select {
 		case <-ch:
 		case <-ctx.Done():

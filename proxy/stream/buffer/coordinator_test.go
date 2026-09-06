@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,6 +20,115 @@ import (
 )
 
 // ── test helpers ──────────────────────────────────────────────────────────────
+
+// A notify landing between the reader's unlock and subscribe must not be lost.
+func TestReadChunks_NoMissedWakeup(t *testing.T) {
+	const readers = 64
+
+	for i := range 300 {
+		coord := newCoordForTest(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
+		_, _, pos, seq := coord.ReadChunks(ctx, coord.InitialPosition(), 0)
+
+		var wg sync.WaitGroup
+		for range readers {
+			wg.Go(func() {
+				coord.ReadChunks(ctx, pos, seq)
+			})
+		}
+
+		for range i % 5 {
+			runtime.Gosched()
+		}
+		coord.Write(&ChunkData{Data: []byte("x"), Timestamp: time.Now()})
+
+		woke := make(chan struct{})
+		go func() { wg.Wait(); close(woke) }()
+
+		select {
+		case <-woke:
+		case <-time.After(2 * time.Second):
+			cancel()
+			t.Fatalf("iteration %d: a reader missed the wakeup and stalled", i)
+		}
+		cancel()
+	}
+}
+
+// A channel swap mid-wait must not return WaitHeaders before headers exist.
+func TestWaitHeaders_SurvivesChannelSwap(t *testing.T) {
+	for i := range 200 {
+		coord := newCoordForTest(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		done := make(chan struct{})
+		go func() {
+			coord.WaitHeaders(ctx)
+			close(done)
+		}()
+
+		fresh := make(chan struct{})
+		old := coord.respHeaderSet.Swap(&fresh)
+		if old != nil {
+			close(*old)
+		}
+
+		select {
+		case <-done:
+			t.Fatalf("iteration %d: WaitHeaders returned before headers were set", i)
+		case <-time.After(20 * time.Millisecond):
+		}
+
+		coord.WriterRespHeader.Store(&http.Header{"Content-Type": []string{"video/mp2t"}})
+		close(fresh)
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("iteration %d: WaitHeaders never woke after headers were set", i)
+		}
+	}
+}
+
+// Writers, readers and client churn together surface lock-order deadlocks.
+func TestCoordinatorConcurrentChurn(t *testing.T) {
+	coord := newCoordForTest(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+
+	wg.Go(func() {
+		for ctx.Err() == nil {
+			coord.Write(&ChunkData{Data: bytes.Repeat([]byte("a"), 512), Timestamp: time.Now()})
+		}
+	})
+
+	for range 8 {
+		wg.Go(func() {
+			_, _ = clientRead(ctx, coord)
+		})
+	}
+
+	wg.Go(func() {
+		for ctx.Err() == nil {
+			if err := coord.RegisterClient(); err == nil {
+				coord.UnregisterClient()
+			}
+		}
+	})
+
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("deadlock: goroutines did not finish after context expiry")
+	}
+}
 
 func newCoordForTest(t *testing.T) *StreamCoordinator {
 	t.Helper()

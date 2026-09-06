@@ -21,7 +21,9 @@ func (c *StreamCoordinator) StartMediaWriter(ctx context.Context, lbResult *load
 	c.LBResultOnWrite.Store(lbResult)
 	c.WriterRespHeader.Store(nil)
 	newHeaderChan := make(chan struct{})
-	c.respHeaderSet.Store(&newHeaderChan)
+	if old := c.respHeaderSet.Swap(&newHeaderChan); old != nil {
+		close(*old)
+	}
 
 	c.logger.Debug("StartMediaWriter: Beginning read loop")
 

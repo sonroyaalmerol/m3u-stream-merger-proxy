@@ -45,7 +45,9 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 	c.WriterRespHeader.Store(nil)
 
 	newHeaderChan := make(chan struct{})
-	c.respHeaderSet.Store(&newHeaderChan)
+	if old := c.respHeaderSet.Swap(&newHeaderChan); old != nil {
+		close(*old)
+	}
 	c.m3uHeaderSet.Store(false)
 	c.logger.Debug("StartHLSWriter: Beginning read loop")
 
