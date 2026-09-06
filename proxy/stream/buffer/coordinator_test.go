@@ -482,3 +482,79 @@ func firstDiff(a, b []byte) int {
 	}
 	return n
 }
+
+type eofReader struct{ sent bool }
+
+func (r *eofReader) Read(p []byte) (int, error) {
+	if r.sent {
+		return 0, io.EOF
+	}
+	r.sent = true
+	return copy(p, bytes.Repeat([]byte("x"), 16)), nil
+}
+
+func (r *eofReader) Close() error { return nil }
+
+type scriptedReader struct {
+	chunks [][]byte
+	i      int
+}
+
+func (r *scriptedReader) Read(p []byte) (int, error) {
+	if r.i >= len(r.chunks) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.chunks[r.i])
+	r.i++
+	return n, nil
+}
+
+func (r *scriptedReader) Close() error { return nil }
+
+func TestReadAndWriteStream_ReturnsPromptlyOnEOF(t *testing.T) {
+	c := newCoordForTest(t)
+	if err := c.RegisterClient(); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	err := c.readAndWriteStream(context.Background(), &eofReader{}, c.writeChunk)
+	elapsed := time.Since(start)
+
+	if err != io.EOF {
+		t.Fatalf("got err %v, want io.EOF", err)
+	}
+	if elapsed > 20*time.Millisecond {
+		t.Fatalf("EOF took %v, want prompt return", elapsed)
+	}
+}
+
+func TestReadAndWriteStream_ChunkNotAliasedAcrossReads(t *testing.T) {
+	c := newCoordForTest(t)
+	if err := c.RegisterClient(); err != nil {
+		t.Fatal(err)
+	}
+
+	payloads := [][]byte{
+		bytes.Repeat([]byte("a"), 300),
+		bytes.Repeat([]byte("b"), 300),
+		bytes.Repeat([]byte("c"), 300),
+	}
+
+	var got [][]byte
+	err := c.readAndWriteStream(context.Background(), &scriptedReader{chunks: payloads}, func(b []byte) error {
+		got = append(got, b)
+		return nil
+	})
+	if err != io.EOF {
+		t.Fatalf("got err %v, want io.EOF", err)
+	}
+	if len(got) != len(payloads) {
+		t.Fatalf("got %d chunks, want %d", len(got), len(payloads))
+	}
+	for i, want := range payloads {
+		if !bytes.Equal(got[i], want) {
+			t.Errorf("chunk %d aliased: got %q, want %q", i, got[i][:1], want[:1])
+		}
+	}
+}

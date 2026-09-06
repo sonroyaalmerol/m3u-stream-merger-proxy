@@ -6,7 +6,6 @@ import (
 	"io"
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/loadbalancer"
-	"time"
 )
 
 func (c *StreamCoordinator) StartMediaWriter(ctx context.Context, lbResult *loadbalancer.LoadBalancerResult) {
@@ -38,13 +37,7 @@ func (c *StreamCoordinator) StartMediaWriter(ctx context.Context, lbResult *load
 		close(*ch)
 	}
 
-	err := c.readAndWriteStream(ctx, lbResult.Response.Body, func(b []byte) error {
-		c.Write(&ChunkData{
-			Data:      append([]byte(nil), b...),
-			Timestamp: time.Now(),
-		})
-		return nil
-	})
+	err := c.readAndWriteStream(ctx, lbResult.Response.Body, c.writeChunk)
 	if err != nil {
 		switch err {
 		case ctx.Err():

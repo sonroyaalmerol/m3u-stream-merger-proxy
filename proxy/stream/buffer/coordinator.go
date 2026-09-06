@@ -78,12 +78,17 @@ func (c *StreamCoordinator) subscribe() <-chan struct{} {
 	return ch
 }
 
+// notifyLocked wakes waiting readers. Caller must already hold c.Mu for writing.
+func (c *StreamCoordinator) notifyLocked() {
+	close(c.broadcast)
+	c.broadcast = make(chan struct{})
+}
+
 // notifySubscribers closes the current broadcast channel and
 // creates a new one so waiting clients can be notified.
 func (c *StreamCoordinator) notifySubscribers() {
 	c.Mu.Lock()
-	close(c.broadcast)
-	c.broadcast = make(chan struct{})
+	c.notifyLocked()
 	c.Mu.Unlock()
 }
 
@@ -217,10 +222,16 @@ func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 		atomic.StoreInt32(&c.state, stateDraining)
 		c.logger.Debugf("Write: Setting error state: err=%v, status=%d", chunk.Error, chunk.Status)
 	}
-	c.Mu.Unlock()
 
-	c.notifySubscribers()
+	c.notifyLocked()
+	c.Mu.Unlock()
 	return true
+}
+
+// writeChunk publishes b and takes ownership of it; the caller must not reuse b.
+func (c *StreamCoordinator) writeChunk(b []byte) error {
+	c.Write(&ChunkData{Data: b, Timestamp: time.Now()})
+	return nil
 }
 
 // InitialPosition returns the ring position a new reader should start from.
@@ -261,7 +272,7 @@ func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.R
 		c.Mu.RLock()
 	}
 
-	chunks := make([]*ChunkData, 0, c.config.SharedBufferSize)
+	var chunks []*ChunkData
 	current := fromPosition
 	var errorChunk *ChunkData
 	newClientSeq := clientSeq
@@ -269,6 +280,9 @@ func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.R
 	for current != c.Buffer {
 		if chunk, ok := current.Value.(*ChunkData); ok && chunk != nil {
 			if len(chunk.Data) > 0 {
+				if chunks == nil {
+					chunks = make([]*ChunkData, 0, c.config.SharedBufferSize)
+				}
 				chunks = append(chunks, chunk)
 				if chunk.seq > newClientSeq {
 					newClientSeq = chunk.seq
@@ -332,7 +346,8 @@ func (c *StreamCoordinator) readAndWriteStream(
 	body io.ReadCloser,
 	processChunk func([]byte) error,
 ) error {
-	buffer := make([]byte, c.config.ChunkSize)
+	const slabChunks = 4
+	var slab []byte
 	timeout := c.getTimeoutDuration()
 	backoff := proxy.NewBackoffStrategy(c.config.InitialBackoff,
 		time.Duration(c.config.TimeoutSeconds-1)*time.Second)
@@ -354,8 +369,15 @@ func (c *StreamCoordinator) readAndWriteStream(
 				return ErrStreamTimeout
 			}
 
-			n, err := body.Read(buffer)
+			if len(slab) < c.config.ChunkSize {
+				slab = make([]byte, c.config.ChunkSize*slabChunks)
+			}
+
+			n, err := body.Read(slab[:c.config.ChunkSize])
 			if n == 0 {
+				if err != nil {
+					return err
+				}
 				zeroReads++
 				if zeroReads > 10 {
 					return io.EOF
@@ -383,8 +405,11 @@ func (c *StreamCoordinator) readAndWriteStream(
 				}
 			}
 
+			chunk := slab[:n:n]
+			slab = slab[n:]
+
 			if err == io.EOF && n > 0 {
-				if err = processChunk(buffer[:n]); err != nil {
+				if err = processChunk(chunk); err != nil {
 					return err
 				}
 				return io.EOF
@@ -399,11 +424,10 @@ func (c *StreamCoordinator) readAndWriteStream(
 				return err
 			}
 
-			if err = processChunk(buffer[:n]); err != nil {
+			if err = processChunk(chunk); err != nil {
 				return err
 			}
 
-			// Reset backoff if at least one second has passed.
 			if time.Since(lastErr) >= time.Second {
 				backoff.Reset()
 				lastErr = time.Now()
