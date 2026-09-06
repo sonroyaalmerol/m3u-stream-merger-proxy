@@ -259,8 +259,7 @@ func TestCoordinator_SharedBuffer_LateJoin(t *testing.T) {
 	)
 
 	// Client 1 connects before any data arrives.
-	wg.Add(1)
-	go func() { defer wg.Done(); data1, status1 = clientRead(ctx, coord) }()
+	wg.Go(func() { ; data1, status1 = clientRead(ctx, coord) })
 	if !waitForClients(coord, 1, time.Second) {
 		t.Fatal("client1 did not register in time")
 	}
@@ -273,8 +272,7 @@ func TestCoordinator_SharedBuffer_LateJoin(t *testing.T) {
 	}
 
 	// Client 2 joins mid-stream.
-	wg.Add(1)
-	go func() { defer wg.Done(); data2, status2 = clientRead(ctx, coord) }()
+	wg.Go(func() { ; data2, status2 = clientRead(ctx, coord) })
 	if !waitForClients(coord, 2, time.Second) {
 		t.Fatal("client2 did not register in time")
 	}
@@ -476,10 +474,7 @@ func TestCoordinator_SharedBuffer_WriterStopsAfterLastClient(t *testing.T) {
 // firstDiff returns the index of the first byte that differs between a and b,
 // or max(len(a), len(b)) if the shorter slice is a prefix of the longer.
 func firstDiff(a, b []byte) int {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
+	n := min(len(b), len(a))
 	for i := range n {
 		if a[i] != b[i] {
 			return i
