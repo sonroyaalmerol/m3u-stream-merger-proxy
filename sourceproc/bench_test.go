@@ -2,18 +2,27 @@ package sourceproc
 
 import (
 	"fmt"
-	"m3u-stream-merger/config"
+	"sync"
 	"testing"
 
-	"github.com/puzpuzpuz/xsync/v3"
+	"m3u-stream-merger/config"
 )
 
-func benchDataDir(b *testing.B) {
+func benchDataDir(b testing.TB) {
 	b.Helper()
 	dir := b.TempDir()
 	prev := config.GetConfig()
 	config.SetConfig(&config.Config{DataPath: dir, TempPath: dir})
 	b.Cleanup(func() { config.SetConfig(prev) })
+
+	defaultStore.mu.Lock()
+	defaultStore.loaded = false
+	if defaultStore.data != nil {
+		_ = defaultStore.data.Close()
+		defaultStore.data = nil
+	}
+	defaultStore.index = nil
+	defaultStore.mu.Unlock()
 }
 
 func benchStream(i int) *StreamInfo {
@@ -26,13 +35,84 @@ func benchStream(i int) *StreamInfo {
 		Group:       "Sports | International",
 		SourceM3U:   "1",
 		SourceIndex: i,
-		URLs:        xsync.NewMapOf[string, map[string]string](),
 	}
-	s.URLs.Store("1", map[string]string{"abc": "1:::http://example.com/live/user/pass/1234.ts"})
+	s.AddURL("1", "abc", 1, "http://example.com/live/user/pass/1234.ts")
 	return s
 }
 
-// BenchmarkSanitizeField runs once per playlist entry during source processing.
+func benchStreams(n int) []*StreamInfo {
+	streams := make([]*StreamInfo, n)
+	unique := max(n*4/5, 1)
+	for i := range streams {
+		streams[i] = benchStream(i % unique)
+	}
+	return streams
+}
+
+func BenchmarkSortingPipeline(b *testing.B) {
+	for _, n := range []int{1000, 20000, 100000} {
+		b.Run(fmt.Sprintf("streams=%d", n), func(b *testing.B) {
+			benchDataDir(b)
+			b.ReportAllocs()
+			for b.Loop() {
+				b.StopTimer()
+				streams := benchStreams(n)
+				m := newSortingManager()
+				b.StartTimer()
+
+				for _, s := range streams {
+					if err := m.AddToSorter(s); err != nil {
+						b.Fatal(err)
+					}
+				}
+				count := 0
+				if err := m.GetSortedEntries(func(*StreamInfo) { count++ }); err != nil {
+					b.Fatal(err)
+				}
+
+				b.StopTimer()
+				if count == 0 {
+					b.Fatal("no entries emitted")
+				}
+				m.Close()
+				b.StartTimer()
+			}
+		})
+	}
+}
+
+func BenchmarkSortingParallelInsert(b *testing.B) {
+	const n = 10000
+	const workers = 8
+	benchDataDir(b)
+	b.ReportAllocs()
+	for b.Loop() {
+		b.StopTimer()
+		streams := benchStreams(n)
+		m := newSortingManager()
+		b.StartTimer()
+
+		var wg sync.WaitGroup
+		for w := range workers {
+			wg.Add(1)
+			go func(w int) {
+				defer wg.Done()
+				for i := w; i < len(streams); i += workers {
+					if err := m.AddToSorter(streams[i]); err != nil {
+						b.Error(err)
+						return
+					}
+				}
+			}(w)
+		}
+		wg.Wait()
+
+		b.StopTimer()
+		m.Close()
+		b.StartTimer()
+	}
+}
+
 func BenchmarkSanitizeField(b *testing.B) {
 	title := "Some | Channel: Name/HD <Sports> \"Feed\" ?1"
 	b.ReportAllocs()

@@ -102,6 +102,10 @@ func GetStreamsDirPath() string {
 	return filepath.Join(globalConfig.DataPath, "streams/")
 }
 
+func GetStreamStoreDirPath() string {
+	return filepath.Join(globalConfig.DataPath, "store/")
+}
+
 func GetSourcesDirPath() string {
 	return filepath.Join(globalConfig.TempPath, "sources/")
 }

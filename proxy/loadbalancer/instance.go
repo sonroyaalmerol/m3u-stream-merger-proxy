@@ -217,26 +217,8 @@ func (instance *LoadBalancerInstance) fetchBackendUrls(streamUrl string) error {
 
 	instance.logger.Debugf("Decoded slug: %v", stream)
 
-	if stream.URLs == nil {
-		stream.URLs = xsync.NewMapOf[string, map[string]string]()
-	}
-	// Validate URLs map
-	if stream.URLs.Size() == 0 {
+	if len(stream.URLs) == 0 {
 		return fmt.Errorf("stream has no URLs configured")
-	}
-
-	// Validate that at least one index has URLs
-	hasValidUrls := false
-	stream.URLs.Range(func(_ string, innerMap map[string]string) bool {
-		if len(innerMap) > 0 {
-			hasValidUrls = true
-			return false
-		}
-
-		return true
-	})
-	if !hasValidUrls {
-		return fmt.Errorf("stream has no valid URLs")
 	}
 
 	instance.SetStreamInfo(stream)
@@ -273,8 +255,8 @@ func (instance *LoadBalancerInstance) tryAllStreams(ctx context.Context, req *ht
 		default:
 		}
 
-		innerMap, ok := instance.GetStreamInfo().URLs.Load(index)
-		if !ok {
+		innerMap := instance.GetStreamInfo().URLsForIndex(index)
+		if len(innerMap) == 0 {
 			instance.logger.Errorf("Channel not found from M3U_%s: %s", index, instance.GetStreamInfo().Title)
 			continue
 		}

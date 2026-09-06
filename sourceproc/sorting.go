@@ -1,273 +1,116 @@
 package sourceproc
 
 import (
-	"encoding/json"
-	"fmt"
-	"m3u-stream-merger/config"
-	"m3u-stream-merger/logger"
-	"maps"
+	"cmp"
 	"os"
-	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/cespare/xxhash"
+	"m3u-stream-merger/config"
+
 	"github.com/puzpuzpuz/xsync/v3"
 )
 
-const (
-	mutexShards       = 4096
-	shardFileTemplate = "shard-%04d.json"
-)
-
 type SortingManager struct {
-	shardMap   *xsync.MapOf[uint64, *shardData]
+	streams    *xsync.MapOf[string, *StreamInfo]
 	sortingKey string
 	sortingDir string
-	basePath   string
 }
 
-type shardData struct {
-	index  map[string]bool
-	buffer map[string][]byte
+type sortEntry struct {
+	stream *StreamInfo
+	key    string
+	num    int
+	numOK  bool
 }
 
 func newSortingManager() *SortingManager {
-	sortingKey := os.Getenv("SORTING_KEY")
-	sortingDir := strings.ToLower(os.Getenv("SORTING_DIRECTION"))
-	basePath := config.GetSortDirPath()
-
-	if err := os.MkdirAll(basePath, 0755); err != nil {
-		logger.Default.Error(err.Error())
-	}
+	_ = os.RemoveAll(config.GetSortDirPath())
 
 	return &SortingManager{
-		shardMap:   xsync.NewMapOf[uint64, *shardData](),
-		sortingKey: sortingKey,
-		sortingDir: sortingDir,
-		basePath:   basePath,
+		streams:    xsync.NewMapOf[string, *StreamInfo](),
+		sortingKey: os.Getenv("SORTING_KEY"),
+		sortingDir: strings.ToLower(os.Getenv("SORTING_DIRECTION")),
 	}
 }
 
 func (m *SortingManager) AddToSorter(s *StreamInfo) error {
-	titleHash := xxhash.Sum64String(s.Title)
-	shardIndex := titleHash % mutexShards
-	sanitizedTitle := sanitizeField(s.Title)
-
-	var addErr error
-	m.shardMap.Compute(shardIndex, func(oldVal *shardData, loaded bool) (*shardData, bool) {
-		if oldVal == nil {
-			oldVal = &shardData{
-				index:  make(map[string]bool),
-				buffer: make(map[string][]byte),
-			}
+	m.streams.Compute(sanitizeField(s.Title), func(old *StreamInfo, loaded bool) (*StreamInfo, bool) {
+		if !loaded {
+			return s.cloneForStore(), false
 		}
-
-		if oldVal.index[sanitizedTitle] {
-			addErr = m.handleExisting(shardIndex, sanitizedTitle, s)
-			return oldVal, false
-		}
-
-		shardFile := filepath.Join(m.basePath, fmt.Sprintf(shardFileTemplate, shardIndex))
-		if _, err := os.Stat(shardFile); err == nil {
-			entries, err := m.readShard(shardIndex)
-			if err != nil {
-				addErr = err
-				return oldVal, false
-			}
-			for title := range entries {
-				oldVal.index[title] = true
-			}
-			if oldVal.index[sanitizedTitle] {
-				addErr = m.handleExisting(shardIndex, sanitizedTitle, s)
-				return oldVal, false
-			}
-		}
-
-		encoded, err := json.Marshal(s)
-		if err != nil {
-			addErr = fmt.Errorf("failed to marshal StreamInfo: %w", err)
-			return oldVal, false
-		}
-
-		oldVal.buffer[sanitizedTitle] = encoded
-		oldVal.index[sanitizedTitle] = true
-
-		if len(oldVal.buffer) >= 250 {
-			if err := m.flushShard(shardIndex, oldVal); err != nil {
-				addErr = err
-			}
-		}
-
-		return oldVal, false
+		return mergeStreamInfoAttributes(old, s), false
 	})
 
-	return addErr
+	return nil
 }
 
 func (m *SortingManager) Close() {
-	basePath := config.GetSortDirPath()
-	os.RemoveAll(basePath)
-}
-
-func (m *SortingManager) handleExisting(shardIndex uint64, title string, s *StreamInfo) error {
-	entries, err := m.readShard(shardIndex)
-	if err != nil {
-		return err
-	}
-
-	if existing, exists := entries[title]; exists {
-		merged := mergeStreamInfoAttributes(existing, s)
-		entries[title] = merged
-	} else {
-		entries[title] = s
-	}
-
-	return m.writeShard(shardIndex, entries)
-}
-
-func (m *SortingManager) flushShard(shardIndex uint64, data *shardData) error {
-	if len(data.buffer) == 0 {
-		return nil
-	}
-
-	entries, err := m.readShard(shardIndex)
-	if err != nil {
-		return err
-	}
-
-	for title, buf := range data.buffer {
-		var s StreamInfo
-		if err := json.Unmarshal(buf, &s); err != nil {
-			continue
-		}
-		entries[title] = &s
-	}
-
-	if err := m.writeShard(shardIndex, entries); err != nil {
-		return err
-	}
-
-	data.buffer = make(map[string][]byte)
-	return nil
-}
-
-func (m *SortingManager) readShard(shardIndex uint64) (map[string]*StreamInfo, error) {
-	shardFile := filepath.Join(m.basePath, fmt.Sprintf(shardFileTemplate, shardIndex))
-	entries := make(map[string]*StreamInfo)
-
-	file, err := os.Open(shardFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return entries, nil
-		}
-		return nil, err
-	}
-	defer file.Close()
-
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&entries); err != nil {
-		return nil, fmt.Errorf("failed to decode shard: %w", err)
-	}
-
-	return entries, nil
-}
-
-func (m *SortingManager) writeShard(shardIndex uint64, entries map[string]*StreamInfo) error {
-	shardFile := filepath.Join(m.basePath, fmt.Sprintf(shardFileTemplate, shardIndex))
-
-	file, err := os.Create(shardFile)
-	if err != nil {
-		return fmt.Errorf("failed to create shard file: %w", err)
-	}
-	defer file.Close()
-
-	encoder := json.NewEncoder(file)
-	if err := encoder.Encode(entries); err != nil {
-		return fmt.Errorf("failed to encode shard: %w", err)
-	}
-
-	return nil
+	m.streams.Clear()
 }
 
 func (m *SortingManager) GetSortedEntries(callback func(*StreamInfo)) error {
-	for shardIndex := range mutexShards {
-		index := uint64(shardIndex)
-		m.shardMap.Compute(index, func(oldVal *shardData, loaded bool) (*shardData, bool) {
-			if oldVal == nil {
-				return nil, false
-			}
-			if err := m.flushShard(index, oldVal); err != nil {
-				logger.Default.Errorf("failed to flush shard %d: %v", index, err)
-			}
-			return oldVal, false
-		})
-	}
-
-	entries := make([]*StreamInfo, 0, 1_000_000)
-
-	for shardIndex := range mutexShards {
-		shardFile := filepath.Join(m.basePath, fmt.Sprintf(shardFileTemplate, shardIndex))
-
-		file, err := os.Open(shardFile)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("failed to open shard %d: %w", shardIndex, err)
-		}
-
-		var shardData map[string]*StreamInfo
-		if err := json.NewDecoder(file).Decode(&shardData); err != nil {
-			file.Close()
-			return fmt.Errorf("failed to decode shard %d: %w", shardIndex, err)
-		}
-		file.Close()
-
-		for _, stream := range shardData {
-			entries = append(entries, stream)
-		}
-	}
-
-	sort.Slice(entries, func(i, j int) bool {
-		iStream := entries[i]
-		jStream := entries[j]
-
-		var cmp int
-
-		switch m.sortingKey {
-		case "tvg-chno", "channel-id", "channel-number":
-			cmp = compareNumeric(iStream.TvgChNo, jStream.TvgChNo)
-		case "tvg-id":
-			cmp = compareNumeric(iStream.TvgID, jStream.TvgID)
-		case "source":
-			cmp = compareNumeric(iStream.SourceM3U, jStream.SourceM3U)
-		case "tvg-group", "group-title":
-			cmp = strings.Compare(
-				strings.ToLower(iStream.Group),
-				strings.ToLower(jStream.Group))
-		case "tvg-type":
-			cmp = strings.Compare(
-				strings.ToLower(iStream.TvgType),
-				strings.ToLower(jStream.TvgType))
-		default: // Title
-			cmp = strings.Compare(
-				strings.ToLower(iStream.Title),
-				strings.ToLower(jStream.Title))
-		}
-
-		if m.sortingDir == "desc" {
-			return cmp > 0
-		}
-		return cmp < 0
+	entries := make([]sortEntry, 0, m.streams.Size())
+	m.streams.Range(func(_ string, s *StreamInfo) bool {
+		entries = append(entries, m.sortEntryFor(s))
+		return true
 	})
 
-	for _, entry := range entries {
-		callback(entry)
+	desc := m.sortingDir == "desc"
+	slices.SortFunc(entries, func(a, b sortEntry) int {
+		c := compareSortEntries(a, b)
+		if desc {
+			return -c
+		}
+		return c
+	})
+
+	for i := range entries {
+		callback(entries[i].stream)
 	}
 
 	return nil
+}
+
+func (m *SortingManager) sortEntryFor(s *StreamInfo) sortEntry {
+	e := sortEntry{stream: s}
+	numeric := false
+
+	switch m.sortingKey {
+	case "tvg-chno", "channel-id", "channel-number":
+		e.key, numeric = s.TvgChNo, true
+	case "tvg-id":
+		e.key, numeric = s.TvgID, true
+	case "source":
+		e.key, numeric = s.SourceM3U, true
+	case "tvg-group", "group-title":
+		e.key = strings.ToLower(s.Group)
+	case "tvg-type":
+		e.key = strings.ToLower(s.TvgType)
+	default:
+		e.key = strings.ToLower(s.Title)
+	}
+
+	if numeric {
+		if n, err := strconv.Atoi(e.key); err == nil {
+			e.num, e.numOK = n, true
+		}
+	}
+
+	return e
+}
+
+func compareSortEntries(a, b sortEntry) int {
+	if a.numOK && b.numOK {
+		if c := cmp.Compare(a.num, b.num); c != 0 {
+			return c
+		}
+	} else if c := strings.Compare(a.key, b.key); c != 0 {
+		return c
+	}
+
+	return strings.Compare(a.stream.Title, b.stream.Title)
 }
 
 func mergeStreamInfoAttributes(base, new *StreamInfo) *StreamInfo {
@@ -290,23 +133,9 @@ func mergeStreamInfoAttributes(base, new *StreamInfo) *StreamInfo {
 		base.Group = new.Group
 	}
 
-	if base.URLs == nil {
-		base.URLs = xsync.NewMapOf[string, map[string]string]()
+	for _, u := range new.URLs {
+		base.AddURL(u.M3UIndex, u.Hash, u.LineNum, u.URL)
 	}
-
-	new.URLs.Range(func(key string, value map[string]string) bool {
-		_, _ = base.URLs.Compute(key, func(oldValue map[string]string, loaded bool) (newValue map[string]string, del bool) {
-			if oldValue == nil {
-				oldValue = value
-			} else {
-				maps.Copy(oldValue, value)
-			}
-
-			return oldValue, false
-		})
-
-		return true
-	})
 
 	if new.SourceM3U < base.SourceM3U || (new.SourceM3U == base.SourceM3U && new.SourceIndex < base.SourceIndex) {
 		base.SourceM3U = new.SourceM3U
@@ -345,20 +174,4 @@ func sanitizeField(value string) string {
 	}
 
 	return sanitized
-}
-
-func compareNumeric(a, b string) int {
-	aNum, aErr := strconv.Atoi(a)
-	bNum, bErr := strconv.Atoi(b)
-
-	if aErr == nil && bErr == nil {
-		if aNum < bNum {
-			return -1
-		} else if aNum > bNum {
-			return 1
-		}
-		return 0
-	}
-
-	return strings.Compare(a, b)
 }

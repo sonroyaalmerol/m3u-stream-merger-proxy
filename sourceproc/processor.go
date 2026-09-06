@@ -25,6 +25,7 @@ type M3UProcessor struct {
 	writer                *bufio.Writer
 	revalidatingDone      chan struct{}
 	sortingMgr            *SortingManager
+	storeWriter           *StreamStoreWriter
 	criticalErrorOccurred atomic.Bool
 	tvgIDs                map[string]struct{}
 }
@@ -219,8 +220,13 @@ func (p *M3UProcessor) applyNewRemoteFiles() {
 		}
 	}
 
-	_ = os.RemoveAll(config.GetCurrentSlugDirPath())
-	_ = os.Rename(config.GetNewSlugDirPath(), config.GetCurrentSlugDirPath())
+	if p.storeWriter != nil {
+		if err := p.storeWriter.Commit(); err != nil {
+			logger.Default.Errorf("Error committing stream store: %v", err)
+		}
+		p.storeWriter = nil
+		cleanupLegacyStores()
+	}
 }
 
 func (p *M3UProcessor) cleanFailedRemoteFiles() {
@@ -230,11 +236,14 @@ func (p *M3UProcessor) cleanFailedRemoteFiles() {
 		tmpPath := finalPath + ".new"
 		_ = os.RemoveAll(tmpPath)
 	}
-	_ = os.RemoveAll(config.GetNewSlugDirPath())
+	if p.storeWriter != nil {
+		p.storeWriter.Discard()
+		p.storeWriter = nil
+	}
 }
 
 func (p *M3UProcessor) addStream(stream *StreamInfo) error {
-	if stream == nil || stream.URLs.Size() == 0 {
+	if stream == nil || len(stream.URLs) == 0 {
 		return nil
 	}
 
@@ -264,11 +273,21 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 		return
 	}
 
+	storeWriter, err := NewStreamStoreWriter()
+	if err != nil {
+		p.markCriticalError(err)
+		return
+	}
+	p.storeWriter = storeWriter
+
 	p.tvgIDs = make(map[string]struct{})
 	err = p.sortingMgr.GetSortedEntries(func(entry *StreamInfo) {
 		_, writeErr := p.writer.WriteString(formatStreamEntry(baseURL, entry))
 		if writeErr != nil {
 			p.markCriticalError(writeErr)
+		}
+		if storeErr := storeWriter.Add(entry); storeErr != nil {
+			p.markCriticalError(storeErr)
 		}
 		if entry.TvgID != "" {
 			p.tvgIDs[entry.TvgID] = struct{}{}
