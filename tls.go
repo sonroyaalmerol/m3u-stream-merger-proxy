@@ -106,6 +106,20 @@ func (s *tlsSetup) redirectHandler() http.Handler {
 			fmt.Fprintln(w, "this proxy requires HTTPS; configure BASE_URL to enable redirects")
 			return
 		}
-		http.Redirect(w, r, base+r.URL.RequestURI(), http.StatusMovedPermanently)
+		w.Header().Set("Location", s.redirectTarget(r, base))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusMovedPermanently)
+		if r.Method == http.MethodGet {
+			fmt.Fprintln(w, `<a href="`+w.Header().Get("Location")+`">Moved Permanently</a>.`)
+		}
 	})
+}
+
+// redirectTarget joins the config-owned base with the request path; host never comes from r.
+func (s *tlsSetup) redirectTarget(r *http.Request, base string) string {
+	target := base + r.URL.Path
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	return target
 }
