@@ -56,7 +56,7 @@ func (p *M3UProcessor) Start(r *http.Request) {
 			logger.Default.Errorf("Error while processing stream: %v", err)
 		}
 		processCount++
-		batch := max(int(math.Pow(10, math.Floor(math.Log10(float64(processCount))))), 100)
+		batch := min(max(int(math.Pow(10, math.Floor(math.Log10(float64(processCount))))), 100), 10000)
 		if processCount%batch == 0 {
 			logger.Default.Logf("Processed %d streams so far", processCount)
 		}
