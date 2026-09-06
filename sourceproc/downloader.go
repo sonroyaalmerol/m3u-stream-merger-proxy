@@ -2,6 +2,7 @@ package sourceproc
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
+	"m3u-stream-merger/xtream"
 )
 
 type SourceDownloaderResult struct {
@@ -49,17 +51,22 @@ func streamDownloadM3USources() chan *SourceDownloaderResult {
 					defer close(result.Error)
 
 					m3uURL := os.Getenv(fmt.Sprintf("M3U_URL_%s", idx))
-					if m3uURL == "" {
+					xtreamURL := os.Getenv(fmt.Sprintf("XTREAM_URL_%s", idx))
+					if m3uURL == "" && xtreamURL == "" {
 						result.Error <- fmt.Errorf("no URL configured for M3U index %s", idx)
 						return
 					}
 
-					if after, ok := strings.CutPrefix(m3uURL, "file://"); ok {
-						handleLocalFile(after, result)
+					if m3uURL != "" {
+						if after, ok := strings.CutPrefix(m3uURL, "file://"); ok {
+							handleLocalFile(after, result)
+							return
+						}
+						handleRemoteURL(m3uURL, idx, result)
 						return
 					}
 
-					handleRemoteURL(m3uURL, idx, result)
+					handleXtreamSource(idx, result)
 				}()
 
 				resultChan <- result
@@ -144,6 +151,87 @@ func handleRemoteURL(m3uURL, idx string, result *SourceDownloaderResult) {
 
 	reader := io.TeeReader(bufReader, newFile)
 	scanAndStream(reader, result)
+}
+
+// handleXtreamSource: fetch, tee into .new cache + Lines channel, fallback to last good cache.
+func handleXtreamSource(idx string, result *SourceDownloaderResult) {
+	finalPath := utils.GetM3UFilePathByIndex(idx)
+	tmpPath := finalPath + ".new"
+
+	if err := os.MkdirAll(filepath.Dir(finalPath), os.ModePerm); err != nil {
+		result.Error <- fmt.Errorf("error creating dir for source: %v", err)
+		return
+	}
+
+	fallbackFile, _ := os.Open(finalPath)
+	defer func() {
+		if fallbackFile != nil {
+			fallbackFile.Close()
+		}
+	}()
+
+	useFallback := func(err error) {
+		if fallbackFile != nil {
+			scanAndStream(fallbackFile, result)
+		} else {
+			result.Error <- err
+		}
+	}
+
+	client := xtream.NewClient(
+		os.Getenv(fmt.Sprintf("XTREAM_URL_%s", idx)),
+		os.Getenv(fmt.Sprintf("XTREAM_USERNAME_%s", idx)),
+		os.Getenv(fmt.Sprintf("XTREAM_PASSWORD_%s", idx)),
+	)
+
+	newFile, err := os.Create(tmpPath)
+	if err != nil {
+		useFallback(fmt.Errorf("error creating tmp file for index %s: %v", idx, err))
+		return
+	}
+	defer newFile.Close()
+
+	writer := bufio.NewWriter(newFile)
+	if _, err := writer.WriteString("#EXTM3U\n"); err != nil {
+		_ = os.Remove(tmpPath)
+		useFallback(fmt.Errorf("error writing header for index %s: %v", idx, err))
+		return
+	}
+
+	lineNum := 0
+	emitted := false
+	fetchErr := xtream.FetchPlaylistLines(context.Background(), client, func(line string) error {
+		if _, err := writer.WriteString(line + "\n"); err != nil {
+			return err
+		}
+		result.Lines <- &LineDetails{Content: line, LineNum: lineNum}
+		lineNum++
+		emitted = true
+		return nil
+	})
+
+	if fetchErr != nil {
+		_ = writer.Flush()
+		_ = os.Remove(tmpPath)
+		if !emitted {
+			logger.Default.Warnf("Xtream fetch error for index %s: %v", idx, fetchErr)
+			useFallback(fetchErr)
+		} else {
+			result.Error <- fmt.Errorf("xtream index %s partial fetch: %w", idx, fetchErr)
+		}
+		return
+	}
+
+	if err := writer.Flush(); err != nil {
+		_ = os.Remove(tmpPath)
+		useFallback(fmt.Errorf("error flushing tmp file for index %s: %v", idx, err))
+		return
+	}
+
+	if fallbackFile != nil {
+		fallbackFile.Close()
+		fallbackFile = nil
+	}
 }
 
 func scanAndStream(r io.Reader, result *SourceDownloaderResult) {
