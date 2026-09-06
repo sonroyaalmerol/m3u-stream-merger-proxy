@@ -26,7 +26,7 @@ func fakePanel() http.Handler {
 		case "get_series_categories":
 			fmt.Fprint(w, `[{"category_id":"3","category_name":"Drama","parent_id":0}]`)
 		case "get_live_streams":
-			fmt.Fprint(w, `[{"num":1,"name":"CNN","stream_type":"live","stream_id":100,"stream_icon":"http://img/cnn.png","epg_channel_id":"cnn.id","category_id":"1"}]`)
+			fmt.Fprint(w, `[{"num":1,"name":"CNN","stream_type":"live","stream_id":100,"stream_icon":"http://img/cnn.png","epg_channel_id":"cnn.id","category_id":"1","tv_archive":"","tv_archive_duration":""}]`)
 		case "get_vod_streams":
 			fmt.Fprint(w, `[{"num":1,"name":"Cool Movie","stream_type":"movie","stream_id":200,"stream_icon":"http://img/m.png","category_id":"2","container_extension":"mp4"}]`)
 		case "get_series":

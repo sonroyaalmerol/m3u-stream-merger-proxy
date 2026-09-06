@@ -9,18 +9,16 @@ type RawCategory struct {
 }
 
 type RawLiveStream struct {
-	Num               int         `json:"num"`
-	Name              string      `json:"name"`
-	StreamType        string      `json:"stream_type"`
-	StreamID          json.Number `json:"stream_id"`
-	StreamIcon        string      `json:"stream_icon"`
-	EPGChannelID      string      `json:"epg_channel_id"`
-	Added             string      `json:"added"`
-	CategoryID        json.Number `json:"category_id"`
-	CustomSID         string      `json:"custom_sid"`
-	TVArchive         int         `json:"tv_archive"`
-	DirectSource      string      `json:"direct_source"`
-	TVArchiveDuration int         `json:"tv_archive_duration"`
+	Num          int         `json:"num"`
+	Name         string      `json:"name"`
+	StreamType   string      `json:"stream_type"`
+	StreamID     json.Number `json:"stream_id"`
+	StreamIcon   string      `json:"stream_icon"`
+	EPGChannelID string      `json:"epg_channel_id"`
+	Added        string      `json:"added"`
+	CategoryID   json.Number `json:"category_id"`
+	CustomSID    string      `json:"custom_sid"`
+	DirectSource string      `json:"direct_source"`
 }
 
 type RawVodStream struct {
