@@ -346,7 +346,6 @@ func (c *StreamCoordinator) readAndWriteStream(
 	body io.ReadCloser,
 	processChunk func([]byte) error,
 ) error {
-	const slabChunks = 4
 	var slab []byte
 	timeout := c.getTimeoutDuration()
 	backoff := proxy.NewBackoffStrategy(c.config.InitialBackoff,
@@ -369,11 +368,11 @@ func (c *StreamCoordinator) readAndWriteStream(
 				return ErrStreamTimeout
 			}
 
-			if len(slab) < c.config.ChunkSize {
-				slab = make([]byte, c.config.ChunkSize*slabChunks)
+			if len(slab) < c.config.ChunkSize/4+1 {
+				slab = make([]byte, c.config.ChunkSize)
 			}
 
-			n, err := body.Read(slab[:c.config.ChunkSize])
+			n, err := body.Read(slab)
 			if n == 0 {
 				if err != nil {
 					return err

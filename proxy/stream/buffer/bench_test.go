@@ -154,7 +154,26 @@ func BenchmarkReadAndWriteStream(b *testing.B) {
 	}
 }
 
-// BenchmarkParsePlaylist covers HLS playlist parsing, run once per poll tick.
+// BenchmarkShortReads models a real socket, where reads are far under ChunkSize.
+func BenchmarkShortReads(b *testing.B) {
+	cfg := benchConfig()
+	cfg.ChunkSize = 1024 * 1024
+	readSize := 32 * 1024
+
+	b.ReportAllocs()
+	b.SetBytes(int64(readSize * 64))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		c := NewStreamCoordinator("bench", cfg, store.NewConcurrencyManager(), nopLogger{})
+		_ = c.RegisterClient()
+		body := &slowReader{chunk: make([]byte, readSize), remaining: 64}
+		b.StartTimer()
+
+		_ = c.readAndWriteStream(context.Background(), body, c.writeChunk)
+	}
+}
+
 func BenchmarkParsePlaylist(b *testing.B) {
 	c := newBenchCoordinator(b)
 	var sb []byte

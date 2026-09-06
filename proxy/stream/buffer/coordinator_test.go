@@ -498,14 +498,20 @@ func (r *eofReader) Close() error { return nil }
 type scriptedReader struct {
 	chunks [][]byte
 	i      int
+	off    int
 }
 
+// Read resumes mid-chunk when p is short, instead of dropping the tail.
 func (r *scriptedReader) Read(p []byte) (int, error) {
 	if r.i >= len(r.chunks) {
 		return 0, io.EOF
 	}
-	n := copy(p, r.chunks[r.i])
-	r.i++
+	n := copy(p, r.chunks[r.i][r.off:])
+	r.off += n
+	if r.off >= len(r.chunks[r.i]) {
+		r.i++
+		r.off = 0
+	}
 	return n, nil
 }
 
@@ -549,12 +555,16 @@ func TestReadAndWriteStream_ChunkNotAliasedAcrossReads(t *testing.T) {
 	if err != io.EOF {
 		t.Fatalf("got err %v, want io.EOF", err)
 	}
-	if len(got) != len(payloads) {
-		t.Fatalf("got %d chunks, want %d", len(got), len(payloads))
+
+	var gotAll, wantAll []byte
+	for _, g := range got {
+		gotAll = append(gotAll, g...)
 	}
-	for i, want := range payloads {
-		if !bytes.Equal(got[i], want) {
-			t.Errorf("chunk %d aliased: got %q, want %q", i, got[i][:1], want[:1])
-		}
+	for _, w := range payloads {
+		wantAll = append(wantAll, w...)
+	}
+	if !bytes.Equal(gotAll, wantAll) {
+		t.Fatalf("stream corrupted at byte %d: got %d bytes, want %d",
+			firstDiff(gotAll, wantAll), len(gotAll), len(wantAll))
 	}
 }
