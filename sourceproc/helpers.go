@@ -3,8 +3,6 @@ package sourceproc
 import (
 	"fmt"
 	"os"
-	"sort"
-	"strconv"
 	"strings"
 
 	"m3u-stream-merger/config"
@@ -60,30 +58,6 @@ func GenerateStreamURL(baseUrl string, stream *StreamInfo) string {
 	}
 
 	return finalUrl + extension
-}
-
-func SortStreamSubUrls(urls map[string]string) []string {
-	type urlInfo struct {
-		key string
-		idx int
-	}
-
-	urlInfos := make([]urlInfo, 0, len(urls))
-	for key, url := range urls {
-		idxStr := strings.SplitN(url, ":::", 2)[0]
-		idx, _ := strconv.Atoi(idxStr)
-		urlInfos = append(urlInfos, urlInfo{key, idx})
-	}
-
-	sort.Slice(urlInfos, func(i, j int) bool {
-		return urlInfos[i].idx < urlInfos[j].idx
-	})
-
-	result := make([]string, len(urlInfos))
-	for i, info := range urlInfos {
-		result[i] = info.key
-	}
-	return result
 }
 
 func ClearProcessedM3Us() {

@@ -52,16 +52,3 @@ func BenchmarkFormatStreamEntry(b *testing.B) {
 		_ = formatStreamEntry("http://localhost:8080", s)
 	}
 }
-
-// BenchmarkSortStreamSubUrls runs once per load-balancer attempt per index.
-func BenchmarkSortStreamSubUrls(b *testing.B) {
-	urls := make(map[string]string, 16)
-	for i := range 16 {
-		urls[fmt.Sprintf("hash%02d", i)] = fmt.Sprintf("%d:::http://example.com/live/%d.ts", i, i)
-	}
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = SortStreamSubUrls(urls)
-	}
-}
