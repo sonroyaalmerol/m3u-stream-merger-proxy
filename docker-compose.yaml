@@ -24,4 +24,5 @@ services:
       - STREAM_TIMEOUT=7
     ports:
       - YOUR_PORT:8080
+    volumes:
     restart: unless-stopped

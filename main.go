@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"m3u-stream-merger/handlers"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/updater"
@@ -75,8 +74,11 @@ func main() {
 	logger.Default.Log("Stream Endpoint is running (`/p/{originalBasePath}/{streamID}.{fileExt}`)")
 	logger.Default.Log("EPG Endpoint is running (`/epg.xml`)")
 	logger.Default.Log("Xtream API is running (`/player_api.php`, `/live|movie|series/{user}/{pass}/{id}.{ext}`, `/get.php`)")
-	err = http.ListenAndServe(fmt.Sprintf(":%s", os.Getenv("PORT")), nil)
+	setup, err := newTLSSetup(logger.Default)
 	if err != nil {
+		logger.Default.Fatalf("TLS setup error: %v", err)
+	}
+	if err := setup.serve(); err != nil {
 		logger.Default.Fatalf("HTTP server error: %v", err)
 	}
 }

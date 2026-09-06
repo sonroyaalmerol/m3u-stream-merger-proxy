@@ -129,6 +129,17 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 | PGID    | Set GID of user running the container.              | 1000          | Any valid GID                                    |
 | TZ      | Set timezone                                        | Etc/UTC       | [TZ Identifiers](https://nodatime.org/TimeZones) |
 
+### TLS Configs
+
+Set one of the following to enable first-party TLS on the main `PORT` listener. When TLS is on, the proxy also listens on port `80` for ACME challenges and plain-HTTP-to-HTTPS redirects (unavailable ports are logged and skipped, e.g. unprivileged containers).
+
+| ENV VAR       | Description                                                                                       | Default Value | Possible Values                    |
+| ------------- | ------------------------------------------------------------------------------------------------- | ------------- | ---------------------------------- |
+| TLS_CERT_FILE | Path to a certificate file. Must be set together with `TLS_KEY_FILE`.                             | none          | Any valid PEM certificate path     |
+| TLS_KEY_FILE  | Path to the private key file matching `TLS_CERT_FILE`.                                            | none          | Any valid PEM private key path     |
+| TLS_DOMAIN    | Comma-separated domain(s) for automatic Let's Encrypt certificates (takes over port `80`).        | none          | Any domain resolving to this host  |
+| TLS_CACHE_DIR | Directory for storing autocert certificates and account keys. Only used with `TLS_DOMAIN`.        | `certs`       | Any writable directory path        |
+
 ### Playlist Source Configs
 
 | ENV VAR                                                             | Description                                                   | Default Value                                      | Possible Values           |
@@ -205,7 +216,7 @@ The proxy works in both directions with the Xtream Codes API:
 2. **Serve:** point any Xtream client (TiviMate, IPTV Smarters, etc.) directly at the proxy:
    - Server URL: `http://<server>:<port>`
    - Username/password: any credentials configured in `CREDENTIALS` (leave unset to disable auth).
-   - Note: the Xtream protocol sends credentials in plaintext URLs, so put a TLS-terminating reverse proxy in front when exposing the proxy to the internet.
+   - Note: the Xtream protocol sends credentials in plaintext URLs, so enable TLS (see [TLS Configs](#tls-configs)) or put a TLS-terminating reverse proxy in front when exposing the proxy to the internet.
 
    Supported client actions on `/player_api.php`: `get_live_categories`, `get_live_streams`, `get_vod_categories`, `get_vod_streams`, `get_series_categories`, `get_series`, `get_series_info`, `get_vod_info`, `get_short_epg`. Playback uses `/live/{user}/{pass}/{id}.ts`, `/movie/{user}/{pass}/{id}.{ext}` and `/series/{user}/{pass}/{id}.{ext}`. `/get.php?type=m3u_plus` exports the whole merged catalog as an Xtream-style M3U and `/xmltv.php` serves the merged XMLTV EPG.
 
