@@ -316,23 +316,32 @@ func mergeStreamInfoAttributes(base, new *StreamInfo) *StreamInfo {
 	return base
 }
 
+// fieldSanitizer is built once; strings.NewReplacer costs ~7KB per construction.
+var fieldSanitizer = strings.NewReplacer(
+	"/", "_",
+	"\\", "_",
+	":", "_",
+	"*", "_",
+	"?", "_",
+	"\"", "_",
+	"<", "_",
+	">", "_",
+	"|", "_",
+	" ", "",
+)
+
+const maxFieldRunes = 100
+
 func sanitizeField(value string) string {
-	sanitized := strings.NewReplacer(
-		"/", "_",
-		"\\", "_",
-		":", "_",
-		"*", "_",
-		"?", "_",
-		"\"", "_",
-		"<", "_",
-		">", "_",
-		"|", "_",
-		" ", "",
-	).Replace(value)
+	sanitized := fieldSanitizer.Replace(value)
+
+	if len(sanitized) <= maxFieldRunes {
+		return sanitized
+	}
 
 	runes := []rune(sanitized)
-	if len(runes) > 100 {
-		sanitized = string(runes[:100])
+	if len(runes) > maxFieldRunes {
+		sanitized = string(runes[:maxFieldRunes])
 	}
 
 	return sanitized

@@ -109,29 +109,29 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 func formatStreamEntry(baseURL string, stream *StreamInfo) string {
 	var entry strings.Builder
 
-	extInfTags := []string{"#EXTINF:-1"}
-
-	if stream.TvgID != "" {
-		extInfTags = append(extInfTags, fmt.Sprintf("tvg-id=\"%s\"", stream.TvgID))
-	}
-	if stream.TvgChNo != "" {
-		extInfTags = append(extInfTags, fmt.Sprintf("tvg-chno=\"%s\"", stream.TvgChNo))
-	}
-	if stream.LogoURL != "" {
-		extInfTags = append(extInfTags, fmt.Sprintf("tvg-logo=\"%s\"", stream.LogoURL))
-	}
-	if stream.Group != "" {
-		extInfTags = append(extInfTags, fmt.Sprintf("tvg-group=\"%s\"", stream.Group))
-		extInfTags = append(extInfTags, fmt.Sprintf("group-title=\"%s\"", stream.Group))
-	}
-	if stream.TvgType != "" {
-		extInfTags = append(extInfTags, fmt.Sprintf("tvg-type=\"%s\"", stream.TvgType))
-	}
-	if stream.Title != "" {
-		extInfTags = append(extInfTags, fmt.Sprintf("tvg-name=\"%s\"", stream.Title))
+	writeTag := func(key, value string) {
+		if value == "" {
+			return
+		}
+		entry.WriteString(" ")
+		entry.WriteString(key)
+		entry.WriteString(`="`)
+		entry.WriteString(value)
+		entry.WriteString(`"`)
 	}
 
-	entry.WriteString(fmt.Sprintf("%s,%s\n", strings.Join(extInfTags, " "), stream.Title))
+	entry.WriteString("#EXTINF:-1")
+	writeTag("tvg-id", stream.TvgID)
+	writeTag("tvg-chno", stream.TvgChNo)
+	writeTag("tvg-logo", stream.LogoURL)
+	writeTag("tvg-group", stream.Group)
+	writeTag("group-title", stream.Group)
+	writeTag("tvg-type", stream.TvgType)
+	writeTag("tvg-name", stream.Title)
+
+	entry.WriteString(",")
+	entry.WriteString(stream.Title)
+	entry.WriteString("\n")
 	entry.WriteString(GenerateStreamURL(baseURL, stream))
 	entry.WriteString("\n")
 
