@@ -55,7 +55,7 @@ func fetchAPI[T any](ctx context.Context, c *Client, action string, extra url.Va
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("xtream api %s returned status %d", action, resp.StatusCode)
@@ -197,9 +197,7 @@ func FetchPlaylistLines(ctx context.Context, c *Client, emit func(line string) e
 	jobs := make(chan RawSeries)
 	var wg sync.WaitGroup
 	for range seriesInfoWorkers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for series := range jobs {
 				info, err := c.SeriesInfo(ctx, series.SeriesID.String())
 				if err != nil {
@@ -210,7 +208,7 @@ func FetchPlaylistLines(ctx context.Context, c *Client, emit func(line string) e
 					for _, ep := range episodes {
 						epNum := ep.EpisodeNum
 						if epNum == 0 {
-						epNum, _ = strconv.Atoi(ep.ID.String())
+							epNum, _ = strconv.Atoi(ep.ID.String())
 						}
 						title := fmt.Sprintf("%s S%sE%d", series.Name, strings.TrimPrefix(seasonNum, "0"), epNum)
 						ext := ep.ContainerExtension
@@ -228,7 +226,7 @@ func FetchPlaylistLines(ctx context.Context, c *Client, emit func(line string) e
 					}
 				}
 			}
-		}()
+		})
 	}
 	for _, series := range seriesList {
 		select {
