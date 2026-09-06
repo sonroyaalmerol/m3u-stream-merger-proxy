@@ -1,18 +1,11 @@
 package sourceproc
 
 import (
-	"encoding/base64"
-	"fmt"
-	"m3u-stream-merger/config"
-	"m3u-stream-merger/logger"
-	"m3u-stream-merger/utils"
-	"os"
-	"path/filepath"
 	"regexp"
-	"strings"
 	"sync"
 
-	"github.com/puzpuzpuz/xsync/v3"
+	"m3u-stream-merger/logger"
+	"m3u-stream-merger/utils"
 )
 
 var (
@@ -57,95 +50,7 @@ func initFilters() {
 }
 
 func ParseStreamInfoBySlug(slug string) (*StreamInfo, error) {
-	initInfo, err := DecodeSlug(slug)
-	if err != nil {
-		return nil, err
-	}
-
-	initInfo.URLs = xsync.NewMapOf[string, map[string]string]()
-	var wg sync.WaitGroup
-	errCh := make(chan error, len(utils.GetM3UIndexes()))
-
-	for _, m3uIndex := range utils.GetM3UIndexes() {
-		wg.Add(1)
-		go func(idx string) {
-			defer wg.Done()
-			if err := loadStreamURLs(initInfo, idx); err != nil {
-				errCh <- err
-			}
-		}(m3uIndex)
-	}
-
-	// Wait for all goroutines and close error channel
-	go func() {
-		wg.Wait()
-		close(errCh)
-	}()
-
-	// Collect any errors
-	var errors []error
-	for err := range errCh {
-		errors = append(errors, err)
-	}
-
-	if len(errors) > 0 {
-		return nil, fmt.Errorf("errors loading stream URLs: %v", errors)
-	}
-
-	return initInfo, nil
-}
-
-func loadStreamURLs(stream *StreamInfo, m3uIndex string) error {
-	safeTitle := base64.StdEncoding.EncodeToString([]byte(stream.Title))
-	fileName := fmt.Sprintf("%s_%s*", safeTitle, m3uIndex)
-	// Search across all shard directories
-	globPattern := filepath.Join(config.GetStreamsDirPath(), "*", fileName)
-
-	fileMatches, err := filepath.Glob(globPattern)
-	if err != nil {
-		return fmt.Errorf("error finding files for pattern %s: %v", globPattern, err)
-	}
-
-	stream.URLs.Store(m3uIndex, make(map[string]string))
-
-	for _, fileMatch := range fileMatches {
-		// Extract filename from path (works with sharded structure)
-		fileNameSplit := filepath.Base(fileMatch)
-		parts := strings.Split(fileNameSplit, "|")
-		if len(parts) != 2 {
-			continue
-		}
-
-		fileContent, err := os.ReadFile(fileMatch)
-		if err != nil {
-			logger.Default.Debugf("Error reading file %s: %v", fileMatch, err)
-			continue
-		}
-
-		encodedUrl := fileContent
-		urlIndex := "0"
-		splitContent := strings.SplitN(string(fileContent), ":::", 2)
-		if len(splitContent) == 2 {
-			encodedUrl = []byte(splitContent[1])
-			urlIndex = splitContent[0]
-		}
-
-		url, err := base64.StdEncoding.DecodeString(string(encodedUrl))
-		if err != nil {
-			logger.Default.Debugf("Error decoding URL from %s: %v", fileMatch, err)
-			continue
-		}
-
-		_, _ = stream.URLs.Compute(m3uIndex, func(oldValue map[string]string, loaded bool) (newValue map[string]string, del bool) {
-			if oldValue == nil {
-				oldValue = make(map[string]string)
-			}
-			oldValue[parts[1]] = strings.TrimSpace(fmt.Sprintf("%s:::%s", urlIndex, string(url)))
-			return oldValue, false
-		})
-	}
-
-	return nil
+	return defaultStore.Get(slug)
 }
 
 func compileRegexes(filters []string) []*regexp.Regexp {

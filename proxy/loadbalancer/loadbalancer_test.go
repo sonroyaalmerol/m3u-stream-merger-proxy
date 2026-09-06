@@ -8,15 +8,16 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/sourceproc"
 	"m3u-stream-merger/store"
+	"maps"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/puzpuzpuz/xsync/v3"
 )
 
 // trackingBody wraps a ReadCloser and records whether Close has been called.
@@ -26,6 +27,20 @@ type trackingBody struct {
 	io.ReadCloser
 	mu     sync.Mutex
 	closed bool
+}
+
+func testURLs(index string, m map[string]string) []sourceproc.StreamURL {
+	out := make([]sourceproc.StreamURL, 0, len(m))
+	for _, hash := range slices.Sorted(maps.Keys(m)) {
+		line, url, found := strings.Cut(m[hash], ":::")
+		if !found {
+			line, url = "0", m[hash]
+		}
+		n, _ := strconv.Atoi(line)
+		out = append(out, sourceproc.StreamURL{M3UIndex: index, Hash: hash, LineNum: n, URL: url})
+	}
+
+	return out
 }
 
 func newTrackingBody(content string) *trackingBody {
@@ -158,14 +173,14 @@ func setupTestInstance(t *testing.T) (*LoadBalancerInstance, *mockHTTPClient, *m
 		indexes: []string{"1", "2"},
 	}
 
-	urls := xsync.NewMapOf[string, map[string]string]()
-	urls.Store("1", map[string]string{
+	var urls []sourceproc.StreamURL
+	urls = append(urls, testURLs("1", map[string]string{
 		"a": "http://test1.com/stream",
 		"b": "http://test1.com/backup",
-	})
-	urls.Store("2", map[string]string{
+	})...)
+	urls = append(urls, testURLs("2", map[string]string{
 		"a": "http://test2.com/stream",
-	})
+	})...)
 
 	slugParser := &mockSlugParser{
 		streams: map[string]*sourceproc.StreamInfo{
@@ -197,10 +212,10 @@ func setupTestInstance(t *testing.T) (*LoadBalancerInstance, *mockHTTPClient, *m
 }
 
 func TestNewLoadBalancerInstance(t *testing.T) {
-	urls := xsync.NewMapOf[string, map[string]string]()
-	urls.Store("1", map[string]string{
+	var urls []sourceproc.StreamURL
+	urls = append(urls, testURLs("1", map[string]string{
 		"a": "http://test1.com/stream",
-	})
+	})...)
 
 	slugParser := &mockSlugParser{
 		streams: map[string]*sourceproc.StreamInfo{
@@ -515,8 +530,8 @@ func TestConcurrentAccess(t *testing.T) {
 }
 
 func TestEdgeCaseURLConfigurations(t *testing.T) {
-	urls := xsync.NewMapOf[string, map[string]string]()
-	urls.Store("1", map[string]string{})
+	var urls []sourceproc.StreamURL
+	urls = append(urls, testURLs("1", map[string]string{})...)
 	tests := []struct {
 		name      string
 		streams   map[string]*sourceproc.StreamInfo
@@ -527,7 +542,7 @@ func TestEdgeCaseURLConfigurations(t *testing.T) {
 			streams: map[string]*sourceproc.StreamInfo{
 				"test-stream": {
 					Title: "Test Stream",
-					URLs:  xsync.NewMapOf[string, map[string]string](),
+					URLs:  nil,
 				},
 			},
 			expectErr: true,
@@ -660,16 +675,16 @@ func (m *mockHTTPClientWithTracking) Do(req *http.Request) (*http.Response, erro
 }
 
 func TestLoadBalancerConcurrencyPriority(t *testing.T) {
-	urls := xsync.NewMapOf[string, map[string]string]()
-	urls.Store("1", map[string]string{
+	var urls []sourceproc.StreamURL
+	urls = append(urls, testURLs("1", map[string]string{
 		"a": "http://index1.com/stream",
-	})
-	urls.Store("2", map[string]string{
+	})...)
+	urls = append(urls, testURLs("2", map[string]string{
 		"a": "http://index2.com/stream",
-	})
-	urls.Store("3", map[string]string{
+	})...)
+	urls = append(urls, testURLs("3", map[string]string{
 		"a": "http://index3.com/stream",
-	})
+	})...)
 	tests := []struct {
 		name           string
 		setupEnv       func()
@@ -734,10 +749,11 @@ func TestLoadBalancerConcurrencyPriority(t *testing.T) {
 
 			// Create indexes slice
 			var indexes []string
-			streams["test-stream"].URLs.Range(func(idx string, _ map[string]string) bool {
-				indexes = append(indexes, idx)
-				return true
-			})
+			for _, u := range streams["test-stream"].URLs {
+				if !slices.Contains(indexes, u.M3UIndex) {
+					indexes = append(indexes, u.M3UIndex)
+				}
+			}
 			sort.Strings(indexes) // Ensure consistent order
 			t.Logf("Indexes created: %v", indexes)
 
@@ -817,11 +833,11 @@ func TestResponseBodyClosedOnNonOKStatus(t *testing.T) {
 		errors: make(map[string]error),
 	}
 
-	urls := xsync.NewMapOf[string, map[string]string]()
-	urls.Store("1", map[string]string{
+	var urls []sourceproc.StreamURL
+	urls = append(urls, testURLs("1", map[string]string{
 		"a": "http://primary.test/stream",
 		"b": "http://backup.test/stream",
-	})
+	})...)
 	slugParser := &mockSlugParser{
 		streams: map[string]*sourceproc.StreamInfo{
 			"test-stream": {Title: "Test Stream", URLs: urls},
@@ -840,7 +856,7 @@ func TestResponseBodyClosedOnNonOKStatus(t *testing.T) {
 		t.Fatalf("fetchBackendUrls: %v", err)
 	}
 
-	innerMap, _ := instance.GetStreamInfo().URLs.Load("1")
+	innerMap := instance.GetStreamInfo().URLsForIndex("1")
 	result, err := instance.tryStreamUrls(context.Background(), newTestRequest(http.MethodGet), "test-stream", "1", innerMap)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -867,11 +883,11 @@ func TestResponseBodyClosedOnEvaluateError(t *testing.T) {
 		errors: make(map[string]error),
 	}
 
-	urls := xsync.NewMapOf[string, map[string]string]()
-	urls.Store("1", map[string]string{
+	var urls []sourceproc.StreamURL
+	urls = append(urls, testURLs("1", map[string]string{
 		"a": "http://bad.test/stream",
 		"b": "http://good.test/stream",
-	})
+	})...)
 	slugParser := &mockSlugParser{
 		streams: map[string]*sourceproc.StreamInfo{
 			"test-stream": {Title: "Test Stream", URLs: urls},
@@ -890,7 +906,7 @@ func TestResponseBodyClosedOnEvaluateError(t *testing.T) {
 		t.Fatalf("fetchBackendUrls: %v", err)
 	}
 
-	innerMap, _ := instance.GetStreamInfo().URLs.Load("1")
+	innerMap := instance.GetStreamInfo().URLsForIndex("1")
 	result, err := instance.tryStreamUrls(context.Background(), newTestRequest(http.MethodGet), "test-stream", "1", innerMap)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -918,11 +934,11 @@ func TestNonWinningResponseBodiesClosed(t *testing.T) {
 		errors: make(map[string]error),
 	}
 
-	urls := xsync.NewMapOf[string, map[string]string]()
-	urls.Store("1", map[string]string{
+	var urls []sourceproc.StreamURL
+	urls = append(urls, testURLs("1", map[string]string{
 		"a": "http://stream1.test/s",
 		"b": "http://stream2.test/s",
-	})
+	})...)
 	slugParser := &mockSlugParser{
 		streams: map[string]*sourceproc.StreamInfo{
 			"test-stream": {Title: "Test Stream", URLs: urls},
@@ -941,7 +957,7 @@ func TestNonWinningResponseBodiesClosed(t *testing.T) {
 		t.Fatalf("fetchBackendUrls: %v", err)
 	}
 
-	innerMap, _ := instance.GetStreamInfo().URLs.Load("1")
+	innerMap := instance.GetStreamInfo().URLsForIndex("1")
 	result, err := instance.tryStreamUrls(context.Background(), newTestRequest(http.MethodGet), "test-stream", "1", innerMap)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1080,11 +1096,11 @@ func TestConcurrentHealthChecksCancelledAfterFirstSuccess(t *testing.T) {
 
 	indexProvider := &mockIndexProvider{indexes: []string{"1"}}
 
-	urls := xsync.NewMapOf[string, map[string]string]()
-	urls.Store("1", map[string]string{
+	var urls []sourceproc.StreamURL
+	urls = append(urls, testURLs("1", map[string]string{
 		"a": "http://fast.example.com/stream",
 		"b": "http://slow.example.com/stream",
-	})
+	})...)
 
 	slugParser := &mockSlugParser{
 		streams: map[string]*sourceproc.StreamInfo{
@@ -1201,11 +1217,11 @@ func TestWinnerContextNotCancelledAfterHealthCheck(t *testing.T) {
 		},
 	}
 
-	urls := xsync.NewMapOf[string, map[string]string]()
-	urls.Store("1", map[string]string{
+	var urls []sourceproc.StreamURL
+	urls = append(urls, testURLs("1", map[string]string{
 		"a": winnerURL,
 		"b": loserURL,
-	})
+	})...)
 	slugParser := &mockSlugParser{
 		streams: map[string]*sourceproc.StreamInfo{
 			"ch": {Title: "ch", URLs: urls},
@@ -1225,7 +1241,7 @@ func TestWinnerContextNotCancelledAfterHealthCheck(t *testing.T) {
 		t.Fatalf("fetchBackendUrls: %v", err)
 	}
 
-	innerMap, _ := instance.GetStreamInfo().URLs.Load("1")
+	innerMap := instance.GetStreamInfo().URLsForIndex("1")
 	result, err := instance.tryStreamUrls(context.Background(), newTestRequest(http.MethodGet), "ch", "1", innerMap)
 	if err != nil {
 		t.Fatalf("tryStreamUrls error: %v", err)
