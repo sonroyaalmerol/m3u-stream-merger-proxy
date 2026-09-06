@@ -67,7 +67,8 @@ type StreamCoordinator struct {
 
 	writeSeq int64
 
-	droppedChunks atomic.Int64
+	droppedChunks  atomic.Int64
+	capacityWarned atomic.Bool
 }
 
 // notifyLocked wakes waiting readers. Caller must already hold c.Mu for writing.
@@ -390,6 +391,14 @@ func (c *StreamCoordinator) readAndWriteStream(
 						windowThroughput, c.config.ExpectedThroughput,
 					)
 					return fmt.Errorf("low buffer health: %.2f Bps", windowThroughput)
+				}
+
+				ringBytes := int64(c.config.SharedBufferSize) * int64(c.config.ChunkSize)
+				if need := int64(windowThroughput * timeout.Seconds()); need > ringBytes && !c.capacityWarned.Swap(true) {
+					suggested := (need + int64(c.config.ChunkSize) - 1) / int64(c.config.ChunkSize)
+					c.logger.Warnf("Stream %s: sustained ~%.0f Bps needs ~%.0fs of buffer but the ring holds only %.1fs; raise BUFFER_CHUNK_NUM to >= %d or lower STREAM_TIMEOUT",
+						c.streamID, windowThroughput, timeout.Seconds(),
+						float64(ringBytes)/windowThroughput, suggested)
 				}
 			}
 

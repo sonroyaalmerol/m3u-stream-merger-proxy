@@ -3,6 +3,7 @@ package buffer
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -728,6 +729,53 @@ func TestReadAndWriteStream_RollingWindowDetectsLateDegradation(t *testing.T) {
 	}
 	if elapsed < 3*time.Second || elapsed > 10*time.Second {
 		t.Fatalf("detected after %v, want within the first degraded window (~4s)", elapsed)
+	}
+}
+
+type warnRecorder struct {
+	mu       sync.Mutex
+	warnings []string
+}
+
+func (w *warnRecorder) Log(string)          {}
+func (w *warnRecorder) Logf(string, ...any) {}
+func (w *warnRecorder) Warn(string)         {}
+func (w *warnRecorder) Warnf(format string, v ...any) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.warnings = append(w.warnings, fmt.Sprintf(format, v...))
+}
+
+func (w *warnRecorder) Debug(string)          {}
+func (w *warnRecorder) Debugf(string, ...any) {}
+func (w *warnRecorder) Error(string)          {}
+func (w *warnRecorder) Errorf(string, ...any) {}
+func (w *warnRecorder) Fatal(string)          {}
+func (w *warnRecorder) Fatalf(string, ...any) {}
+
+func TestReadAndWriteStream_WarnsWhenRingSmallerThanTimeoutWindow(t *testing.T) {
+	rec := &warnRecorder{}
+	c := NewStreamCoordinator(t.Name(), &config.StreamConfig{
+		SharedBufferSize: 2,
+		ChunkSize:        512,
+		TimeoutSeconds:   3,
+	}, store.NewConcurrencyManager(), rec)
+	if err := c.RegisterClient(); err != nil {
+		t.Fatal(err)
+	}
+
+	body := &degradingReader{
+		data:    append(bytes.Repeat([]byte{7}, 4096), bytes.Repeat([]byte{8}, 512)...),
+		fastLen: 4096,
+		delay:   2200 * time.Millisecond,
+	}
+
+	_ = c.readAndWriteStream(context.Background(), body, c.writeChunk)
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.warnings) == 0 || !strings.Contains(rec.warnings[0], "BUFFER_CHUNK_NUM") {
+		t.Fatalf("expected a ring capacity warning, got %v", rec.warnings)
 	}
 }
 
