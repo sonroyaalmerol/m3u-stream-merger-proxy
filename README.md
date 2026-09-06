@@ -1,6 +1,8 @@
 # 📡 M3U Stream Merger Proxy
+
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/15a1064c638d4402931fe633b2baa51d)](https://app.codacy.com/gh/sonroyaalmerol/m3u-stream-merger-proxy/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade) [![Docker Pulls](https://img.shields.io/docker/pulls/sonroyaalmerol/m3u-stream-merger-proxy.svg)](https://hub.docker.com/r/sonroyaalmerol/m3u-stream-merger-proxy/) [![](https://img.shields.io/docker/image-size/sonroyaalmerol/m3u-stream-merger-proxy)](https://img.shields.io/docker/image-size/sonroyaalmerol/m3u-stream-merger-proxy) [![Release Images](https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/actions/workflows/release.yml/badge.svg)](https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/actions/workflows/release.yml) [![Developer Images](https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/actions/workflows/developer.yml/badge.svg)](https://github.com/sonroyaalmerol/m3u-stream-merger-proxy/actions/workflows/developer.yml) [![Discord](https://img.shields.io/discord/1274826220596625603?logo=discord&label=Discord&link=https%3A%2F%2Fdiscord.gg%2Fb2hVjRvkcj)](https://discord.com/invite/b2hVjRvkcj)
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
+
 [![All Contributors](https://img.shields.io/badge/all_contributors-5-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
@@ -43,6 +45,12 @@ Uses the channel title or `tvg-name` (as fallback) to merge multiple identical c
      - `streamToken`: An encoded string that contains the stream title and an array of the original stream URLs associated with the stream title. This token allows the proxy to be **stateless** as the M3U itself is the "database".
      - `fileExt`: Parsed file extension from one of the original source.
 
+   - **Xtream API endpoints (see [Xtream API Support](#xtream-api-support)):**
+     - `/player_api.php`: Full Xtream Codes API for clients like TiviMate or IPTV Smarters.
+     - `/live/{user}/{pass}/{id}.ts`, `/movie/{user}/{pass}/{id}.{ext}`, `/series/{user}/{pass}/{id}.{ext}`: Stream playback.
+     - `/get.php`: M3U export in Xtream format.
+     - `/xmltv.php`: XMLTV EPG served in Xtream format.
+
 3. **Load Balancing:**
    - The service employs load balancing by cycling through available stream URLs.
    - Users can set max concurrency per stream URLs for optimized performance.
@@ -71,7 +79,6 @@ Uses the channel title or `tvg-name` (as fallback) to merge multiple identical c
 Deploy with ease using the provided `docker-compose.yml`:
 
 ```yaml
-
 services:
   m3u-stream-merger-proxy:
     image: sonroyaalmerol/m3u-stream-merger-proxy:latest
@@ -88,6 +95,10 @@ services:
       - M3U_MAX_CONCURRENCY_1=2
       - M3U_URL_2=https://iptvprovider2.com/playlist.m3u
       - M3U_MAX_CONCURRENCY_2=1
+      - XTREAM_URL_3=http://iptvprovider3.com
+      - XTREAM_USERNAME_3=your-username
+      - XTREAM_PASSWORD_3=your-password
+      - M3U_MAX_CONCURRENCY_3=1
       - M3U_URL_X=
       - EPG_URL_1=https://iptvprovider1.com/epg.xml
       - EPG_URL_X=
@@ -110,64 +121,94 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 > If you only need to filter out a specific substring, then putting in the substring itself in those variables should work just fine.
 
 ### Container Configs
-| ENV VAR                     | Description                                              | Default Value | Possible Values                                |
-|-----------------------------|----------------------------------------------------------|---------------|------------------------------------------------|
-| PORT | Set listening port of service inside the container.                  |   8080 |   Any valid port |
-| PUID | Set UID of user running the container.                  |   1000 |   Any valid UID |
-| PGID | Set GID of user running the container.                  |   1000 |   Any valid GID |
-| TZ                          | Set timezone                                           | Etc/UTC     | [TZ Identifiers](https://nodatime.org/TimeZones) |
+
+| ENV VAR | Description                                         | Default Value | Possible Values                                  |
+| ------- | --------------------------------------------------- | ------------- | ------------------------------------------------ |
+| PORT    | Set listening port of service inside the container. | 8080          | Any valid port                                   |
+| PUID    | Set UID of user running the container.              | 1000          | Any valid UID                                    |
+| PGID    | Set GID of user running the container.              | 1000          | Any valid GID                                    |
+| TZ      | Set timezone                                        | Etc/UTC       | [TZ Identifiers](https://nodatime.org/TimeZones) |
 
 ### Playlist Source Configs
-| ENV VAR                     | Description                                              | Default Value | Possible Values                                |
-|-----------------------------|----------------------------------------------------------|---------------|------------------------------------------------|
-| M3U_URL_1, M3U_URL_2, M3U_URL_X | Set M3U URLs as environment variables.                  |   N/A            |   Any valid M3U URLs                                             |
-| M3U_MAX_CONCURRENCY_1, M3U_MAX_CONCURRENCY_2, M3U_MAX_CONCURRENCY_X | Set max concurrency. The "X" should match the M3U URL.                                 |  1             |   Any integer                                             |
-| USER_AGENT                  | Set the User-Agent of HTTP requests.                    | IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00)    |  Any valid user agent        |
-| HTTP_ACCEPT                  | Set the Accept header of HTTP requests.                    | video/MP2T, */*    |  Any valid Accept value        |
-| SYNC_CRON                   | Set cron schedule expression of the background updates. | 0 0 * * *   |  Any valid cron expression    |
-| SYNC_ON_BOOT                | Set if an initial background syncing will be executed on boot | true    | true/false   |
-| CLEAR_ON_BOOT                | Set if an initial database clearing will be executed on boot | false   | true/false   |
+
+| ENV VAR                                                             | Description                                                   | Default Value                                      | Possible Values           |
+| ------------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------- | ------------------------- |
+| M3U_URL_1, M3U_URL_2, M3U_URL_X                                     | Set M3U URLs as environment variables.                        | N/A                                                | Any valid M3U URLs        |
+| M3U_MAX_CONCURRENCY_1, M3U_MAX_CONCURRENCY_2, M3U_MAX_CONCURRENCY_X | Set max concurrency. The "X" should match the M3U URL.        | 1                                                  | Any integer               |
+| USER_AGENT                                                          | Set the User-Agent of HTTP requests.                          | IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00) | Any valid user agent      |
+| HTTP_ACCEPT                                                         | Set the Accept header of HTTP requests.                       | video/MP2T, _/_                                    | Any valid Accept value    |
+| SYNC_CRON                                                           | Set cron schedule expression of the background updates.       | 0 0 * * *                                          | Any valid cron expression |
+| SYNC_ON_BOOT                                                        | Set if an initial background syncing will be executed on boot | true                                               | true/false                |
+| CLEAR_ON_BOOT                                                       | Set if an initial database clearing will be executed on boot  | false                                              | true/false                |
+
+### Xtream Source Configs
+
+Xtream Codes providers can be used as sources directly alongside (or instead of) M3U URLs. The proxy fetches live channels, VOD and full series episode listings via the provider's `player_api.php` and merges everything into `/playlist.m3u` like any other source. Indexes share the same namespace as `M3U_URL_X`, so filters and `M3U_MAX_CONCURRENCY_X` apply to Xtream sources as well.
+
+| ENV VAR                                                 | Description                                                                                             | Default Value | Possible Values            |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------- | -------------------------- |
+| XTREAM_URL_1, XTREAM_URL_2, XTREAM_URL_X                | Set the Xtream provider base URL (e.g. `http://provider:80`). Use an index not used by any `M3U_URL_X`. | N/A           | Any valid Xtream panel URL |
+| XTREAM_USERNAME_1, XTREAM_USERNAME_2, XTREAM_USERNAME_X | Set the username for the matching Xtream provider index.                                                | N/A           | Any string                 |
+| XTREAM_PASSWORD_1, XTREAM_PASSWORD_2, XTREAM_PASSWORD_X | Set the password for the matching Xtream provider index.                                                | N/A           | Any string                 |
 
 ### EPG Source Configs
-| ENV VAR                     | Description                                              | Default Value | Possible Values                                |
-|-----------------------------|----------------------------------------------------------|---------------|------------------------------------------------|
-| EPG_URL_1, EPG_URL_2, EPG_URL_X | Set XMLTV EPG source URLs. The merged guide is served at `/epg.xml`. Omit entirely to disable EPG proxying. When at least one EPG URL is set the generated `/playlist.m3u` automatically includes a `url-tvg` attribute pointing to `/epg.xml`. Sources that serve gzip-compressed XML (`.gz` URLs or `application/gzip` content type) are decompressed automatically. | N/A | Any valid XMLTV URL or `file:///path/to/epg.xml` |
-| EPG_SYNC_CRON | Set an independent cron schedule for EPG refresh. When unset the EPG is rebuilt immediately after every M3U sync (same cron as `SYNC_CRON`). Set to a different expression to decouple EPG updates from M3U updates. | Same as `SYNC_CRON` | Any valid cron expression |
-| EPG_MAX_SIZE_MB | Maximum allowed decompressed size of a single EPG source file in megabytes. Sources that exceed this limit are rejected (with fallback to cache) to prevent decompression-bomb denial-of-service attacks. | 500 | Any positive integer |
-| EPG_CHANNEL_MAP_1, EPG_CHANNEL_MAP_2, EPG_CHANNEL_MAP_X | Remap an EPG channel id to a different M3U `tvg-id`. Format: `m3u_tvg_id=epg_channel_id`. When set, any channel or programme element whose EPG id matches `epg_channel_id` is rewritten to `m3u_tvg_id` in the merged output. This lets you link EPG sources that use different channel identifiers than your M3U playlist. | N/A | e.g. `MyChannel=provider.channel.id` |
+
+| ENV VAR                                                 | Description                                                                                                                                                                                                                                                                                                                                                            | Default Value       | Possible Values                                  |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | ------------------------------------------------ |
+| EPG_URL_1, EPG_URL_2, EPG_URL_X                         | Set XMLTV EPG source URLs. The merged guide is served at `/epg.xml`. Omit entirely to disable EPG proxying. When at least one EPG URL is set the generated `/playlist.m3u` automatically includes a `url-tvg` attribute pointing to `/epg.xml`. Sources that serve gzip-compressed XML (`.gz` URLs or `application/gzip` content type) are decompressed automatically. | N/A                 | Any valid XMLTV URL or `file:///path/to/epg.xml` |
+| EPG_SYNC_CRON                                           | Set an independent cron schedule for EPG refresh. When unset the EPG is rebuilt immediately after every M3U sync (same cron as `SYNC_CRON`). Set to a different expression to decouple EPG updates from M3U updates.                                                                                                                                                   | Same as `SYNC_CRON` | Any valid cron expression                        |
+| EPG_MAX_SIZE_MB                                         | Maximum allowed decompressed size of a single EPG source file in megabytes. Sources that exceed this limit are rejected (with fallback to cache) to prevent decompression-bomb denial-of-service attacks.                                                                                                                                                              | 500                 | Any positive integer                             |
+| EPG_CHANNEL_MAP_1, EPG_CHANNEL_MAP_2, EPG_CHANNEL_MAP_X | Remap an EPG channel id to a different M3U `tvg-id`. Format: `m3u_tvg_id=epg_channel_id`. When set, any channel or programme element whose EPG id matches `epg_channel_id` is rewritten to `m3u_tvg_id` in the merged output. This lets you link EPG sources that use different channel identifiers than your M3U playlist.                                            | N/A                 | e.g. `MyChannel=provider.channel.id`             |
 
 ### Load Balancer Configs
-| ENV VAR                     | Description                                              | Default Value | Possible Values                                |
-|-----------------------------|----------------------------------------------------------|---------------|------------------------------------------------|
-| MAX_RETRIES | Set max number of retries (loop) across all M3Us while streaming. 0 to never stop retrying (beware of throttling from provider). | 5 | Any integer greater than or equal 0 |
-| RETRY_WAIT | Set a wait time before retrying (looping) across all M3Us on stream initialization error. | 0 | Any integer greater than or equal 0 |
-| STREAM_TIMEOUT | Set timeout duration in seconds of retrying on error before a stream is considered down. | 3 | Any positive integer greater than 0 |
-| MINIMUM_THROUGHPUT | Set minimum buffer health throughput (in bytes per second) before a stream is considered down. | 100000 | Any positive integer greater than 0 |
-| BUFFER_CHUNK_NUM | Set number of chunk "containers" for the **shared buffer** that rotates across all clients and the source of the stream. See [here](#how-does-the-shared-buffer-work) for more information. You can change this value by increments of 2. Higher quantity means more capacity for contents but more memory usage for the proxy. | 8 | Any positive integer |
+
+| ENV VAR            | Description                                                                                                                                                                                                                                                                                                                     | Default Value | Possible Values                     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ----------------------------------- |
+| MAX_RETRIES        | Set max number of retries (loop) across all M3Us while streaming. 0 to never stop retrying (beware of throttling from provider).                                                                                                                                                                                                | 5             | Any integer greater than or equal 0 |
+| RETRY_WAIT         | Set a wait time before retrying (looping) across all M3Us on stream initialization error.                                                                                                                                                                                                                                       | 0             | Any integer greater than or equal 0 |
+| STREAM_TIMEOUT     | Set timeout duration in seconds of retrying on error before a stream is considered down.                                                                                                                                                                                                                                        | 3             | Any positive integer greater than 0 |
+| MINIMUM_THROUGHPUT | Set minimum buffer health throughput (in bytes per second) before a stream is considered down.                                                                                                                                                                                                                                  | 100000        | Any positive integer greater than 0 |
+| BUFFER_CHUNK_NUM   | Set number of chunk "containers" for the **shared buffer** that rotates across all clients and the source of the stream. See [here](#how-does-the-shared-buffer-work) for more information. You can change this value by increments of 2. Higher quantity means more capacity for contents but more memory usage for the proxy. | 8             | Any positive integer                |
 
 ### Playlist Output (`/playlist.m3u`) Configs
+
 > [!NOTE]
 > Filter configs (e.g. `INCLUDE_GROUPS_X`, `EXCLUDE_GROUPS_X`, `INCLUDE_TITLE_X`, `EXCLUDE_TITLE_X`) only applies **every sync** from source.
 > Changes in the values will not reflect immediately unless the cache is cleared which forces the sync to trigger.
 > Also, the `X` values on these env vars are **not associated** with the `X` values of the M3U URLs. They are simply a way for you to use multiple filters for each.
 
-| ENV VAR                     | Description                                              | Default Value | Possible Values                                |
-|-----------------------------|----------------------------------------------------------|---------------|------------------------------------------------|
-| BASE_URL | Sets the base URL for the stream URls in the M3U file to be generated. | http/s://<request_hostname> (e.g. <http://192.168.1.10:8080>)    | Any string that follows the URL format  |
-| CREDENTIALS | Set authentication credentials for the M3U playlist. Enabling this will require query variables in the M3U playlist URL to be authenticated. (e.g. <http://test.test/playlist.m3u?username=user1&password=pass1>) | none | Format: `user1:pass1\|user2:pass2:2025-02-01` (separate multiple users with `\|`, each user's credentials with `:`). You can add an optional expiry date at the end with another colon (:) as shown. Set to `none` or leave it empty to disable auth. |
-| SORTING_KEY | Set tag to be used for sorting the stream list | title | tvg-id, tvg-chno, tvg-group, tvg-type, source |
-| SORTING_DIRECTION | Set sorting direction based on `SORTING_KEY` | asc | asc, desc |
-| INCLUDE_GROUPS_1, INCLUDE_GROUPS_2, INCLUDE_GROUPS_X    | Set channels to include based on groups (Takes precedence over EXCLUDE_GROUPS_X) | N/A | Go regexp |
-| EXCLUDE_GROUPS_1, EXCLUDE_GROUPS_2, EXCLUDE_GROUPS_X    | Set channels to exclude based on groups | N/A | Go regexp |
-| INCLUDE_TITLE_1, INCLUDE_TITLE_2, INCLUDE_TITLE_X    | Set channels to include based on title (Takes precedence over EXCLUDE_TITLE_X) | N/A | Go regexp |
-| EXCLUDE_TITLE_1, EXCLUDE_TITLE_2, EXCLUDE_TITLE_X    | Set channels to exclude based on title | N/A | Go regexp |
-| TITLE_SUBSTR_FILTER | Sets a regex pattern used to exclude substrings from channel titles. This modifies the title of the streams when rendered in `/playlist.m3u`. | none    | Go regexp   |
+| ENV VAR                                              | Description                                                                                                                                                                                                       | Default Value                                                 | Possible Values                                                                                                                                                                                                                                       |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| BASE_URL                                             | Sets the base URL for the stream URls in the M3U file to be generated.                                                                                                                                            | http/s://<request_hostname> (e.g. <http://192.168.1.10:8080>) | Any string that follows the URL format                                                                                                                                                                                                                |
+| CREDENTIALS                                          | Set authentication credentials for the M3U playlist. Enabling this will require query variables in the M3U playlist URL to be authenticated. (e.g. <http://test.test/playlist.m3u?username=user1&password=pass1>) | none                                                          | Format: `user1:pass1\|user2:pass2:2025-02-01` (separate multiple users with `\|`, each user's credentials with `:`). You can add an optional expiry date at the end with another colon (:) as shown. Set to `none` or leave it empty to disable auth. |
+| SORTING_KEY                                          | Set tag to be used for sorting the stream list                                                                                                                                                                    | title                                                         | tvg-id, tvg-chno, tvg-group, tvg-type, source                                                                                                                                                                                                         |
+| SORTING_DIRECTION                                    | Set sorting direction based on `SORTING_KEY`                                                                                                                                                                      | asc                                                           | asc, desc                                                                                                                                                                                                                                             |
+| INCLUDE_GROUPS_1, INCLUDE_GROUPS_2, INCLUDE_GROUPS_X | Set channels to include based on groups (Takes precedence over EXCLUDE_GROUPS_X)                                                                                                                                  | N/A                                                           | Go regexp                                                                                                                                                                                                                                             |
+| EXCLUDE_GROUPS_1, EXCLUDE_GROUPS_2, EXCLUDE_GROUPS_X | Set channels to exclude based on groups                                                                                                                                                                           | N/A                                                           | Go regexp                                                                                                                                                                                                                                             |
+| INCLUDE_TITLE_1, INCLUDE_TITLE_2, INCLUDE_TITLE_X    | Set channels to include based on title (Takes precedence over EXCLUDE_TITLE_X)                                                                                                                                    | N/A                                                           | Go regexp                                                                                                                                                                                                                                             |
+| EXCLUDE_TITLE_1, EXCLUDE_TITLE_2, EXCLUDE_TITLE_X    | Set channels to exclude based on title                                                                                                                                                                            | N/A                                                           | Go regexp                                                                                                                                                                                                                                             |
+| TITLE_SUBSTR_FILTER                                  | Sets a regex pattern used to exclude substrings from channel titles. This modifies the title of the streams when rendered in `/playlist.m3u`.                                                                     | none                                                          | Go regexp                                                                                                                                                                                                                                             |
 
 ### Logging Configs
-| ENV VAR                     | Description                                              | Default Value | Possible Values                                |
-|-----------------------------|----------------------------------------------------------|---------------|------------------------------------------------|
-| DEBUG                | Set if verbose logging is enabled | false    | true/false   |
-| SAFE_LOGS | Set if sensitive info are removed from logs. Always enable this if submitting a log publicly. | false    | true/false   |
+
+| ENV VAR   | Description                                                                                   | Default Value | Possible Values |
+| --------- | --------------------------------------------------------------------------------------------- | ------------- | --------------- |
+| DEBUG     | Set if verbose logging is enabled                                                             | false         | true/false      |
+| SAFE_LOGS | Set if sensitive info are removed from logs. Always enable this if submitting a log publicly. | false         | true/false      |
+
+## Xtream API Support
+
+The proxy works in both directions with the Xtream Codes API:
+
+1. **Ingest:** add Xtream providers as sources with `XTREAM_URL_X` / `XTREAM_USERNAME_X` / `XTREAM_PASSWORD_X` (see [Xtream Source Configs](#xtream-source-configs)). Live channels, VOD and series episodes are merged into `/playlist.m3u` and share the same load balancing, filters and failover as M3U sources.
+
+2. **Serve:** point any Xtream client (TiviMate, IPTV Smarters, etc.) directly at the proxy:
+   - Server URL: `http://<server>:<port>`
+   - Username/password: any credentials configured in `CREDENTIALS` (leave unset to disable auth).
+
+   Supported client actions on `/player_api.php`: `get_live_categories`, `get_live_streams`, `get_vod_categories`, `get_vod_streams`, `get_series_categories`, `get_series`, `get_series_info`, `get_vod_info`, `get_short_epg`. Playback uses `/live/{user}/{pass}/{id}.ts`, `/movie/{user}/{pass}/{id}.{ext}` and `/series/{user}/{pass}/{id}.{ext}`. `/get.php?type=m3u_plus` exports the whole merged catalog as an Xtream-style M3U and `/xmltv.php` serves the merged XMLTV EPG.
+
+   Streams are classified as live, movie or series from the source `tvg-type` attribute (set automatically for Xtream ingested sources) or the original URL path (`live/`, `movie/`, `series/`), defaulting to live. Series episodes are detected by `SxxExx` title patterns (e.g. `Show S01E02`), grouped into series by show name. Stream IDs are stable hashes of the stream title.
 
 ## How does the shared buffer work?
 
@@ -176,20 +217,25 @@ The stream buffer system is essentially an implementation of a [Circular Buffer 
 Imagine a circular [sushi conveyor belt](https://en.wikipedia.org/wiki/Conveyor_belt_sushi) with a fixed number of plates (`BUFFER_CHUNK_NUM`). Each plate can hold a piece of sushi (chunk of data).
 
 ### The Chef (Writer)
+
 At the preparation station, there's a chef who:
+
 - Takes raw fish (stream data) and cuts it into bite-sized pieces (fixed to `1 MB`)
 - Places each piece on an empty plate
 - Puts the plate on the conveyor belt and moves to the next empty plate
 - If something goes wrong with the fish (error), marks the plate with a warning flag
 
 The chef works continuously unless:
+
 - The restaurant closes (context cancelled)
 - There are no more customers (client count drops to 0)
 - They run out of fish (EOF)
 - Something goes wrong in the kitchen (error)
 
 ### You, the Customers (Readers)
+
 Customers sitting at different points around the belt:
+
 - Remember which plate they last looked at
 - Can look at all plates that have passed by since they last checked
 - Make their own copy of each piece of sushi they want (copying the data)
@@ -201,6 +247,7 @@ If a customer is too slow and takes too long to check a plate, the data might ge
 This system ensures that streaming data (sushi) flows smoothly from the source (kitchen) to multiple consumers (customers) while efficiently managing memory (plates) and handling errors (food safety warnings).
 
 ## Sponsors ✨
+
 Huge thanks to those who donated for the development of this project!
 
 <p align="left"><!-- markdownlint-disable-line --><!-- markdownlint-disable-next-line -->
@@ -242,6 +289,7 @@ All types of contributions are encouraged and valued. 🎉
 I'm currently looking to add more `tvg-*` tags that might be used by some IPTV providers. Feel free to post an issue if you require a specific tag!
 
 And if you like the project, but just don't have time to contribute, that's fine. There are other easy ways to support the project and show your appreciation, which I would also be very happy about:
+
 - Star the project
 - Tweet about it
 - Mention the project and tell your friends/colleagues
