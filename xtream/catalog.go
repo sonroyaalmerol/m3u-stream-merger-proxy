@@ -280,6 +280,15 @@ func (c *Catalog) Categories(streamType string) []RawCategory {
 	return append([]RawCategory(nil), c.cats[streamType]...)
 }
 
+func (c *Catalog) CategoryID(streamType, group string) uint64 {
+	if group == "" {
+		return 0
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.catIDs[streamType+"|"+group]
+}
+
 func (c *Catalog) Live(categoryID uint64) []*Entry {
 	return filterEntries(c.live, categoryID, c.catIDs)
 }

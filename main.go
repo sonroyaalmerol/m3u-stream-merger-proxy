@@ -20,6 +20,7 @@ func main() {
 	epgHandler := handlers.NewEPGHTTPHandler(m3uHandler)
 	streamHandler := handlers.NewStreamHTTPHandler(handlers.NewDefaultProxyInstance(), logger.Default)
 	passthroughHandler := handlers.NewPassthroughHTTPHandler(logger.Default)
+	xtreamHandler := handlers.NewXtreamHTTPHandler(streamHandler, logger.Default)
 
 	logger.Default.Log("Starting updater...")
 	_, err := updater.Initialize(ctx, logger.Default, m3uHandler, epgHandler)
@@ -53,12 +54,27 @@ func main() {
 	http.HandleFunc("/epg.xml", func(w http.ResponseWriter, r *http.Request) {
 		epgHandler.ServeHTTP(w, r)
 	})
+	http.HandleFunc("/player_api.php", func(w http.ResponseWriter, r *http.Request) {
+		xtreamHandler.ServePlayerAPI(w, r)
+	})
+	http.HandleFunc("/get.php", func(w http.ResponseWriter, r *http.Request) {
+		xtreamHandler.ServeGetPHP(w, r)
+	})
+	http.HandleFunc("/xmltv.php", func(w http.ResponseWriter, r *http.Request) {
+		xtreamHandler.ServeXMLTV(w, r)
+	})
+	for _, prefix := range []string{"/live/", "/movie/", "/series/"} {
+		http.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
+			xtreamHandler.ServeStream(w, r)
+		})
+	}
 
 	// Start the server
 	logger.Default.Logf("Server is running on port %s...", os.Getenv("PORT"))
 	logger.Default.Log("Playlist Endpoint is running (`/playlist.m3u`)")
 	logger.Default.Log("Stream Endpoint is running (`/p/{originalBasePath}/{streamID}.{fileExt}`)")
 	logger.Default.Log("EPG Endpoint is running (`/epg.xml`)")
+	logger.Default.Log("Xtream API is running (`/player_api.php`, `/live|movie|series/{user}/{pass}/{id}.{ext}`, `/get.php`)")
 	err = http.ListenAndServe(fmt.Sprintf(":%s", os.Getenv("PORT")), nil)
 	if err != nil {
 		logger.Default.Fatalf("HTTP server error: %v", err)
