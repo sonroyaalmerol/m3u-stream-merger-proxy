@@ -4,6 +4,8 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"html"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -106,11 +108,12 @@ func (s *tlsSetup) redirectHandler() http.Handler {
 			fmt.Fprintln(w, "this proxy requires HTTPS; configure BASE_URL to enable redirects")
 			return
 		}
-		w.Header().Set("Location", s.redirectTarget(r, base))
+		target := s.redirectTarget(r, base)
+		w.Header().Set("Location", target)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusMovedPermanently)
 		if r.Method == http.MethodGet {
-			fmt.Fprintln(w, `<a href="`+w.Header().Get("Location")+`">Moved Permanently</a>.`)
+			_, _ = io.WriteString(w, `<a href="`+html.EscapeString(target)+`">Moved Permanently</a>.`+"\n")
 		}
 	})
 }
