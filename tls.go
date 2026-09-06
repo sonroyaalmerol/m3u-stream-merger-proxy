@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/acme/autocert"
 
@@ -16,12 +17,13 @@ import (
 // tlsSetup describes how the main listener serves: static cert pair, autocert
 // via TLS_DOMAIN, or plain HTTP when useTLS is false.
 type tlsSetup struct {
-	srv    *http.Server
-	cert   string
-	key    string
-	useTLS bool
-	port80 http.Handler
-	logger logger.Logger
+	srv      *http.Server
+	cert     string
+	key      string
+	useTLS   bool
+	port80   http.Handler
+	redirect string
+	logger   logger.Logger
 }
 
 // newTLSSetup builds the main server from TLS_CERT_FILE/TLS_KEY_FILE or
@@ -31,7 +33,13 @@ func newTLSSetup(l logger.Logger) (*tlsSetup, error) {
 	domain := os.Getenv("TLS_DOMAIN")
 
 	s := &tlsSetup{
-		srv:    &http.Server{Addr: fmt.Sprintf(":%s", os.Getenv("PORT")), Handler: http.DefaultServeMux},
+		srv: &http.Server{
+			Addr:              fmt.Sprintf(":%s", os.Getenv("PORT")),
+			Handler:           http.DefaultServeMux,
+			ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout:       120 * time.Second,
+			TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12},
+		},
 		logger: l,
 	}
 
@@ -47,13 +55,15 @@ func newTLSSetup(l logger.Logger) (*tlsSetup, error) {
 		if cache == "" {
 			cache = "certs"
 		}
+		domains := strings.Split(domain, ",")
 		m := &autocert.Manager{
 			Cache:      autocert.DirCache(cache),
 			Prompt:     autocert.AcceptTOS,
-			HostPolicy: autocert.HostWhitelist(strings.Split(domain, ",")...),
+			HostPolicy: autocert.HostWhitelist(domains...),
 		}
-		s.srv.TLSConfig = &tls.Config{GetCertificate: m.GetCertificate}
+		s.srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: m.GetCertificate}
 		s.useTLS = true
+		s.redirect = "https://" + strings.TrimSpace(domains[0])
 		s.port80 = m.HTTPHandler(s.redirectHandler())
 		l.Logf("TLS enabled (autocert for: %s, cache: %s)", domain, cache)
 	default:
@@ -70,7 +80,12 @@ func newTLSSetup(l logger.Logger) (*tlsSetup, error) {
 func (s *tlsSetup) serve() error {
 	if s.useTLS {
 		go func() {
-			l := &http.Server{Addr: ":80", Handler: s.port80}
+			l := &http.Server{
+				Addr:              ":80",
+				Handler:           s.port80,
+				ReadHeaderTimeout: 10 * time.Second,
+				IdleTimeout:       60 * time.Second,
+			}
 			if err := l.ListenAndServe(); err != nil {
 				s.logger.Warnf("HTTP listener on :80 unavailable (ACME/redirect disabled): %v", err)
 			}
@@ -80,14 +95,17 @@ func (s *tlsSetup) serve() error {
 	return s.srv.ListenAndServe()
 }
 
-// redirectHandler sends plain-HTTP traffic to HTTPS, preferring BASE_URL
-// (the externally visible URL) when configured.
 func (s *tlsSetup) redirectHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		target := "https://" + r.Host
-		if base := os.Getenv("BASE_URL"); base != "" {
-			target = strings.TrimSuffix(base, "/") + r.URL.RequestURI()
+		base := s.redirect
+		if b := os.Getenv("BASE_URL"); b != "" {
+			base = strings.TrimSuffix(b, "/")
 		}
-		http.Redirect(w, r, target, http.StatusMovedPermanently)
+		if base == "" {
+			w.WriteHeader(http.StatusUpgradeRequired)
+			fmt.Fprintln(w, "this proxy requires HTTPS; configure BASE_URL to enable redirects")
+			return
+		}
+		http.Redirect(w, r, base+r.URL.RequestURI(), http.StatusMovedPermanently)
 	})
 }

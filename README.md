@@ -131,7 +131,7 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 
 ### TLS Configs
 
-Set one of the following to enable first-party TLS on the main `PORT` listener. When TLS is on, the proxy also listens on port `80` for ACME challenges and plain-HTTP-to-HTTPS redirects (unavailable ports are logged and skipped, e.g. unprivileged containers).
+Set one of the following to enable first-party TLS on the main `PORT` listener. When TLS is on, the proxy also listens on port `80` for ACME challenges and plain-HTTP-to-HTTPS redirects (unavailable ports are logged and skipped, e.g. unprivileged containers). Redirect targets are built from `BASE_URL` (or the primary `TLS_DOMAIN`), never the request's `Host` header; with neither set, port `80` answers `426 Upgrade Required` instead of redirecting.
 
 | ENV VAR       | Description                                                                                | Default Value | Possible Values                   |
 | ------------- | ------------------------------------------------------------------------------------------ | ------------- | --------------------------------- |

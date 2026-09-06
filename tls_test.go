@@ -111,8 +111,16 @@ func TestServeTLS(t *testing.T) {
 	go setup.srv.ServeTLS(ln, cert, key)
 	t.Cleanup(func() { setup.srv.Close() })
 
+	roots := x509.NewCertPool()
+	pemBytes, err := os.ReadFile(cert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !roots.AppendCertsFromPEM(pemBytes) {
+		t.Fatal("failed to load test certificate")
+	}
 	client := &http.Client{Transport: &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12},
 	}}
 	resp, err := client.Get("https://" + ln.Addr().String() + "/tls-smoke/")
 	if err != nil {
@@ -129,14 +137,22 @@ func TestRedirectHandler(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	setup.redirectHandler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://host.example/foo", nil))
-	if rr.Code != http.StatusMovedPermanently || rr.Header().Get("Location") != "https://host.example" {
-		t.Fatalf("bad redirect: %d %s", rr.Code, rr.Header().Get("Location"))
+	if rr.Code != http.StatusUpgradeRequired {
+		t.Fatalf("expected 426 without BASE_URL, got %d", rr.Code)
 	}
 
 	t.Setenv("BASE_URL", "https://base.example:8443/")
 	rr = httptest.NewRecorder()
 	setup.redirectHandler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://host.example/foo?a=1", nil))
-	if got := rr.Header().Get("Location"); got != "https://base.example:8443/foo?a=1" {
-		t.Fatalf("BASE_URL redirect: %s", got)
+	if rr.Code != http.StatusMovedPermanently || rr.Header().Get("Location") != "https://base.example:8443/foo?a=1" {
+		t.Fatalf("BASE_URL redirect: %d %s", rr.Code, rr.Header().Get("Location"))
+	}
+
+	t.Setenv("BASE_URL", "")
+	setup = &tlsSetup{logger: logger.Default, redirect: "https://stream.example.com"}
+	rr = httptest.NewRecorder()
+	setup.redirectHandler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://evil.example/foo", nil))
+	if got := rr.Header().Get("Location"); got != "https://stream.example.com/foo" {
+		t.Fatalf("TLS_DOMAIN redirect: %s", got)
 	}
 }
