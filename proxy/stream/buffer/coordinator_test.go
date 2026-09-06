@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -676,5 +677,79 @@ func TestReadAndWriteStream_ChunkNotAliasedAcrossReads(t *testing.T) {
 	if !bytes.Equal(gotAll, wantAll) {
 		t.Fatalf("stream corrupted at byte %d: got %d bytes, want %d",
 			firstDiff(gotAll, wantAll), len(gotAll), len(wantAll))
+	}
+}
+
+// degradingReader delivers fastLen bytes instantly, then throttles to one Read per delay.
+type degradingReader struct {
+	data    []byte
+	off     int
+	fastLen int
+	delay   time.Duration
+}
+
+func (r *degradingReader) Read(p []byte) (int, error) {
+	if r.off >= r.fastLen {
+		time.Sleep(r.delay)
+	}
+	if r.off >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[r.off:])
+	r.off += n
+	return n, nil
+}
+
+func (r *degradingReader) Close() error { return nil }
+
+func TestReadAndWriteStream_RollingWindowDetectsLateDegradation(t *testing.T) {
+	c := NewStreamCoordinator(t.Name(), &config.StreamConfig{
+		SharedBufferSize:   64,
+		ChunkSize:          512,
+		TimeoutSeconds:     0,
+		ExpectedThroughput: 10_000,
+	}, store.NewConcurrencyManager(), logger.Default)
+	if err := c.RegisterClient(); err != nil {
+		t.Fatal(err)
+	}
+
+	body := &degradingReader{
+		data:    append(bytes.Repeat([]byte{1}, 200_000), bytes.Repeat([]byte{2}, 8_192)...),
+		fastLen: 200_000,
+		delay:   400 * time.Millisecond,
+	}
+
+	start := time.Now()
+	err := c.readAndWriteStream(context.Background(), body, c.writeChunk)
+	elapsed := time.Since(start)
+
+	if err == nil || !strings.Contains(err.Error(), "low buffer health") {
+		t.Fatalf("err = %v, want low buffer health error", err)
+	}
+	if elapsed < 3*time.Second || elapsed > 10*time.Second {
+		t.Fatalf("detected after %v, want within the first degraded window (~4s)", elapsed)
+	}
+}
+
+func TestReadChunks_CountsDroppedChunks(t *testing.T) {
+	c := NewStreamCoordinator(t.Name(), &config.StreamConfig{
+		SharedBufferSize: 4,
+		ChunkSize:        512,
+		TimeoutSeconds:   0,
+	}, store.NewConcurrencyManager(), logger.Default)
+
+	payload := bytes.Repeat([]byte{0xAB}, 64)
+	for range 10 {
+		c.Write(&ChunkData{Data: payload, Timestamp: time.Now()})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, _, pos, _ := c.ReadChunks(ctx, nil, 1)
+	if pos != c.Buffer {
+		t.Fatal("stale reader was not reset to the live edge")
+	}
+	if got := c.droppedChunks.Load(); got != 9 {
+		t.Fatalf("droppedChunks = %d, want 9 (seq 1 through 10, ring of 4)", got)
 	}
 }

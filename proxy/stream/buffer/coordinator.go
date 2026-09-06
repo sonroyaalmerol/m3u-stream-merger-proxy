@@ -65,8 +65,9 @@ type StreamCoordinator struct {
 	LBResultOnWrite  atomic.Pointer[loadbalancer.LoadBalancerResult]
 	lastProcessedSeq atomic.Int64
 
-	// writeSeq is an atomic counter to track the order of chunks.
 	writeSeq int64
+
+	droppedChunks atomic.Int64
 }
 
 // notifyLocked wakes waiting readers. Caller must already hold c.Mu for writing.
@@ -242,7 +243,10 @@ func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.R
 	if clientSeq > 0 {
 		currentWriteSeq := atomic.LoadInt64(&c.writeSeq)
 		if clientSeq < currentWriteSeq-int64(c.config.SharedBufferSize) {
-			c.logger.Debug("ReadChunks: Client is stale; resetting to latest chunk")
+			jumped := currentWriteSeq - clientSeq
+			c.droppedChunks.Add(jumped)
+			c.logger.Logf("Stream %s: reader lagged behind by %d chunks; rejoining at live edge",
+				c.streamID, jumped)
 			fromPosition = c.Buffer
 		}
 	}
@@ -342,7 +346,6 @@ func (c *StreamCoordinator) readAndWriteStream(
 	zeroReads := 0
 
 	var totalBytesRead int64
-	readingStartTime := time.Now()
 	lastHealthLog := time.Now()
 
 	for atomic.LoadInt32(&c.state) == stateActive {
@@ -375,18 +378,18 @@ func (c *StreamCoordinator) readAndWriteStream(
 			zeroReads = 0
 			totalBytesRead += int64(n)
 
-			if time.Since(lastHealthLog) >= 2*time.Second {
-				elapsed := time.Since(readingStartTime).Seconds()
-				avgThroughput := float64(totalBytesRead) / elapsed
-				c.logger.Debugf("Buffer health: average throughput = %.2f Bps", avgThroughput)
+			if window := time.Since(lastHealthLog); window >= 2*time.Second {
+				windowThroughput := float64(totalBytesRead) / window.Seconds()
+				c.logger.Debugf("Buffer health: throughput = %.2f Bps (2s window)", windowThroughput)
+				totalBytesRead = 0
 				lastHealthLog = time.Now()
 
 				if c.config.ExpectedThroughput > 0 &&
-					avgThroughput < float64(c.config.ExpectedThroughput) {
-					c.logger.Warnf("Low buffer health: average throughput %.2f Bps below expected %d Bps",
-						avgThroughput, c.config.ExpectedThroughput,
+					windowThroughput < float64(c.config.ExpectedThroughput) {
+					c.logger.Warnf("Low buffer health: throughput %.2f Bps below expected %d Bps",
+						windowThroughput, c.config.ExpectedThroughput,
 					)
-					return fmt.Errorf("low buffer health: %.2f Bps", avgThroughput)
+					return fmt.Errorf("low buffer health: %.2f Bps", windowThroughput)
 				}
 			}
 
