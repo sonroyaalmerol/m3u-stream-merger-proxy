@@ -205,6 +205,7 @@ The proxy works in both directions with the Xtream Codes API:
 2. **Serve:** point any Xtream client (TiviMate, IPTV Smarters, etc.) directly at the proxy:
    - Server URL: `http://<server>:<port>`
    - Username/password: any credentials configured in `CREDENTIALS` (leave unset to disable auth).
+   - Note: the Xtream protocol sends credentials in plaintext URLs, so put a TLS-terminating reverse proxy in front when exposing the proxy to the internet.
 
    Supported client actions on `/player_api.php`: `get_live_categories`, `get_live_streams`, `get_vod_categories`, `get_vod_streams`, `get_series_categories`, `get_series`, `get_series_info`, `get_vod_info`, `get_short_epg`. Playback uses `/live/{user}/{pass}/{id}.ts`, `/movie/{user}/{pass}/{id}.{ext}` and `/series/{user}/{pass}/{id}.{ext}`. `/get.php?type=m3u_plus` exports the whole merged catalog as an Xtream-style M3U and `/xmltv.php` serves the merged XMLTV EPG.
 
