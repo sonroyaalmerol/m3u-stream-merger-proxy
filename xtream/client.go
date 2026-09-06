@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
@@ -51,22 +52,40 @@ func fetchAPI[T any](ctx context.Context, c *Client, action string, extra url.Va
 		return nil, err
 	}
 
-	resp, err := utils.HTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
+	for attempt := 1; ; attempt++ {
+		if attempt > 1 {
+			delay := time.Duration(attempt-1) * time.Second
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("xtream api %s returned status %d", action, resp.StatusCode)
-	}
+		resp, err := utils.HTTPClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
 
-	var result T
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("xtream api %s decode error: %w", action, err)
-	}
+		if resp.StatusCode >= 500 && attempt < 3 {
+			_ = resp.Body.Close()
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			return nil, fmt.Errorf("xtream api %s returned status %d", action, resp.StatusCode)
+		}
 
-	return &result, nil
+		var result T
+		decodeErr := json.NewDecoder(resp.Body).Decode(&result)
+		_ = resp.Body.Close()
+		if decodeErr == nil {
+			return &result, nil
+		}
+		if attempt >= 3 {
+			return nil, fmt.Errorf("xtream api %s decode error: %w", action, decodeErr)
+		}
+	}
 }
 
 func fetchList[T any](ctx context.Context, c *Client, action string) ([]T, error) {

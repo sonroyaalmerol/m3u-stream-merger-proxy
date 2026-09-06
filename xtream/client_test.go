@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -79,5 +80,34 @@ func TestFetchPlaylistLinesBadAuth(t *testing.T) {
 	err := FetchPlaylistLines(context.Background(), client, func(string) error { return nil })
 	if err == nil {
 		t.Fatal("expected error for bad credentials")
+	}
+}
+
+func TestFetchRetriesTruncatedResponse(t *testing.T) {
+	var calls int32
+	panel := fakePanel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/player_api.php", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("action") == "get_vod_streams" && atomic.AddInt32(&calls, 1) == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `[{"num":1,"name":"Trunc`)
+			return
+		}
+		panel.ServeHTTP(w, r)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient(server.URL, "user", "pass")
+	var lines []string
+	err := FetchPlaylistLines(context.Background(), client, func(line string) error {
+		lines = append(lines, line)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "Cool Movie") {
+		t.Fatal("vod section missing after truncated response")
 	}
 }
