@@ -34,11 +34,17 @@ var (
 
 func GetM3UIndexes() []string {
 	m3uIndexesOnce.Do(func() {
-		for _, env := range os.Environ() {
-			pair := strings.SplitN(env, "=", 2)
-			if after, ok := strings.CutPrefix(pair[0], "M3U_URL_"); ok {
-				indexString := after
-				m3uIndexes = append(m3uIndexes, indexString)
+		seen := make(map[string]struct{})
+		for _, prefix := range []string{"M3U_URL_", "XTREAM_URL_"} {
+			for _, env := range os.Environ() {
+				pair := strings.SplitN(env, "=", 2)
+				if after, ok := strings.CutPrefix(pair[0], prefix); ok {
+					if _, dup := seen[after]; dup {
+						continue
+					}
+					seen[after] = struct{}{}
+					m3uIndexes = append(m3uIndexes, after)
+				}
 			}
 		}
 	})

@@ -13,6 +13,10 @@ services:
       - SYNC_CRON=0 0 * * *
       - M3U_URL_1=YOUR_LOCAL_OR_REMOTE_M3U
       - M3U_MAX_CONCURRENCY_1=2
+      - XTREAM_URL_2=YOUR_XTREAM_PROVIDER_URL
+      - XTREAM_USERNAME_2=YOUR_XTREAM_USERNAME
+      - XTREAM_PASSWORD_2=YOUR_XTREAM_PASSWORD
+      - M3U_MAX_CONCURRENCY_2=1
       - SORTING_KEY=tvg-type # tvg-group, tvg-chno, tvg-id: default is Name
       - SORTING_DIRECTION=asc # desc: default is asc
       - MAX_RETRIES=5
