@@ -133,12 +133,44 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 
 Set one of the following to enable first-party TLS on the main `PORT` listener. When TLS is on, the proxy also listens on port `80` for ACME challenges and plain-HTTP-to-HTTPS redirects (unavailable ports are logged and skipped, e.g. unprivileged containers).
 
-| ENV VAR       | Description                                                                                       | Default Value | Possible Values                    |
-| ------------- | ------------------------------------------------------------------------------------------------- | ------------- | ---------------------------------- |
-| TLS_CERT_FILE | Path to a certificate file. Must be set together with `TLS_KEY_FILE`.                             | none          | Any valid PEM certificate path     |
-| TLS_KEY_FILE  | Path to the private key file matching `TLS_CERT_FILE`.                                            | none          | Any valid PEM private key path     |
-| TLS_DOMAIN    | Comma-separated domain(s) for automatic Let's Encrypt certificates (takes over port `80`).        | none          | Any domain resolving to this host  |
-| TLS_CACHE_DIR | Directory for storing autocert certificates and account keys. Only used with `TLS_DOMAIN`.        | `certs`       | Any writable directory path        |
+| ENV VAR       | Description                                                                                | Default Value | Possible Values                   |
+| ------------- | ------------------------------------------------------------------------------------------ | ------------- | --------------------------------- |
+| TLS_CERT_FILE | Path to a certificate file. Must be set together with `TLS_KEY_FILE`.                      | none          | Any valid PEM certificate path    |
+| TLS_KEY_FILE  | Path to the private key file matching `TLS_CERT_FILE`.                                     | none          | Any valid PEM private key path    |
+| TLS_DOMAIN    | Comma-separated domain(s) for automatic Let's Encrypt certificates (takes over port `80`). | none          | Any domain resolving to this host |
+| TLS_CACHE_DIR | Directory for storing autocert certificates and account keys. Only used with `TLS_DOMAIN`. | `certs`       | Any writable directory path       |
+
+Static certificate files (any CA, including self-signed):
+
+```yaml
+services:
+  tprox:
+    environment:
+      - BASE_URL=https://your.domain.com/
+      - TLS_CERT_FILE=/certs/cert.pem
+      - TLS_KEY_FILE=/certs/key.pem
+    ports:
+      - 443:8080
+    volumes:
+      - ./certs/cert.pem:/certs/cert.pem:ro
+      - ./certs/key.pem:/certs/key.pem:ro
+```
+
+Automatic Let's Encrypt certificates (the domain must resolve to this host, port `80` must be reachable for challenges, and `TLS_CACHE_DIR` must be writable and persistent):
+
+```yaml
+services:
+  tprox:
+    environment:
+      - BASE_URL=https://your.domain.com/
+      - TLS_DOMAIN=your.domain.com
+      - TLS_CACHE_DIR=/config/certs
+    ports:
+      - 80:80
+      - 443:8080
+    volumes:
+      - ./autocert:/config/certs
+```
 
 ### Playlist Source Configs
 
