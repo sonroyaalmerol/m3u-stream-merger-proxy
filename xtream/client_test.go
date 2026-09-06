@@ -111,3 +111,28 @@ func TestFetchRetriesTruncatedResponse(t *testing.T) {
 		t.Fatal("vod section missing after truncated response")
 	}
 }
+
+func TestSeriesInfoFailFast(t *testing.T) {
+	var calls int32
+	panel := fakePanel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/player_api.php", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("action") == "get_series_info" {
+			atomic.AddInt32(&calls, 1)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		panel.ServeHTTP(w, r)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient(server.URL, "user", "pass")
+	err := FetchPlaylistLines(context.Background(), client, func(string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := atomic.LoadInt32(&calls); n > seriesFailLimit+seriesInfoWorkers {
+		t.Fatalf("get_series_info called %d times, expected <= %d", n, seriesFailLimit+seriesInfoWorkers)
+	}
+}

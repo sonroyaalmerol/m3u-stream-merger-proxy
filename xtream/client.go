@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"m3u-stream-merger/logger"
@@ -46,44 +47,50 @@ func (c *Client) apiURL(action string, extra url.Values) string {
 	return c.Host + "/player_api.php?" + v.Encode()
 }
 
-func fetchAPI[T any](ctx context.Context, c *Client, action string, extra url.Values) (*T, error) {
+// fetchOnce performs one API attempt; retryable marks truncated 200s and 5xx.
+func fetchOnce[T any](ctx context.Context, c *Client, action string, extra url.Values) (*T, bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiURL(action, extra), nil)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	for attempt := 1; ; attempt++ {
-		if attempt > 1 {
-			delay := time.Duration(attempt-1) * time.Second
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(delay):
-			}
-		}
-
-		resp, err := utils.HTTPClient.Do(req)
-		if err != nil {
-			return nil, err
-		}
-
-		if resp.StatusCode >= 500 && attempt < 3 {
-			_ = resp.Body.Close()
-			continue
-		}
-		if resp.StatusCode != http.StatusOK {
-			_ = resp.Body.Close()
-			return nil, fmt.Errorf("xtream api %s returned status %d", action, resp.StatusCode)
-		}
-
-		var result T
-		decodeErr := json.NewDecoder(resp.Body).Decode(&result)
+	resp, err := utils.HTTPClient.Do(req)
+	if err != nil {
+		return nil, false, err
+	}
+	if resp.StatusCode >= 500 {
 		_ = resp.Body.Close()
-		if decodeErr == nil {
-			return &result, nil
+		return nil, true, fmt.Errorf("xtream api %s returned status %d", action, resp.StatusCode)
+	}
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		return nil, false, fmt.Errorf("xtream api %s returned status %d", action, resp.StatusCode)
+	}
+
+	var result T
+	decodeErr := json.NewDecoder(resp.Body).Decode(&result)
+	_ = resp.Body.Close()
+	if decodeErr != nil {
+		return nil, true, fmt.Errorf("xtream api %s decode error: %w", action, decodeErr)
+	}
+	return &result, false, nil
+}
+
+// fetchAPI retries transient panel failures: truncated 200s and 5xx.
+// Per-item actions (get_series_info) must call fetchOnce instead: retrying
+// thousands of per-series calls multiplies a panel outage into hours.
+func fetchAPI[T any](ctx context.Context, c *Client, action string, extra url.Values) (*T, error) {
+	for attempt := 1; ; attempt++ {
+		result, retryable, err := fetchOnce[T](ctx, c, action, extra)
+		if err == nil || !retryable || attempt >= 3 {
+			return result, err
 		}
-		if attempt >= 3 {
-			return nil, fmt.Errorf("xtream api %s decode error: %w", action, decodeErr)
+		logger.Default.Warnf("xtream api %s attempt %d/3 failed, retrying: %v", action, attempt, err)
+		delay := time.Duration(attempt) * time.Second
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
 		}
 	}
 }
@@ -121,7 +128,8 @@ func (c *Client) SeriesList(ctx context.Context) ([]RawSeries, error) {
 }
 
 func (c *Client) SeriesInfo(ctx context.Context, seriesID string) (*RawSeriesInfo, error) {
-	return fetchAPI[RawSeriesInfo](ctx, c, "get_series_info", url.Values{"series_id": {seriesID}})
+	result, _, err := fetchOnce[RawSeriesInfo](ctx, c, "get_series_info", url.Values{"series_id": {seriesID}})
+	return result, err
 }
 
 // categoryMap converts the category list into an id -> name lookup. Duplicate
@@ -137,6 +145,9 @@ func categoryMap(categories []RawCategory) map[string]string {
 }
 
 const seriesInfoWorkers = 8
+
+// seriesFailLimit aborts the per-series fetch loop when the panel is failing everything.
+const seriesFailLimit = 25
 
 // FetchPlaylistLines pulls the full account catalog from the panel and emits
 // synthesized M3U lines through emit. Line order between live, vod and series
@@ -201,6 +212,8 @@ func FetchPlaylistLines(ctx context.Context, c *Client, emit func(line string) e
 		return fmt.Errorf("get_series: %w", err)
 	}
 
+	logger.Default.Logf("Xtream: fetching info for %d series", len(seriesList))
+
 	var (
 		emitMu sync.Mutex
 		first  error
@@ -215,14 +228,23 @@ func FetchPlaylistLines(ctx context.Context, c *Client, emit func(line string) e
 
 	jobs := make(chan RawSeries)
 	var wg sync.WaitGroup
+	var failStreak atomic.Int32
 	for range seriesInfoWorkers {
 		wg.Go(func() {
 			for series := range jobs {
-				info, err := c.SeriesInfo(ctx, series.SeriesID.String())
-				if err != nil {
-					logger.Default.Warnf("xtream get_series_info %s (%s): %v", series.SeriesID.String(), series.Name, err)
+				if failStreak.Load() >= seriesFailLimit {
 					continue
 				}
+				info, err := c.SeriesInfo(ctx, series.SeriesID.String())
+				if err != nil {
+					if n := failStreak.Add(1); n == seriesFailLimit {
+						logger.Default.Warnf("Xtream get_series_info failed %d times in a row, skipping remaining series", seriesFailLimit)
+					} else if n < seriesFailLimit {
+						logger.Default.Warnf("xtream get_series_info %s (%s): %v", series.SeriesID.String(), series.Name, err)
+					}
+					continue
+				}
+				failStreak.Store(0)
 				for seasonNum, episodes := range info.Episodes {
 					for _, ep := range episodes {
 						epNum := ep.EpisodeNum
