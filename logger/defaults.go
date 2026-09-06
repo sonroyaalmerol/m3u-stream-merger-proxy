@@ -16,12 +16,11 @@ var Default = &DefaultLogger{}
 
 var logger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().Timestamp().Logger()
 
-func cleanString(text string) string {
-	urlRegex := `[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[a-zA-Z0-9+%/.\-:_?&=#@+]+`
-	re := regexp.MustCompile(urlRegex)
+// urlRedactor is compiled once; MustCompile costs ~2us per call.
+var urlRedactor = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[a-zA-Z0-9+%/.\-:_?&=#@+]+`)
 
-	safeString := re.ReplaceAllString(text, "[redacted url]")
-	return safeString
+func cleanString(text string) string {
+	return urlRedactor.ReplaceAllString(text, "[redacted url]")
 }
 
 func safeLogf(format string, v ...any) string {
@@ -51,12 +50,11 @@ func (*DefaultLogger) Debug(format string) {
 }
 
 func (*DefaultLogger) Debugf(format string, v ...any) {
-	debug := os.Getenv("DEBUG") == "true"
-	logString := fmt.Sprintf(format, v...)
-
-	if debug {
-		logger.Debug().Msg(safeLogf("%s", logString))
+	if os.Getenv("DEBUG") != "true" {
+		return
 	}
+
+	logger.Debug().Msg(safeLogf("%s", fmt.Sprintf(format, v...)))
 }
 
 func (*DefaultLogger) Error(format string) {
