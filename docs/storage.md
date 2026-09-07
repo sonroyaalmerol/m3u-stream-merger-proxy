@@ -38,7 +38,7 @@ Partition files (`p0000.bin`...) exist only during a sync pass; the `sort/` dire
 
 ## Stream catalog (`.cat` / `.cix`)
 
-The catalog is the query-time store backing playback and the Xtream API. It is write-once per sync: a full new generation is built, then atomically swapped in. Readers mmap both files and decode records on demand - steady-state memory is one mapped page cache plus per-request scratch, not the corpus.
+There is exactly one catalog for all source types: M3U and Xtream lines are indistinguishable after ingestion (Xtream sources are rendered to M3U text at download time), so the same records serve both playback and the Xtream API. It is write-once per sync: a full new generation is built, then atomically swapped in. Readers mmap both files and decode records on demand - steady-state memory is one mapped page cache plus per-request scratch, not the corpus.
 
 ### Data file `g<N>.cat`
 
@@ -89,6 +89,8 @@ Lookups are binary-searched (`lookupRange`); a key can map to multiple records. 
 A new generation `N+1` is written while generation `N` keeps serving. `Commit` (`store.go`) fsyncs data, writes the index, then publishes by renaming `current.new` -> `current` (atomic) and fsyncing the directory. Readers (re)load by reading `current`, mmapping `g<N>.cat`/`g<N>.cix`, and only then unmapping the old generation. The previous generation files are deleted after the swap; a crash mid-sync leaves `current` pointing at the last complete generation.
 
 ## Xtream series stubs and fragments
+
+The only source-type-specific storage. Xtream series episodes are populated lazily after the main pass (see [ingestion.md](ingestion.md)); these two files are the cache that makes replay cheap.
 
 Stub file (magic `XSTUB01`, `uint16` count, then per stub: `uint64` upstream id + three length-prefixed strings name/group/cover). Stubs are rewritten atomically (tmp + rename) each sync.
 
