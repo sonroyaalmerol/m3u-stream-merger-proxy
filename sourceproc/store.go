@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	catalogMagic          = "M3UCAT03"
+	catalogMagic          = "M3UCAT04"
 	catalogHeaderLen      = 128
 	catalogRecordFixedLen = 64
 	lookupRecordLen       = 12
@@ -163,10 +163,7 @@ func appendCatalogRecord(dst []byte, sum [28]byte, s *StreamInfo) []byte {
 
 	seriesID := uint64(0)
 	if kind == catalogKindSeries {
-		tmp := append(dst[:0], "series|"...)
-		tmp = append(tmp, show...)
-		seriesID = xxhash.Sum64(tmp)
-		dst = tmp[:0]
+		seriesID = SeriesIDFor(show)
 	}
 
 	ext := streamExtension(s)
@@ -175,7 +172,7 @@ func appendCatalogRecord(dst []byte, sum [28]byte, s *StreamInfo) []byte {
 	}
 
 	dst = append(dst, sum[:]...)
-	dst = binary.LittleEndian.AppendUint64(dst, xxhash.Sum64String(s.Title))
+	dst = binary.LittleEndian.AppendUint64(dst, StreamIDFor(s.Title))
 	dst = binary.LittleEndian.AppendUint64(dst, categoryID)
 	dst = binary.LittleEndian.AppendUint64(dst, seriesID)
 	dst = binary.LittleEndian.AppendUint32(dst, uint32(len(show)))
@@ -196,6 +193,18 @@ func catalogKind(tvgType string) byte {
 	default:
 		return catalogKindLive
 	}
+}
+
+// ponytail: 63-bit mask keeps every emitted ID inside a Java Long, unlike raw xxhash
+func StreamIDFor(title string) uint64 {
+	return xxhash.Sum64String(title) & 0x7fffffffffffffff
+}
+
+func SeriesIDFor(show string) uint64 {
+	h := xxhash.New()
+	_, _ = h.Write([]byte("series|"))
+	_, _ = h.Write([]byte(show))
+	return h.Sum64() & 0x7fffffffffffffff
 }
 
 func catalogKindName(kind byte) string {

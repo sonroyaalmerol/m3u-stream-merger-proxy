@@ -17,7 +17,6 @@ import (
 	"m3u-stream-merger/utils"
 	"m3u-stream-merger/xtream"
 
-	"github.com/cespare/xxhash"
 	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -110,7 +109,7 @@ func TestXtreamLiveStreams(t *testing.T) {
 	require.Len(t, streams, 1)
 	assert.Equal(t, "CNN", streams[0].Name)
 	assert.Equal(t, "cnn.id", streams[0].EPGChannelID)
-	assert.Equal(t, strconv.FormatUint(xxhash.Sum64String("CNN"), 10), streams[0].StreamID.String())
+	assert.Equal(t, strconv.FormatUint(sourceproc.StreamIDFor("CNN"), 10), streams[0].StreamID.String())
 }
 
 func TestXtreamCategoriesAndFilter(t *testing.T) {
@@ -138,7 +137,7 @@ func TestXtreamCategoriesAndFilter(t *testing.T) {
 func TestXtreamSeriesInfo(t *testing.T) {
 	h := setupXtreamHandler(t)
 
-	seriesID := xxhash.Sum64String("series|Test Show")
+	seriesID := sourceproc.SeriesIDFor("Test Show")
 	rec := playerAPIRequest(t, h, "action=get_series_info&series_id="+strconv.FormatUint(seriesID, 10))
 	require.Equal(t, http.StatusOK, rec.Code)
 
@@ -157,7 +156,7 @@ func TestXtreamSeriesInfo(t *testing.T) {
 func TestXtreamVodInfo(t *testing.T) {
 	h := setupXtreamHandler(t)
 
-	vodID := xxhash.Sum64String("Cool Movie")
+	vodID := sourceproc.StreamIDFor("Cool Movie")
 	rec := playerAPIRequest(t, h, "action=get_vod_info&vod_id="+strconv.FormatUint(vodID, 10))
 	require.Equal(t, http.StatusOK, rec.Code)
 
@@ -200,8 +199,8 @@ func TestXtreamGetPHP(t *testing.T) {
 	assert.Contains(t, body, "x-tvg-url=")
 	assert.Contains(t, body, "http://example.com/live/u/p/")
 	assert.Contains(t, body, "http://example.com/movie/u/p/")
-	assert.Contains(t, body, fmt.Sprintf("http://example.com/movie/u/p/%d.mp4", xxhash.Sum64String("Cool Movie")))
-	assert.Contains(t, body, fmt.Sprintf("http://example.com/series/u/p/%d.mkv", xxhash.Sum64String("Test Show S01E02")))
+	assert.Contains(t, body, fmt.Sprintf("http://example.com/movie/u/p/%d.mp4", sourceproc.StreamIDFor("Cool Movie")))
+	assert.Contains(t, body, fmt.Sprintf("http://example.com/series/u/p/%d.mkv", sourceproc.StreamIDFor("Test Show S01E02")))
 }
 
 func TestXtreamGetPHPOutputFormat(t *testing.T) {
@@ -267,7 +266,7 @@ func TestXtreamShortEPG(t *testing.T) {
 </tv>`
 	require.NoError(t, os.WriteFile(config.GetEPGPath(), []byte(epgXML), 0644))
 
-	cnnID := xxhash.Sum64String("CNN")
+	cnnID := sourceproc.StreamIDFor("CNN")
 	rec := playerAPIRequest(t, h, "action=get_short_epg&stream_id="+strconv.FormatUint(cnnID, 10))
 	require.Equal(t, http.StatusOK, rec.Code)
 

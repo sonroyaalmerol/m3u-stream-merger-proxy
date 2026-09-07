@@ -208,7 +208,7 @@ func (h *XtreamHTTPHandler) categories(kind string) []xtream.RawCategory {
 }
 
 func (h *XtreamHTTPHandler) liveStreams(categoryID uint64) []xtream.LiveStreamOut {
-	var out []xtream.LiveStreamOut
+	out := make([]xtream.LiveStreamOut, 0, 16)
 	_ = h.catalog.RangeEntries(xtream.TypeLive, categoryID, func(position int, e sourceproc.CatalogEntry) bool {
 		catID := jsonNumber(e.CategoryID)
 		out = append(out, xtream.LiveStreamOut{
@@ -229,7 +229,7 @@ func (h *XtreamHTTPHandler) liveStreams(categoryID uint64) []xtream.LiveStreamOu
 }
 
 func (h *XtreamHTTPHandler) vodStreams(categoryID uint64) []xtream.VodStreamOut {
-	var out []xtream.VodStreamOut
+	out := make([]xtream.VodStreamOut, 0, 16)
 	_ = h.catalog.RangeEntries(xtream.TypeMovie, categoryID, func(position int, e sourceproc.CatalogEntry) bool {
 		catID := jsonNumber(e.CategoryID)
 		out = append(out, xtream.VodStreamOut{
@@ -250,7 +250,7 @@ func (h *XtreamHTTPHandler) vodStreams(categoryID uint64) []xtream.VodStreamOut 
 }
 
 func (h *XtreamHTTPHandler) seriesList(categoryID uint64) []xtream.SeriesOut {
-	var out []xtream.SeriesOut
+	out := make([]xtream.SeriesOut, 0, 16)
 	_ = h.catalog.RangeSeries(categoryID, func(position int, sd sourceproc.CatalogSeriesEntry) bool {
 		catID := jsonNumber(sd.CategoryID)
 		out = append(out, xtream.SeriesOut{

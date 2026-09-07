@@ -62,6 +62,9 @@ func main() {
 	http.HandleFunc("/xmltv.php", func(w http.ResponseWriter, r *http.Request) {
 		xtreamHandler.ServeXMLTV(w, r)
 	})
+	http.HandleFunc("/panel_api.php", func(w http.ResponseWriter, r *http.Request) {
+		xtreamHandler.ServePanelAPI(w, r)
+	})
 	for _, prefix := range []string{"/live/", "/movie/", "/series/"} {
 		http.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
 			xtreamHandler.ServeStream(w, r)
