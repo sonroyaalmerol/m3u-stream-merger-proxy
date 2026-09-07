@@ -68,7 +68,7 @@ func streamDownloadM3USources(tracker *ingestProgress) chan *SourceDownloaderRes
 					Index: idx,
 					Kind:  kind,
 					Lines: make(chan *LineDetails, 1000),
-					Error: make(chan error, 1),
+					Error: make(chan error, 4),
 				}
 				result.sp = tracker.register(idx, kind)
 
