@@ -71,7 +71,7 @@ func BenchmarkWriteWithReaders(b *testing.B) {
 					pos := c.InitialPosition()
 					var seq int64
 					for ctx.Err() == nil {
-						_, _, pos, seq = c.ReadChunks(ctx, pos, seq)
+						_, _, pos, seq, _ = c.ReadChunks(ctx, pos, seq)
 					}
 				})
 			}
@@ -115,7 +115,7 @@ func BenchmarkReadChunksDrain(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		pos := c.InitialPosition().Next().Next()
-		_, _, _, _ = c.ReadChunks(ctx, pos, 0)
+		_, _, _, _, _ = c.ReadChunks(ctx, pos, 0)
 	}
 }
 

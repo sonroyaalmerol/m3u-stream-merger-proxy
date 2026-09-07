@@ -31,7 +31,7 @@ func TestReadChunks_NoMissedWakeup(t *testing.T) {
 		coord := newCoordForTest(t)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 
-		_, _, pos, seq := coord.ReadChunks(ctx, coord.InitialPosition(), 0)
+		_, _, pos, seq, _ := coord.ReadChunks(ctx, coord.InitialPosition(), 0)
 
 		var wg sync.WaitGroup
 		for range readers {
@@ -174,7 +174,7 @@ func clientRead(ctx context.Context, coord *StreamCoordinator) ([]byte, int) {
 		if ctx.Err() != nil {
 			return data, proxy.StatusClientClosed
 		}
-		chunks, errChunk, newPos, newSeq := coord.ReadChunks(ctx, pos, seq)
+		chunks, errChunk, newPos, newSeq, _ := coord.ReadChunks(ctx, pos, seq)
 		pos = newPos
 		seq = newSeq
 		for _, c := range chunks {
@@ -808,7 +808,7 @@ func TestReadChunks_CountsDroppedChunks(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	_, _, pos, _ := c.ReadChunks(ctx, nil, 1)
+	_, _, pos, _, _ := c.ReadChunks(ctx, nil, 1)
 	if pos != c.Buffer {
 		t.Fatal("stale reader was not reset to the live edge")
 	}
