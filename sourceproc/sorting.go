@@ -68,8 +68,12 @@ func newSpillSorter() *spillSorter {
 		parts[i] = &spillPart{}
 	}
 
+	sortingKey := os.Getenv("SORTING_KEY")
+	if sortingKey == "" {
+		sortingKey = "provider-order"
+	}
 	s := &spillSorter{
-		sortingKey: os.Getenv("SORTING_KEY"),
+		sortingKey: sortingKey,
 		sortingDir: strings.ToLower(os.Getenv("SORTING_DIRECTION")),
 		dir:        dir,
 		conc:       conc,

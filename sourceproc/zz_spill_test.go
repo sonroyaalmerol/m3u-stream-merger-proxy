@@ -65,6 +65,7 @@ func TestAppendSanitizedMatchesSanitizeField(t *testing.T) {
 }
 
 func TestSpillSorterOrderAndFold(t *testing.T) {
+	t.Setenv("SORTING_KEY", "title")
 	config.SetConfig(&config.Config{DataPath: t.TempDir() + "/data/", TempPath: t.TempDir() + "/tmp/"})
 	s := newSpillSorter()
 	for i := range 500 {
@@ -103,6 +104,15 @@ func TestSpillSorterOrderAndFold(t *testing.T) {
 	}
 	if n != 250 {
 		t.Fatalf("got %d folded entries, want 250", n)
+	}
+	s.Close()
+}
+
+func TestSpillSorterProviderOrderDefault(t *testing.T) {
+	config.SetConfig(&config.Config{DataPath: t.TempDir() + "/data/", TempPath: t.TempDir() + "/tmp/"})
+	s := newSpillSorter()
+	if s.sortingKey != "provider-order" {
+		t.Fatalf("default SORTING_KEY = %q, want provider-order", s.sortingKey)
 	}
 	s.Close()
 }
