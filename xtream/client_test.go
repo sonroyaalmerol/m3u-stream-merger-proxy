@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func fakePanel() http.Handler {
@@ -158,3 +159,20 @@ func TestFetchRetriesTruncatedResponse(t *testing.T) {
 	}
 }
 
+func TestFetchTimeoutUnblocksHungServer(t *testing.T) {
+	t.Setenv("XTREAM_FETCH_TIMEOUT", "1")
+	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer hung.Close()
+
+	c := NewClient(hung.URL, "u", "p")
+	started := time.Now()
+	_, err := c.LiveStreams(context.Background())
+	if err == nil {
+		t.Fatal("expected error from hung server")
+	}
+	if elapsed := time.Since(started); elapsed > 10*time.Second {
+		t.Fatalf("fetch should unblock via timeout, took %v", elapsed)
+	}
+}

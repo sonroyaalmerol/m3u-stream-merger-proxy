@@ -188,13 +188,14 @@ services:
 
 Xtream Codes providers can be used as sources directly alongside (or instead of) M3U URLs. The proxy fetches live channels, VOD and full series episode listings via the provider's `player_api.php` and merges everything into `/playlist.m3u` like any other source. Indexes share the same namespace as `M3U_URL_X`, so filters and `M3U_MAX_CONCURRENCY_X` apply to Xtream sources as well.
 
-| ENV VAR                                                 | Description                                                                                                                      | Default Value | Possible Values            |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------- | -------------------------- |
-| XTREAM_URL_1, XTREAM_URL_2, XTREAM_URL_X                | Set the Xtream provider base URL (e.g. `http://provider:80`). Use an index not used by any `M3U_URL_X`.                          | N/A           | Any valid Xtream panel URL |
-| XTREAM_USERNAME_1, XTREAM_USERNAME_2, XTREAM_USERNAME_X | Set the username for the matching Xtream provider index.                                                                         | N/A           | Any string                 |
-| XTREAM_PASSWORD_1, XTREAM_PASSWORD_2, XTREAM_PASSWORD_X | Set the password for the matching Xtream provider index.                                                                         | N/A           | Any string                 |
-| XTREAM_SERIES_BG_WORKERS                               | Concurrent `get_series_info` requests in the background series populate loop. | 2             | 1-16                      |
-| XTREAM_SERIES_BG_DELAY_MS                              | Minimum interval between background series-info requests per source; caps the request rate like a single browsing client. | 250           | >=50                      |
+| ENV VAR                                                 | Description                                                                                                                     | Default Value | Possible Values            |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------- | -------------------------- |
+| XTREAM_URL_1, XTREAM_URL_2, XTREAM_URL_X                | Set the Xtream provider base URL (e.g. `http://provider:80`). Use an index not used by any `M3U_URL_X`.                         | N/A           | Any valid Xtream panel URL |
+| XTREAM_USERNAME_1, XTREAM_USERNAME_2, XTREAM_USERNAME_X | Set the username for the matching Xtream provider index.                                                                        | N/A           | Any string                 |
+| XTREAM_PASSWORD_1, XTREAM_PASSWORD_2, XTREAM_PASSWORD_X | Set the password for the matching Xtream provider index.                                                                        | N/A           | Any string                 |
+| XTREAM_FETCH_TIMEOUT                                    | Per-attempt deadline for each Xtream panel API call; hung or slow-dripping connections fail instead of stalling ingest forever. | 300           | >0 (seconds)               |
+| XTREAM_SERIES_BG_WORKERS                                | Concurrent `get_series_info` requests in the background series populate loop.                                                   | 2             | 1-16                       |
+| XTREAM_SERIES_BG_DELAY_MS                               | Minimum interval between background series-info requests per source; caps the request rate like a single browsing client.       | 250           | >=50                       |
 
 ### EPG Source Configs
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,8 +47,19 @@ func (c *Client) apiURL(action string, extra url.Values) string {
 	return c.Host + "/player_api.php?" + v.Encode()
 }
 
+func fetchTimeout() time.Duration {
+	if v := os.Getenv("XTREAM_FETCH_TIMEOUT"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return 5 * time.Minute
+}
+
 // fetchOnce performs one API attempt; retryable marks truncated 200s and 5xx.
 func fetchOnce[T any](ctx context.Context, c *Client, action string, extra url.Values) (*T, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, fetchTimeout())
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiURL(action, extra), nil)
 	if err != nil {
 		return nil, false, err
@@ -200,6 +212,7 @@ func FetchPlaylistLines(ctx context.Context, c *Client, cache *SeriesCachePaths,
 		liveErr, vodErr, seriesErr    error
 		fetchWg                       sync.WaitGroup
 	)
+	started := time.Now()
 	fetchWg.Go(func() { liveCats, _ = c.LiveCategories(ctx) })
 	fetchWg.Go(func() { vodCats, _ = c.VodCategories(ctx) })
 	fetchWg.Go(func() { seriesCats, _ = c.SeriesCategories(ctx) })
@@ -207,6 +220,7 @@ func FetchPlaylistLines(ctx context.Context, c *Client, cache *SeriesCachePaths,
 	fetchWg.Go(func() { vod, vodErr = c.VodStreams(ctx) })
 	fetchWg.Go(func() { seriesList, seriesErr = c.SeriesList(ctx) })
 	fetchWg.Wait()
+	logger.Default.Logf("xtream preamble %s: %d live, %d vod, %d series lists fetched in %.1fs", c.Host, len(live), len(vod), len(seriesList), time.Since(started).Seconds())
 
 	if liveErr != nil {
 		return fmt.Errorf("get_live_streams: %w", liveErr)
