@@ -66,7 +66,7 @@ func BenchmarkSortingPipeline(b *testing.B) {
 					}
 				}
 				count := 0
-				err := m.MergeRendered(func(*StreamInfo) renderedEntry { return renderedEntry{} },
+				err := m.MergeRendered(func(*StreamInfo, *renderBuf) renderedEntry { return renderedEntry{} },
 					func(renderedEntry) error { count++; return nil })
 				if err != nil {
 					b.Fatal(err)
