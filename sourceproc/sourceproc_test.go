@@ -563,3 +563,19 @@ func TestIngestProgressStopsIdempotently(t *testing.T) {
 	tracker.stop()
 	tracker.stop()
 }
+
+func TestHandleDownloadedMarksSourceError(t *testing.T) {
+	result := &SourceDownloaderResult{
+		Index: "1",
+		Lines: make(chan *LineDetails),
+		Error: make(chan error, 1),
+	}
+	result.Error <- fmt.Errorf("fetch failed")
+	close(result.Lines)
+	close(result.Error)
+
+	processor := &M3UProcessor{}
+	processor.handleDownloaded(result, make(chan pendingStream))
+
+	assert.True(t, processor.criticalErrorOccurred.Load())
+}

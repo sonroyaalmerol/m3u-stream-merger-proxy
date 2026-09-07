@@ -344,22 +344,34 @@ type pendingStream struct {
 
 func (p *M3UProcessor) handleDownloaded(result *SourceDownloaderResult, streamCh chan<- pendingStream) {
 	var currentLine string
+	lines := result.Lines
+	errors := result.Error
 
-	go func() {
-		for err := range result.Error {
-			if err != nil {
-				logger.Default.Errorf("Error processing M3U %s: %v", result.Index, err)
+	for lines != nil || errors != nil {
+		select {
+		case err, ok := <-errors:
+			if !ok {
+				errors = nil
+				continue
 			}
-		}
-	}()
-
-	for lineInfo := range result.Lines {
-		line := strings.TrimSpace(lineInfo.Content)
-		if strings.HasPrefix(line, "#EXTINF:") {
-			currentLine = line
-		} else if currentLine != "" && !strings.HasPrefix(line, "#") {
-			streamCh <- pendingStream{extinf: currentLine, urlLine: *lineInfo, m3uIndex: result.Index}
-			currentLine = ""
+			if err != nil {
+				p.markCriticalError(fmt.Errorf("M3U %s: %w", result.Index, err))
+			}
+		case lineInfo, ok := <-lines:
+			if !ok {
+				lines = nil
+				continue
+			}
+			if lineInfo == nil {
+				continue
+			}
+			line := strings.TrimSpace(lineInfo.Content)
+			if strings.HasPrefix(line, "#EXTINF:") {
+				currentLine = line
+			} else if currentLine != "" && !strings.HasPrefix(line, "#") {
+				streamCh <- pendingStream{extinf: currentLine, urlLine: *lineInfo, m3uIndex: result.Index}
+				currentLine = ""
+			}
 		}
 	}
 }

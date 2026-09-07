@@ -15,71 +15,38 @@ type RawCategory struct {
 }
 
 type RawLiveStream struct {
-	Num          int         `json:"num"`
-	Name         string      `json:"name"`
-	StreamType   string      `json:"stream_type"`
-	StreamID     json.Number `json:"stream_id"`
-	StreamIcon   string      `json:"stream_icon"`
-	EPGChannelID string      `json:"epg_channel_id"`
-	Added        string      `json:"added"`
-	CategoryID   json.Number `json:"category_id"`
-	CustomSID    string      `json:"custom_sid"`
-	DirectSource string      `json:"direct_source"`
+	Name         string    `json:"name"`
+	StreamID     rawNumber `json:"stream_id"`
+	StreamIcon   string    `json:"stream_icon"`
+	EPGChannelID string    `json:"epg_channel_id"`
+	CategoryID   rawNumber `json:"category_id"`
 }
 
 type RawVodStream struct {
-	Num                int         `json:"num"`
-	Name               string      `json:"name"`
-	StreamType         string      `json:"stream_type"`
-	StreamID           json.Number `json:"stream_id"`
-	StreamIcon         string      `json:"stream_icon"`
-	Rating             string      `json:"rating"`
-	Added              string      `json:"added"`
-	CategoryID         json.Number `json:"category_id"`
-	ContainerExtension string      `json:"container_extension"`
-	CustomSID          string      `json:"custom_sid"`
-	DirectSource       string      `json:"direct_source"`
+	Name               string    `json:"name"`
+	StreamID           rawNumber `json:"stream_id"`
+	StreamIcon         string    `json:"stream_icon"`
+	CategoryID         rawNumber `json:"category_id"`
+	ContainerExtension string    `json:"container_extension"`
 }
 
 type RawSeries struct {
-	Num          int         `json:"num"`
-	Name         string      `json:"name"`
-	SeriesID     json.Number `json:"series_id"`
-	Cover        string      `json:"cover"`
-	Plot         string      `json:"plot"`
-	Cast         string      `json:"cast"`
-	Director     string      `json:"director"`
-	Genre        string      `json:"genre"`
-	ReleaseDate  string      `json:"releaseDate"`
-	LastModified string      `json:"last_modified"`
-	Rating       string      `json:"rating"`
-	CategoryID   json.Number `json:"category_id"`
+	Name       string    `json:"name"`
+	SeriesID   rawNumber `json:"series_id"`
+	Cover      string    `json:"cover"`
+	CategoryID rawNumber `json:"category_id"`
 }
 
 type RawEpisode struct {
-	ID                 json.Number `json:"id"`
-	EpisodeNum         int         `json:"episode_num"`
-	Title              string      `json:"title"`
-	ContainerExtension string      `json:"container_extension"`
-	Season             int         `json:"season"`
-	MovieImage         string      `json:"movie_image"`
-	Plot               string      `json:"plot"`
-	Duration           string      `json:"duration"`
+	ID                 rawNumber      `json:"id"`
+	EpisodeNum         rawNumber      `json:"episode_num"`
+	ContainerExtension string         `json:"container_extension"`
+	MovieImage         string         `json:"movie_image"`
+	Info               rawEpisodeInfo `json:"info"`
 }
 
 type RawSeriesInfo struct {
-	Info struct {
-		Name         string `json:"name"`
-		Cover        string `json:"cover"`
-		Plot         string `json:"plot"`
-		Cast         string `json:"cast"`
-		Director     string `json:"director"`
-		Genre        string `json:"genre"`
-		ReleaseDate  string `json:"releaseDate"`
-		Rating       string `json:"rating"`
-		LastModified int64  `json:"last_modified"`
-	} `json:"info"`
-	Episodes map[string][]RawEpisode `json:"episodes"`
+	Episodes episodeGroups `json:"episodes"`
 }
 
 type UserInfo struct {

@@ -14,7 +14,6 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
 
-	"github.com/goccy/go-json"
 )
 
 // Client talks to an upstream Xtream Codes panel via player_api.php.
@@ -79,10 +78,13 @@ func fetchOnce[T any](ctx context.Context, c *Client, action string, extra url.V
 	}
 
 	var result T
-	decodeErr := json.NewDecoder(resp.Body).Decode(&result)
+	decodeErr := decodeAPIResponse(resp.Body, &result)
 	_ = resp.Body.Close()
 	if decodeErr != nil {
-		return nil, true, fmt.Errorf("xtream api %s decode error: %w", action, decodeErr)
+		if ctx.Err() != nil {
+			return nil, false, fmt.Errorf("xtream api %s: %w", action, ctx.Err())
+		}
+		return nil, retryableJSONError(decodeErr), fmt.Errorf("xtream api %s decode error: %w", action, decodeErr)
 	}
 	return &result, false, nil
 }
@@ -107,11 +109,11 @@ func fetchAPI[T any](ctx context.Context, c *Client, action string, extra url.Va
 }
 
 func fetchList[T any](ctx context.Context, c *Client, action string) ([]T, error) {
-	result, err := fetchAPI[[]T](ctx, c, action, nil)
+	result, err := fetchAPI[listResponse[T]](ctx, c, action, nil)
 	if err != nil {
 		return nil, err
 	}
-	return *result, nil
+	return []T(*result), nil
 }
 
 func (c *Client) LiveCategories(ctx context.Context) ([]RawCategory, error) {
@@ -179,17 +181,20 @@ func entryPair(title, group, tvgType, logo, tvgID, streamURL string) (string, st
 func SeriesToLines(c *Client, seriesName, group string, info *RawSeriesInfo) []string {
 	var lines []string
 	for seasonNum, episodes := range info.Episodes {
-		for _, ep := range episodes {
-			epNum := ep.EpisodeNum
-			if epNum == 0 {
-				epNum, _ = strconv.Atoi(ep.ID.String())
+		for i, ep := range episodes {
+			if !usableEntry(seriesName, ep.ID) {
+				continue
+			}
+			epNum := ep.EpisodeNum.Int()
+			if epNum <= 0 {
+				epNum = i + 1
 			}
 			ext := ep.ContainerExtension
 			if ext == "" {
 				ext = "mkv"
 			}
 			streamURL := fmt.Sprintf("%s/series/%s/%s/%s.%s", c.Host, c.Username, c.Password, ep.ID.String(), ext)
-			inf, u := entryPair(EpisodeTitle(seriesName, seasonNum, epNum), group, "series", ep.MovieImage, "", streamURL)
+			inf, u := entryPair(EpisodeTitle(seriesName, seasonNum, epNum), group, "series", ep.Image(), "", streamURL)
 			lines = append(lines, inf, u)
 		}
 	}
@@ -209,19 +214,29 @@ func FetchPlaylistLines(ctx context.Context, c *Client, cache *SeriesCachePaths,
 		live                          []RawLiveStream
 		vod                           []RawVodStream
 		seriesList                    []RawSeries
+		liveCatsErr, vodCatsErr       error
+		seriesCatsErr                 error
 		liveErr, vodErr, seriesErr    error
 		fetchWg                       sync.WaitGroup
 	)
 	started := time.Now()
-	fetchWg.Go(func() { liveCats, _ = c.LiveCategories(ctx) })
-	fetchWg.Go(func() { vodCats, _ = c.VodCategories(ctx) })
-	fetchWg.Go(func() { seriesCats, _ = c.SeriesCategories(ctx) })
+	fetchWg.Go(func() { liveCats, liveCatsErr = c.LiveCategories(ctx) })
+	fetchWg.Go(func() { vodCats, vodCatsErr = c.VodCategories(ctx) })
+	fetchWg.Go(func() { seriesCats, seriesCatsErr = c.SeriesCategories(ctx) })
 	fetchWg.Go(func() { live, liveErr = c.LiveStreams(ctx) })
 	fetchWg.Go(func() { vod, vodErr = c.VodStreams(ctx) })
 	fetchWg.Go(func() { seriesList, seriesErr = c.SeriesList(ctx) })
 	fetchWg.Wait()
-	logger.Default.Logf("xtream preamble %s: %d live, %d vod, %d series lists fetched in %.1fs", c.Host, len(live), len(vod), len(seriesList), time.Since(started).Seconds())
 
+	if liveCatsErr != nil {
+		return fmt.Errorf("get_live_categories: %w", liveCatsErr)
+	}
+	if vodCatsErr != nil {
+		return fmt.Errorf("get_vod_categories: %w", vodCatsErr)
+	}
+	if seriesCatsErr != nil {
+		return fmt.Errorf("get_series_categories: %w", seriesCatsErr)
+	}
 	if liveErr != nil {
 		return fmt.Errorf("get_live_streams: %w", liveErr)
 	}
@@ -231,6 +246,7 @@ func FetchPlaylistLines(ctx context.Context, c *Client, cache *SeriesCachePaths,
 	if seriesErr != nil {
 		return fmt.Errorf("get_series: %w", seriesErr)
 	}
+	logger.Default.Logf("xtream preamble %s: %d live, %d vod, %d series lists fetched in %.1fs", c.Host, len(live), len(vod), len(seriesList), time.Since(started).Seconds())
 
 	liveNames := categoryMap(liveCats)
 	vodNames := categoryMap(vodCats)
@@ -244,14 +260,27 @@ func FetchPlaylistLines(ctx context.Context, c *Client, cache *SeriesCachePaths,
 		return emit(u)
 	}
 
+	skippedLive := 0
 	for _, s := range live {
+		if !usableEntry(s.Name, s.StreamID) {
+			skippedLive++
+			continue
+		}
 		streamURL := fmt.Sprintf("%s/live/%s/%s/%s.ts", c.Host, c.Username, c.Password, s.StreamID.String())
 		if err := writeEntry(s.Name, liveNames[s.CategoryID.String()], "live", s.StreamIcon, s.EPGChannelID, streamURL); err != nil {
 			return err
 		}
 	}
+	if skippedLive > 0 {
+		logger.Default.Warnf("Xtream: skipped %d live entries without a name or valid stream_id", skippedLive)
+	}
 
+	skippedVod := 0
 	for _, s := range vod {
+		if !usableEntry(s.Name, s.StreamID) {
+			skippedVod++
+			continue
+		}
 		ext := s.ContainerExtension
 		if ext == "" {
 			ext = "mp4"
@@ -261,6 +290,9 @@ func FetchPlaylistLines(ctx context.Context, c *Client, cache *SeriesCachePaths,
 			return err
 		}
 	}
+	if skippedVod > 0 {
+		logger.Default.Warnf("Xtream: skipped %d vod entries without a name or valid stream_id", skippedVod)
+	}
 
 	if cache == nil {
 		return nil
@@ -269,7 +301,7 @@ func FetchPlaylistLines(ctx context.Context, c *Client, cache *SeriesCachePaths,
 	stubs := make([]SeriesStub, 0, len(seriesList))
 	for _, s := range seriesList {
 		id, err := strconv.ParseUint(s.SeriesID.String(), 10, 64)
-		if err != nil {
+		if err != nil || id == 0 || strings.TrimSpace(s.Name) == "" {
 			continue
 		}
 		stubs = append(stubs, SeriesStub{

@@ -2,6 +2,7 @@ package xtream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -159,9 +160,13 @@ func TestFetchRetriesTruncatedResponse(t *testing.T) {
 	}
 }
 
-func TestFetchTimeoutUnblocksHungServer(t *testing.T) {
+func TestFetchTimeoutUnblocksTruncatedResponse(t *testing.T) {
 	t.Setenv("XTREAM_FETCH_TIMEOUT", "1")
+	var calls int32
 	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		_, _ = fmt.Fprint(w, `[{"name":"partial`)
+		w.(http.Flusher).Flush()
 		<-r.Context().Done()
 	}))
 	defer hung.Close()
@@ -169,10 +174,13 @@ func TestFetchTimeoutUnblocksHungServer(t *testing.T) {
 	c := NewClient(hung.URL, "u", "p")
 	started := time.Now()
 	_, err := c.LiveStreams(context.Background())
-	if err == nil {
-		t.Fatal("expected error from hung server")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected deadline error, got %v", err)
 	}
-	if elapsed := time.Since(started); elapsed > 10*time.Second {
-		t.Fatalf("fetch should unblock via timeout, took %v", elapsed)
+	if calls != 1 {
+		t.Fatalf("deadline must not retry, got %d calls", calls)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("fetch should stop after one timeout, took %v", elapsed)
 	}
 }

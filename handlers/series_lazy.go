@@ -165,10 +165,14 @@ func (h *XtreamHTTPHandler) lazySeriesInfo(ctx context.Context, id uint64) *xtre
 			seasonKey := strings.TrimPrefix(seasonNum, "0")
 			season, _ := strconv.Atoi(seasonKey)
 			key := strconv.Itoa(season)
-			for _, ep := range res.info.Episodes[seasonNum] {
-				epNum := ep.EpisodeNum
-				if epNum == 0 {
-					epNum, _ = strconv.Atoi(ep.ID.String())
+			for i, ep := range res.info.Episodes[seasonNum] {
+				upstreamID, err := strconv.ParseUint(ep.ID.String(), 10, 64)
+				if err != nil || upstreamID == 0 {
+					continue
+				}
+				epNum := ep.EpisodeNum.Int()
+				if epNum <= 0 {
+					epNum = i + 1
 				}
 				dedup := fmt.Sprintf("%d:%d", season, epNum)
 				if _, dup := seen[dedup]; dup {
@@ -189,11 +193,11 @@ func (h *XtreamHTTPHandler) lazySeriesInfo(ctx context.Context, id uint64) *xtre
 					Added:              "0",
 					Season:             season,
 					Info: xtream.EpisodeInfoOut{
-						MovieImage: ep.MovieImage,
+						MovieImage: ep.Image(),
 						Season:     season,
 					},
 				})
-				ls.episodes[ourID] = lazyEpisode{srcIdx: res.src.Idx, upstreamID: mustParseUint(ep.ID.String()), ext: ext}
+				ls.episodes[ourID] = lazyEpisode{srcIdx: res.src.Idx, upstreamID: upstreamID, ext: ext}
 			}
 		}
 	}
@@ -222,11 +226,6 @@ func sortedSeasonInts(episodes map[string][]xtream.EpisodeOut) []int {
 	}
 	sort.Ints(seasons)
 	return seasons
-}
-
-func mustParseUint(s string) uint64 {
-	n, _ := strconv.ParseUint(s, 10, 64)
-	return n
 }
 
 func (h *XtreamHTTPHandler) rememberLazy(id uint64, ls *lazySeries) {
