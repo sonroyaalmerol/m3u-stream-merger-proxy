@@ -14,6 +14,7 @@ type StreamConfig struct {
 	InitialBackoff     time.Duration
 	MaxRetries         int
 	ExpectedThroughput int64
+	EnablePCRPacer     bool
 }
 
 func NewDefaultStreamConfig() *StreamConfig {
@@ -22,6 +23,7 @@ func NewDefaultStreamConfig() *StreamConfig {
 	finalTimeoutSeconds := 3
 	finalMaxRetries := 5
 	finalExpectedThroughput := int64(0)
+	finalEnablePCRPacer := false
 
 	maxRetries, ok := os.LookupEnv("MAX_RETRIES")
 	if ok {
@@ -55,6 +57,13 @@ func NewDefaultStreamConfig() *StreamConfig {
 		}
 	}
 
+	enablePacer, ok := os.LookupEnv("ENABLE_PCR_PACER")
+	if ok {
+		if b, err := strconv.ParseBool(enablePacer); err == nil {
+			finalEnablePCRPacer = b
+		}
+	}
+
 	if finalBufferSize < 2 {
 		logger.Default.Warnf("BUFFER_CHUNK_NUM must be at least 2; falling back to 2")
 		finalBufferSize = 2
@@ -76,5 +85,6 @@ func NewDefaultStreamConfig() *StreamConfig {
 		InitialBackoff:     200 * time.Millisecond,
 		MaxRetries:         finalMaxRetries,
 		ExpectedThroughput: finalExpectedThroughput,
+		EnablePCRPacer:     finalEnablePCRPacer,
 	}
 }

@@ -59,6 +59,9 @@ func newPCRPacer(ringBytes int64) *pcrPacer {
 // the program clock (minus the allowed lead). It returns ctx.Err() if the
 // context ends while waiting. Chunks must be fed in stream order.
 func (p *pcrPacer) pace(ctx context.Context, b []byte) error {
+	if p == nil {
+		return nil
+	}
 	p.mu.Lock()
 	if p.disabled {
 		p.mu.Unlock()

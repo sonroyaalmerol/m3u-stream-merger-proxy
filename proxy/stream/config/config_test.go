@@ -2,6 +2,23 @@ package config
 
 import "testing"
 
+func TestEnablePCRPacerDisabledByDefault(t *testing.T) {
+	cfg := NewDefaultStreamConfig()
+	if cfg.EnablePCRPacer {
+		t.Fatal("EnablePCRPacer = true by default, want false")
+	}
+
+	t.Setenv("ENABLE_PCR_PACER", "true")
+	if !NewDefaultStreamConfig().EnablePCRPacer {
+		t.Fatal("ENABLE_PCR_PACER=true not honored")
+	}
+
+	t.Setenv("ENABLE_PCR_PACER", "garbage")
+	if NewDefaultStreamConfig().EnablePCRPacer {
+		t.Fatal("invalid ENABLE_PCR_PACER should leave pacer disabled")
+	}
+}
+
 func TestNewDefaultStreamConfig_ClampsInvalidValues(t *testing.T) {
 	t.Setenv("BUFFER_CHUNK_NUM", "0")
 	t.Setenv("STREAM_TIMEOUT", "0")

@@ -34,7 +34,10 @@ func (c *StreamCoordinator) StartMediaWriter(ctx context.Context, lbResult *load
 	c.WriterRespHeader.Store(&lbResult.Response.Header)
 	c.signalHeaderChan()
 
-	pacer := newPCRPacer(int64(c.config.ChunkSize) * int64(c.config.SharedBufferSize))
+	var pacer *pcrPacer
+	if c.config.EnablePCRPacer {
+		pacer = newPCRPacer(int64(c.config.ChunkSize) * int64(c.config.SharedBufferSize))
+	}
 	err := c.readAndWriteStream(ctx, lbResult.Response.Body, func(b []byte) error {
 		if err := pacer.pace(ctx, b); err != nil {
 			return err
