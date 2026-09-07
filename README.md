@@ -193,7 +193,8 @@ Xtream Codes providers can be used as sources directly alongside (or instead of)
 | XTREAM_URL_1, XTREAM_URL_2, XTREAM_URL_X                | Set the Xtream provider base URL (e.g. `http://provider:80`). Use an index not used by any `M3U_URL_X`.                          | N/A           | Any valid Xtream panel URL |
 | XTREAM_USERNAME_1, XTREAM_USERNAME_2, XTREAM_USERNAME_X | Set the username for the matching Xtream provider index.                                                                         | N/A           | Any string                 |
 | XTREAM_PASSWORD_1, XTREAM_PASSWORD_2, XTREAM_PASSWORD_X | Set the password for the matching Xtream provider index.                                                                         | N/A           | Any string                 |
-| XTREAM_SERIES_WORKERS                                   | Concurrent per-series `get_series_info` requests per Xtream source. Raise for large accounts; panels may rate-limit high values. | 8             | 1-64                       |
+| XTREAM_SERIES_BG_WORKERS                               | Concurrent `get_series_info` requests in the background series populate loop. | 2             | 1-16                      |
+| XTREAM_SERIES_BG_DELAY_MS                              | Minimum interval between background series-info requests per source; caps the request rate like a single browsing client. | 250           | >=50                      |
 
 ### EPG Source Configs
 

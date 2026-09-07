@@ -101,6 +101,8 @@ func Initialize(ctx context.Context, logger logger.Logger, m3uHandler *handlers.
 		}
 	}
 
+	go updateInstance.populateSeriesLoop(ctx)
+
 	updateInstance.Cron = c
 	return updateInstance, nil
 }

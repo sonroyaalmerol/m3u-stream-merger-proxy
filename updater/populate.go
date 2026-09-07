@@ -1,0 +1,196 @@
+package updater
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"m3u-stream-merger/config"
+	"m3u-stream-merger/xtream"
+)
+
+const (
+	populateStreakLimit = 10
+	populateBatchSize   = 250
+	populatePassGap     = time.Hour
+)
+
+func seriesBGWorkers() int {
+	if n, err := strconv.Atoi(os.Getenv("XTREAM_SERIES_BG_WORKERS")); err == nil && n > 0 {
+		return min(n, 16)
+	}
+	return 2
+}
+
+func seriesBGDelay() time.Duration {
+	if n, err := strconv.Atoi(os.Getenv("XTREAM_SERIES_BG_DELAY_MS")); err == nil && n >= 50 {
+		return time.Duration(n) * time.Millisecond
+	}
+	return 250 * time.Millisecond
+}
+
+// populateSeriesLoop trickle-fetches series info at a capped rate, then reingests.
+func (instance *Updater) populateSeriesLoop(ctx context.Context) {
+	for ctx.Err() == nil {
+		time.Sleep(30 * time.Second)
+		if ctx.Err() != nil {
+			return
+		}
+		if instance.populateSeriesPass(ctx) > 0 {
+			instance.UpdateM3USources(ctx)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(populatePassGap):
+		}
+	}
+}
+
+func (instance *Updater) populateSeriesPass(ctx context.Context) int {
+	files, _ := filepath.Glob(filepath.Join(config.GetSeriesCacheDirPath(), "stubs-*.bin"))
+	var (
+		mu    sync.Mutex
+		wg    sync.WaitGroup
+		total int
+	)
+	for _, f := range files {
+		idx := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(f), "stubs-"), ".bin")
+		wg.Add(1)
+		go func(f, idx string) {
+			defer wg.Done()
+			n := instance.populateSource(ctx, f, idx)
+			mu.Lock()
+			total += n
+			mu.Unlock()
+		}(f, idx)
+	}
+	wg.Wait()
+	return total
+}
+
+// populateSource refetches every valid stub each pass so new episodes appear eventually.
+func (instance *Updater) populateSource(ctx context.Context, stubPath, idx string) int {
+	host := strings.TrimSuffix(os.Getenv("XTREAM_URL_"+idx), "/")
+	if host == "" {
+		return 0
+	}
+	client := xtream.NewClient(host, os.Getenv("XTREAM_USERNAME_"+idx), os.Getenv("XTREAM_PASSWORD_"+idx))
+	stubs, err := xtream.ReadSeriesStubs(stubPath)
+	if err != nil || len(stubs) == 0 {
+		return 0
+	}
+
+	jobs := make(chan xtream.SeriesStub)
+	var (
+		mu         sync.Mutex
+		fetched    = make(map[uint64]xtream.FragmentEntry)
+		successes  int
+		failStreak int
+		wg         sync.WaitGroup
+	)
+	fragPath := filepath.Join(config.GetSeriesCacheDirPath(), "frag-"+idx+".m3u")
+	flush := func() {
+		mu.Lock()
+		entries := make([]xtream.FragmentEntry, 0, len(fetched))
+		for _, e := range fetched {
+			entries = append(entries, e)
+		}
+		mu.Unlock()
+		if err := xtream.MutateSeriesFragment(fragPath, func(existing []xtream.FragmentEntry) []xtream.FragmentEntry {
+			return mergeFragmentEntries(existing, entries, stubs)
+		}); err != nil {
+			instance.logger.Errorf("series populate fragment write failed for %s: %v", idx, err)
+		}
+	}
+
+	tick := time.NewTicker(seriesBGDelay())
+	defer tick.Stop()
+	for range seriesBGWorkers() {
+		wg.Go(func() {
+			backoff := seriesBGDelay()
+			for stub := range jobs {
+				select {
+				case <-tick.C:
+				case <-ctx.Done():
+					return
+				}
+				info, err := client.SeriesInfo(ctx, strconv.FormatUint(stub.UpstreamID, 10))
+				mu.Lock()
+				if err != nil {
+					failStreak++
+					streak := failStreak
+					successesNow := successes
+					mu.Unlock()
+					if streak >= populateStreakLimit {
+						instance.logger.Warnf("series populate aborted for %s after %d consecutive failures", idx, streak)
+						return
+					}
+					if successesNow == 0 {
+						time.Sleep(min(backoff, 30*time.Second))
+						backoff *= 2
+					} else {
+						backoff = seriesBGDelay()
+					}
+					continue
+				}
+				failStreak = 0
+				backoff = seriesBGDelay()
+				successes++
+				done := successes
+				fetched[stub.UpstreamID] = xtream.FragmentEntry{
+					UpstreamID: stub.UpstreamID,
+					Lines:      xtream.SeriesToLines(client, stub.Name, stub.Group, info),
+				}
+				mu.Unlock()
+				if done%populateBatchSize == 0 {
+					flush()
+				}
+			}
+		})
+	}
+	for _, stub := range stubs {
+		select {
+		case jobs <- stub:
+		case <-ctx.Done():
+			close(jobs)
+			wg.Wait()
+			flush()
+			mu.Lock()
+			defer mu.Unlock()
+			return successes
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	flush()
+	mu.Lock()
+	defer mu.Unlock()
+	return successes
+}
+
+// mergeFragmentEntries keeps only series still in the stub list so dropped shows disappear.
+func mergeFragmentEntries(existing, fetched []xtream.FragmentEntry, stubs []xtream.SeriesStub) []xtream.FragmentEntry {
+	valid := make(map[uint64]struct{}, len(stubs))
+	for _, s := range stubs {
+		valid[s.UpstreamID] = struct{}{}
+	}
+	merged := make(map[uint64]xtream.FragmentEntry, len(existing)+len(fetched))
+	for _, e := range existing {
+		if _, ok := valid[e.UpstreamID]; ok {
+			merged[e.UpstreamID] = e
+		}
+	}
+	for _, e := range fetched {
+		merged[e.UpstreamID] = e
+	}
+	out := make([]xtream.FragmentEntry, 0, len(merged))
+	for _, e := range merged {
+		out = append(out, e)
+	}
+	return out
+}
