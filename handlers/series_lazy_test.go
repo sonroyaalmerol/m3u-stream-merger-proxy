@@ -77,7 +77,7 @@ func TestLazySeriesFlow(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &info))
 	require.Len(t, info.Episodes["1"], 1)
 	epID := sourceproc.StreamIDFor(xtream.EpisodeTitle("Lazy Show", "1", 2))
-	assert.Equal(t, strconv.FormatUint(epID, 10), info.Episodes["1"][0].ID.String())
+	assert.Equal(t, strconv.FormatUint(epID, 10), info.Episodes["1"][0].ID)
 
 	frag := filepath.Join(config.GetSeriesCacheDirPath(), "frag-1.m3u")
 	entries, err := xtream.ReadSeriesFragment(frag)

@@ -75,7 +75,7 @@ func (h *XtreamHTTPHandler) ServePlayerAPI(w http.ResponseWriter, r *http.Reques
 	categoryID, _ := strconv.ParseUint(query.Get("category_id"), 10, 64)
 
 	switch action {
-	case "":
+	case "", "get_profile", "get_server_info", "get_account_info":
 		h.writeJSON(w, h.rootResponse(r, query.Get("username"), query.Get("password")))
 	case "get_live_categories":
 		h.writeJSON(w, h.categories(xtream.TypeLive))
@@ -178,12 +178,14 @@ func (h *XtreamHTTPHandler) rootResponse(r *http.Request, user, pass string) xtr
 			Status:               "Active",
 			ExpDate:              "0",
 			IsTrial:              "0",
-			ActiveCons:           "0",
-			CreatedAt:            now.Unix(),
+			ActiveCons:           0,
+			CreatedAt:            strconv.FormatInt(now.Unix(), 10),
 			MaxConnections:       "1",
 			AllowedOutputFormats: []string{"m3u8", "ts"},
 		},
 		ServerInfo: xtream.ServerInfo{
+			Xui:            true,
+			Version:        "1.5.5",
 			URL:            serverHost,
 			Port:           serverPort,
 			HTTPSPort:      "443",
@@ -206,9 +208,9 @@ func (h *XtreamHTTPHandler) categories(kind string) []xtream.RawCategory {
 	out := make([]xtream.RawCategory, 0, len(categories))
 	for _, category := range categories {
 		out = append(out, xtream.RawCategory{
-			CategoryID:   jsonNumber(category.ID),
+			CategoryID:   idStr(category.ID),
 			CategoryName: category.Name,
-			ParentID:     "0",
+			ParentID:     0,
 		})
 	}
 	return out
@@ -227,7 +229,7 @@ func (h *XtreamHTTPHandler) liveStreams(categoryID uint64) []xtream.LiveStreamOu
 			EPGChannelID: e.TvgID,
 			Added:        "0",
 			IsAdult:      "0",
-			CategoryID:   catID,
+			CategoryID:   string(catID),
 			CategoryIDs:  []json.Number{catID},
 		})
 		return true
@@ -242,12 +244,14 @@ func (h *XtreamHTTPHandler) vodStreams(categoryID uint64) []xtream.VodStreamOut 
 		out = append(out, xtream.VodStreamOut{
 			Num:                position,
 			Name:               e.Title,
+			Title:              e.Title,
 			StreamType:         xtream.TypeMovie,
 			StreamID:           jsonNumber(e.StreamID),
 			StreamIcon:         e.Logo,
+			Genre:              e.Group,
 			Added:              "0",
 			IsAdult:            "0",
-			CategoryID:         catID,
+			CategoryID:         string(catID),
 			CategoryIDs:        []json.Number{catID},
 			ContainerExtension: containerExt(e.Ext, "mp4"),
 		})
@@ -265,11 +269,13 @@ func (h *XtreamHTTPHandler) seriesList(categoryID uint64) []xtream.SeriesOut {
 		out = append(out, xtream.SeriesOut{
 			Num:          position,
 			Name:         sd.Name,
+			Title:        sd.Name,
+			StreamType:   xtream.TypeSeries,
 			SeriesID:     jsonNumber(sd.SeriesID),
 			Cover:        sd.Cover,
 			Genre:        sd.Group,
 			BackdropPath: []string{},
-			CategoryID:   catID,
+			CategoryID:   string(catID),
 			CategoryIDs:  []json.Number{catID},
 		})
 		return true
@@ -290,11 +296,13 @@ func (h *XtreamHTTPHandler) seriesList(categoryID uint64) []xtream.SeriesOut {
 		out = append(out, xtream.SeriesOut{
 			Num:          len(out) + 1,
 			Name:         st.Name,
+			Title:        st.Name,
+			StreamType:   xtream.TypeSeries,
 			SeriesID:     jsonNumber(st.SeriesID),
 			Cover:        st.Cover,
 			Genre:        st.Group,
 			BackdropPath: []string{},
-			CategoryID:   catID,
+			CategoryID:   string(catID),
 			CategoryIDs:  []json.Number{catID},
 		})
 	}
@@ -323,10 +331,13 @@ func (h *XtreamHTTPHandler) seriesInfo(ctx context.Context, id uint64) *xtream.S
 		Episodes: make(map[string][]xtream.EpisodeOut, len(sd.Episodes)),
 	}
 	info.Info.Name = sd.Name
+	info.Info.Title = sd.Name
+	info.Info.SeriesID = jsonNumber(id)
 	info.Info.Cover = sd.Cover
 	info.Info.Genre = sd.Group
 	info.Info.BackdropPath = []string{}
-	info.Info.CategoryID = strconv.FormatUint(sd.CategoryID, 10)
+	info.Info.CategoryID = idStr(sd.CategoryID)
+	info.Info.CategoryIDs = []json.Number{jsonNumber(sd.CategoryID)}
 
 	seasons := make([]int, 0, len(sd.Episodes))
 	for season := range sd.Episodes {
@@ -338,10 +349,11 @@ func (h *XtreamHTTPHandler) seriesInfo(ctx context.Context, id uint64) *xtream.S
 		key := strconv.Itoa(season)
 		for _, ep := range sd.Episodes[season] {
 			info.Episodes[key] = append(info.Episodes[key], xtream.EpisodeOut{
-				ID:                 jsonNumber(ep.StreamID),
-				EpisodeNum:         ep.Episode,
+				ID:                 idStr(ep.StreamID),
+				EpisodeNum:         strconv.Itoa(ep.Episode),
 				Title:              ep.Title,
 				ContainerExtension: containerExt(ep.Ext, "mkv"),
+				Subtitles:          []string{},
 				Added:              "0",
 				Season:             season,
 				Info: xtream.EpisodeInfoOut{
@@ -381,12 +393,14 @@ func (h *XtreamHTTPHandler) vodInfo(id uint64) xtream.VodInfoOut {
 			ONname:       e.Title,
 			Genre:        e.Group,
 			BackdropPath: []string{},
+			Subtitles:    []string{},
 		},
 		MovieData: xtream.VodMovieDataOut{
 			StreamID:           jsonNumber(e.StreamID),
 			Name:               e.Title,
+			Title:              e.Title,
 			Added:              "0",
-			CategoryID:         catID,
+			CategoryID:         string(catID),
 			CategoryIDs:        []json.Number{catID},
 			ContainerExtension: ext,
 		},
@@ -442,20 +456,21 @@ func (h *XtreamHTTPHandler) epgListings(streamID uint64, limit int, dataTable bo
 			lang = "en"
 		}
 		nowPlaying := 0
-		if dataTable && len(listings) == 0 {
+		if unixNow := time.Now().Unix(); startTS <= unixNow && unixNow < endTS {
 			nowPlaying = 1
 		}
 		listings = append(listings, xtream.EPGListingOut{
-			ID:             jsonNumber(streamID),
-			EPGID:          jsonNumber(streamID),
+			ID:             idStr(sourceproc.StreamIDFor(entry.TvgID + "|" + p.Start)),
+			EPGID:          idStr(streamID),
 			Title:          base64.StdEncoding.EncodeToString([]byte(p.Title.Text)),
 			Lang:           lang,
 			Start:          start,
 			End:            end,
 			Description:    base64.StdEncoding.EncodeToString([]byte(p.Desc)),
 			ChannelID:      entry.TvgID,
-			StartTimestamp: startTS,
-			StopTimestamp:  endTS,
+			StartTimestamp: strconv.FormatInt(startTS, 10),
+			StopTimestamp:  strconv.FormatInt(endTS, 10),
+			Stop:           end,
 			NowPlaying:     nowPlaying,
 		})
 	}
@@ -477,6 +492,11 @@ func xmltvTime(v string) (string, int64) {
 
 func jsonNumber(v uint64) json.Number {
 	return json.Number(strconv.FormatUint(v, 10))
+}
+
+// idStr renders an id for the fields panels send as JSON strings, not numbers.
+func idStr(v uint64) string {
+	return strconv.FormatUint(v, 10)
 }
 
 // ServeStream handles /live/{user}/{pass}/{id}.{ext} style endpoints by

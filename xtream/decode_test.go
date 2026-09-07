@@ -26,7 +26,7 @@ func TestFetchListNormalizesProviderShapes(t *testing.T) {
 
 	client := NewClient(server.URL, "user", "pass")
 	categories, err := client.LiveCategories(context.Background())
-	if err != nil || len(categories) != 1 || categories[0].CategoryID.String() != "" {
+	if err != nil || len(categories) != 1 || categories[0].CategoryID != "" {
 		t.Fatalf("categories = %#v, err = %v", categories, err)
 	}
 	live, err := client.LiveStreams(context.Background())

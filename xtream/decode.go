@@ -175,9 +175,9 @@ func (c *RawCategory) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &value); err != nil {
 		return err
 	}
-	c.CategoryID = json.Number(value.CategoryID.String())
+	c.CategoryID = value.CategoryID.String()
 	c.CategoryName = value.CategoryName
-	c.ParentID = json.Number(value.ParentID.String())
+	c.ParentID = value.ParentID.Int()
 	return nil
 }
 

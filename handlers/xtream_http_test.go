@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
@@ -123,7 +124,7 @@ func TestXtreamCategoriesAndFilter(t *testing.T) {
 	require.Len(t, cats, 1)
 	assert.Equal(t, "News", cats[0].CategoryName)
 
-	newsID := cats[0].CategoryID.String()
+	newsID := cats[0].CategoryID
 	rec = playerAPIRequest(t, h, "action=get_live_streams&category_id="+newsID)
 	var streams []xtream.RawLiveStream
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &streams))
@@ -151,6 +152,50 @@ func TestXtreamSeriesInfo(t *testing.T) {
 	require.Len(t, info.Seasons, 1)
 	assert.Equal(t, 1, info.Seasons[0].SeasonNumber)
 	assert.Equal(t, 1, info.Seasons[0].EpisodeCount)
+}
+
+// TestXtreamWireTypes pins string-vs-number JSON typing to what real panels emit.
+func TestXtreamWireTypes(t *testing.T) {
+	h := setupXtreamHandler(t)
+
+	decodeFirst := func(query string) map[string]any {
+		rec := playerAPIRequest(t, h, query)
+		require.Equal(t, http.StatusOK, rec.Code)
+		var rows []map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows))
+		require.NotEmpty(t, rows)
+		return rows[0]
+	}
+
+	cat := decodeFirst("action=get_live_categories")
+	assert.IsType(t, "", cat["category_id"])
+	assert.IsType(t, float64(0), cat["parent_id"])
+
+	live := decodeFirst("action=get_live_streams")
+	assert.IsType(t, "", live["category_id"])
+	assert.IsType(t, float64(0), live["stream_id"])
+	assert.IsType(t, []any{}, live["category_ids"])
+
+	show := decodeFirst("action=get_series")
+	assert.IsType(t, "", show["category_id"])
+	assert.IsType(t, float64(0), show["series_id"])
+	assert.Equal(t, xtream.TypeSeries, show["stream_type"])
+
+	rec := playerAPIRequest(t, h, "action=get_series_info&series_id="+strconv.FormatUint(sourceproc.SeriesIDFor("Test Show"), 10))
+	var info map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &info))
+	episodes := info["episodes"].(map[string]any)["1"].([]any)
+	require.NotEmpty(t, episodes)
+	episode := episodes[0].(map[string]any)
+	assert.IsType(t, "", episode["id"])
+	assert.IsType(t, "", episode["episode_num"])
+	assert.IsType(t, float64(0), episode["season"])
+
+	rec = playerAPIRequest(t, h, "action=get_profile")
+	var profile xtream.RootResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &profile))
+	assert.Equal(t, 1, profile.UserInfo.Auth)
+	assert.NotEmpty(t, profile.ServerInfo.URL)
 }
 
 func TestXtreamVodInfo(t *testing.T) {
@@ -257,13 +302,20 @@ func TestXtreamShortEPG(t *testing.T) {
 	h := setupXtreamHandler(t)
 
 	require.NoError(t, os.MkdirAll(config.GetEPGDirPath(), 0755))
-	epgXML := `<?xml version="1.0" encoding="UTF-8"?>
+	airing := time.Now().UTC()
+	epgXML := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <tv>
   <programme start="20240101120000 +0000" stop="20240101130000 +0000" channel="cnn.id">
     <title>News Hour</title>
     <desc>Latest news</desc>
   </programme>
-</tv>`
+  <programme start="%s +0000" stop="%s +0000" channel="cnn.id">
+    <title>On Air Now</title>
+    <desc>Currently airing</desc>
+  </programme>
+</tv>`,
+		airing.Add(-time.Hour).Format("20060102150405"),
+		airing.Add(time.Hour).Format("20060102150405"))
 	require.NoError(t, os.WriteFile(config.GetEPGPath(), []byte(epgXML), 0644))
 
 	cnnID := sourceproc.StreamIDFor("CNN")
@@ -272,17 +324,21 @@ func TestXtreamShortEPG(t *testing.T) {
 
 	var short map[string][]xtream.EPGListingOut
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &short))
-	require.Len(t, short["epg_listings"], 1)
+	require.Len(t, short["epg_listings"], 2)
 	listing := short["epg_listings"][0]
 	assert.Equal(t, "2024-01-01 12:00:00", listing.Start)
-	assert.Equal(t, int64(1704110400), listing.StartTimestamp)
+	assert.Equal(t, "1704110400", listing.StartTimestamp)
+	assert.Equal(t, "2024-01-01 13:00:00", listing.Stop)
 	assert.Equal(t, "cnn.id", listing.ChannelID)
 	assert.NotEmpty(t, listing.Title)
+	assert.Equal(t, 0, listing.NowPlaying)
+	assert.NotEqual(t, listing.ID, short["epg_listings"][1].ID)
 
 	rec = playerAPIRequest(t, h, "action=get_simple_data_table&stream_id="+strconv.FormatUint(cnnID, 10))
 	require.Equal(t, http.StatusOK, rec.Code)
 	var table map[string][]xtream.EPGListingOut
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &table))
-	require.Len(t, table["epg_listings"], 1)
-	assert.Equal(t, 1, table["epg_listings"][0].NowPlaying)
+	require.Len(t, table["epg_listings"], 2)
+	assert.Equal(t, 0, table["epg_listings"][0].NowPlaying)
+	assert.Equal(t, 1, table["epg_listings"][1].NowPlaying)
 }

@@ -1,7 +1,5 @@
 package xtream
 
-import "encoding/json"
-
 const (
 	TypeLive   = "live"
 	TypeMovie  = "movie"
@@ -9,9 +7,9 @@ const (
 )
 
 type RawCategory struct {
-	CategoryID   json.Number `json:"category_id"`
-	CategoryName string      `json:"category_name"`
-	ParentID     json.Number `json:"parent_id"`
+	CategoryID   string `json:"category_id"`
+	CategoryName string `json:"category_name"`
+	ParentID     int    `json:"parent_id"`
 }
 
 type RawLiveStream struct {
@@ -57,13 +55,16 @@ type UserInfo struct {
 	Status               string   `json:"status"`
 	ExpDate              string   `json:"exp_date"`
 	IsTrial              string   `json:"is_trial"`
-	ActiveCons           string   `json:"active_cons"`
-	CreatedAt            int64    `json:"created_at"`
+	ActiveCons           int      `json:"active_cons"`
+	CreatedAt            string   `json:"created_at"`
 	MaxConnections       string   `json:"max_connections"`
 	AllowedOutputFormats []string `json:"allowed_output_formats"`
 }
 
 type ServerInfo struct {
+	Xui            bool   `json:"xui"`
+	Version        string `json:"version"`
+	Revision       *int   `json:"revision"`
 	URL            string `json:"url"`
 	Port           string `json:"port"`
 	HTTPSPort      string `json:"https_port"`

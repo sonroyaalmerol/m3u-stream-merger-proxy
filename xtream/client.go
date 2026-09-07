@@ -150,8 +150,8 @@ func (c *Client) SeriesInfo(ctx context.Context, seriesID string) (*RawSeriesInf
 func categoryMap(categories []RawCategory) map[string]string {
 	m := make(map[string]string, len(categories))
 	for _, cat := range categories {
-		if _, ok := m[cat.CategoryID.String()]; !ok {
-			m[cat.CategoryID.String()] = cat.CategoryName
+		if _, ok := m[cat.CategoryID]; !ok {
+			m[cat.CategoryID] = cat.CategoryName
 		}
 	}
 	return m

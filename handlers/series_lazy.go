@@ -141,10 +141,13 @@ func (h *XtreamHTTPHandler) lazySeriesInfo(ctx context.Context, id uint64) *xtre
 		Episodes: map[string][]xtream.EpisodeOut{},
 	}
 	out.Info.Name = stub.Name
+	out.Info.Title = stub.Name
+	out.Info.SeriesID = jsonNumber(id)
 	out.Info.Cover = stub.Cover
 	out.Info.Genre = stub.Group
 	out.Info.BackdropPath = []string{}
-	out.Info.CategoryID = strconv.FormatUint(stub.CategoryID, 10)
+	out.Info.CategoryID = idStr(stub.CategoryID)
+	out.Info.CategoryIDs = []json.Number{jsonNumber(stub.CategoryID)}
 
 	ls := &lazySeries{out: out, episodes: make(map[uint64]lazyEpisode)}
 	seen := make(map[string]struct{})
@@ -186,10 +189,11 @@ func (h *XtreamHTTPHandler) lazySeriesInfo(ctx context.Context, id uint64) *xtre
 				}
 				ourID := sourceproc.StreamIDFor(title)
 				out.Episodes[key] = append(out.Episodes[key], xtream.EpisodeOut{
-					ID:                 json.Number(strconv.FormatUint(ourID, 10)),
-					EpisodeNum:         epNum,
+					ID:                 strconv.FormatUint(ourID, 10),
+					EpisodeNum:         strconv.Itoa(epNum),
 					Title:              title,
 					ContainerExtension: ext,
+					Subtitles:          []string{},
 					Added:              "0",
 					Season:             season,
 					Info: xtream.EpisodeInfoOut{
