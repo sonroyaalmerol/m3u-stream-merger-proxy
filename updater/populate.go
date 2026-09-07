@@ -106,6 +106,15 @@ func (instance *Updater) populateSource(ctx context.Context, stubPath, idx strin
 		wg         sync.WaitGroup
 	)
 	fragPath := filepath.Join(config.GetSeriesCacheDirPath(), "frag-"+idx+".m3u")
+	defer func() {
+		valid := make(map[uint64]struct{}, len(stubs))
+		for _, s := range stubs {
+			valid[s.UpstreamID] = struct{}{}
+		}
+		if err := xtream.CompactSeriesFragment(fragPath, valid); err != nil {
+			instance.logger.Errorf("series populate fragment compact failed for %s: %v", idx, err)
+		}
+	}()
 	flush := func() {
 		mu.Lock()
 		if len(fetched) == 0 {
@@ -116,16 +125,15 @@ func (instance *Updater) populateSource(ctx context.Context, stubPath, idx strin
 		for _, e := range fetched {
 			entries = append(entries, e)
 		}
-		// Entries are merged into the fragment file below; dropping them here
-		// bounds this map to one batch instead of the whole 47k-series pass.
+		done := successes
+		// Appending bounds this pass to one batch in RAM; compaction runs
+		// once at pass end instead of rewriting the whole cache every batch.
 		clear(fetched)
 		mu.Unlock()
-		if err := xtream.MutateSeriesFragment(fragPath, func(existing []xtream.FragmentEntry) []xtream.FragmentEntry {
-			return mergeFragmentEntries(existing, entries, stubs)
-		}); err != nil {
+		if err := xtream.AppendSeriesFragment(fragPath, entries); err != nil {
 			instance.logger.Errorf("series populate fragment write failed for %s: %v", idx, err)
 		} else {
-			instance.logger.Logf("Series populate: source %s at %d/%d", idx, len(entries), len(stubs))
+			instance.logger.Logf("Series populate: source %s at %d/%d", idx, done, len(stubs))
 		}
 	}
 
@@ -195,26 +203,4 @@ func (instance *Updater) populateSource(ctx context.Context, stubPath, idx strin
 		instance.logger.Logf("Series populate: source %s done, %d fetched", idx, successes)
 	}
 	return successes
-}
-
-// mergeFragmentEntries keeps only series still in the stub list so dropped shows disappear.
-func mergeFragmentEntries(existing, fetched []xtream.FragmentEntry, stubs []xtream.SeriesStub) []xtream.FragmentEntry {
-	valid := make(map[uint64]struct{}, len(stubs))
-	for _, s := range stubs {
-		valid[s.UpstreamID] = struct{}{}
-	}
-	merged := make(map[uint64]xtream.FragmentEntry, len(existing)+len(fetched))
-	for _, e := range existing {
-		if _, ok := valid[e.UpstreamID]; ok {
-			merged[e.UpstreamID] = e
-		}
-	}
-	for _, e := range fetched {
-		merged[e.UpstreamID] = e
-	}
-	out := make([]xtream.FragmentEntry, 0, len(merged))
-	for _, e := range merged {
-		out = append(out, e)
-	}
-	return out
 }

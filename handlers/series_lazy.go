@@ -273,20 +273,7 @@ func (h *XtreamHTTPHandler) persistLazyFragments(stub *stubSeries, results []fet
 			Lines:      xtream.SeriesToLines(c, stub.Name, stub.Group, res.info),
 		}
 		frag := filepath.Join(config.GetSeriesCacheDirPath(), "frag-"+res.src.Idx+".m3u")
-		err := xtream.MutateSeriesFragment(frag, func(entries []xtream.FragmentEntry) []xtream.FragmentEntry {
-			replaced := false
-			for i := range entries {
-				if entries[i].UpstreamID == entry.UpstreamID {
-					entries[i] = entry
-					replaced = true
-					break
-				}
-			}
-			if !replaced {
-				entries = append(entries, entry)
-			}
-			return entries
-		})
+		err := xtream.AppendSeriesFragment(frag, []xtream.FragmentEntry{entry})
 		if err != nil {
 			h.logger.Warnf("series fragment append failed for %s: %v", res.src.Idx, err)
 		}

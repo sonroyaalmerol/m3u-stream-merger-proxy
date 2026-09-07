@@ -1,6 +1,7 @@
 package xtream
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"fmt"
@@ -118,12 +119,85 @@ func WriteSeriesFragment(path string, entries []FragmentEntry) error {
 
 var fragMu sync.Mutex
 
-// MutateSeriesFragment read-modify-writes a fragment under the lock shared with the background populate loop.
-func MutateSeriesFragment(path string, fn func(entries []FragmentEntry) []FragmentEntry) error {
+// AppendSeriesFragment appends entries under the lock shared with the
+// background populate loop. Replay reads last-wins per ID, so appending is
+// semantically a replace without rewriting the whole cache.
+func AppendSeriesFragment(path string, entries []FragmentEntry) error {
 	fragMu.Lock()
 	defer fragMu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	if err := writeEntries(bufio.NewWriter(f), entries); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// CompactSeriesFragment keeps only the last version of each series (and only
+// IDs present in valid, when non-nil), rewriting the file atomically. Runs
+// once per populate pass, not per batch.
+func CompactSeriesFragment(path string, valid map[uint64]struct{}) error {
+	fragMu.Lock()
+	defer fragMu.Unlock()
+	// A corrupt or missing cache file is treated as empty; the atomic
+	// rewrite below heals it.
 	entries, _ := ReadSeriesFragment(path)
-	return WriteSeriesFragment(path, fn(entries))
+	last := make(map[uint64]FragmentEntry, len(entries))
+	for _, e := range entries {
+		last[e.UpstreamID] = e
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	if err := writeEntries(bufio.NewWriter(f), mapValues(last, valid)); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func writeEntries(w *bufio.Writer, entries []FragmentEntry) error {
+	for _, e := range entries {
+		if _, err := fmt.Fprintf(w, "#XSERIES %d\n", e.UpstreamID); err != nil {
+			return err
+		}
+		for _, l := range e.Lines {
+			if _, err := w.WriteString(l); err != nil {
+				return err
+			}
+			if err := w.WriteByte('\n'); err != nil {
+				return err
+			}
+		}
+	}
+	return w.Flush()
+}
+
+func mapValues(last map[uint64]FragmentEntry, valid map[uint64]struct{}) []FragmentEntry {
+	out := make([]FragmentEntry, 0, len(last))
+	for id, e := range last {
+		if valid != nil {
+			if _, ok := valid[id]; !ok {
+				continue
+			}
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 func ReadSeriesFragment(path string) ([]FragmentEntry, error) {

@@ -54,13 +54,8 @@ func TestSeriesCacheCodecs(t *testing.T) {
 	_, err = ReadSeriesFragment(fragPath)
 	assert.Error(t, err, "bad fragment header must be rejected")
 
-	var mutating []FragmentEntry
-	require.NoError(t, MutateSeriesFragment(fragPath, func(existing []FragmentEntry) []FragmentEntry {
-		mutating = existing
-		return nil
-	}))
-	assert.Nil(t, mutating, "corrupt fragment is treated as empty, not fatal")
+	require.NoError(t, CompactSeriesFragment(fragPath, nil))
 	healed, err := ReadSeriesFragment(fragPath)
 	require.NoError(t, err)
-	assert.Empty(t, healed, "mutate rewrites the corrupt file as a valid empty fragment")
+	assert.Empty(t, healed, "compact rewrites the corrupt file as a valid empty fragment")
 }
