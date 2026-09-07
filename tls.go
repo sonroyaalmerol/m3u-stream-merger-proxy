@@ -12,6 +12,7 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 
 	"m3u-stream-merger/logger"
+	"m3u-stream-merger/utils"
 )
 
 // tlsSetup describes how the main listener serves: static cert pair, autocert
@@ -98,8 +99,8 @@ func (s *tlsSetup) serve() error {
 func (s *tlsSetup) redirectHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		base := s.redirect
-		if b := os.Getenv("BASE_URL"); b != "" {
-			base = strings.TrimSuffix(b, "/")
+		if b := utils.DetermineBaseURL(nil); b != "" {
+			base = b
 		}
 		if base == "" {
 			w.WriteHeader(http.StatusUpgradeRequired)

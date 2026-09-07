@@ -310,7 +310,6 @@ func (p *M3UProcessor) applyNewRemoteFiles() {
 			logger.Default.Errorf("Error committing stream store: %v", err)
 		}
 		p.storeWriter = nil
-		cleanupLegacyStores()
 	}
 }
 

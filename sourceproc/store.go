@@ -1054,13 +1054,6 @@ func (s *StreamStore) Categories(kind string) []CatalogCategory {
 	return out
 }
 
-func (s *StreamStore) CategoryID(kind, group string) uint64 {
-	if group == "" {
-		return 0
-	}
-	return categoryIDFor(catalogKind(kind), group)
-}
-
 func (s *StreamStore) FindStream(id uint64) *CatalogEntry {
 	if err := s.ensureLoaded(); err != nil {
 		return nil
@@ -1180,10 +1173,4 @@ func (s *StreamStore) SeriesInfo(id uint64) *CatalogSeriesEntry {
 		out.Episodes[entry.Season] = append(out.Episodes[entry.Season], entry)
 	}
 	return out
-}
-
-func cleanupLegacyStores() {
-	_ = os.RemoveAll(config.GetStreamsDirPath())
-	_ = os.RemoveAll(config.GetCurrentSlugDirPath())
-	_ = os.RemoveAll(config.GetNewSlugDirPath())
 }
