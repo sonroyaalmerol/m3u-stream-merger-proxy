@@ -3,12 +3,7 @@ package sourceproc
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"testing"
-
-	"m3u-stream-merger/config"
-
-	"github.com/goccy/go-json"
 )
 
 func storeStream(i int) *StreamInfo {
@@ -47,13 +42,13 @@ func buildStore(tb testing.TB, n int) {
 func BenchmarkStreamIngest(b *testing.B) {
 	benchDataDir(b)
 	i := 0
-	var slab streamSlab
+	var parser streamParser
 	b.ReportAllocs()
 	for b.Loop() {
 		i++
 		line := fmt.Sprintf(`#EXTINF:-1 tvg-id="chan.%d.tv" tvg-name="Chan %d" tvg-chno="%d" group-title="Sports",Chan %d`, i, i, i, i)
 		next := &LineDetails{Content: fmt.Sprintf("http://example.com/live/user/pass/%d.ts", i), LineNum: i}
-		_ = slab.parseLine(line, next, "1")
+		_ = parser.parseLine(line, next, "1")
 	}
 }
 
@@ -122,42 +117,23 @@ func TestStreamStoreRoundTrip(t *testing.T) {
 	}
 }
 
-func TestStreamStoreLegacyFallback(t *testing.T) {
+func TestStreamStoreRejectsOldIndex(t *testing.T) {
 	benchDataDir(t)
-
-	slugDir := config.GetCurrentSlugDirPath()
-	if err := os.MkdirAll(slugDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	legacy := &StreamInfo{Title: "Legacy Channel", TvgID: "legacy.tv"}
-	data, err := json.Marshal(legacy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	slug := EncodeSlug(legacy)
-	if err := os.WriteFile(filepath.Join(slugDir, slug), data, 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := defaultStore.Get(slug)
-	if err != nil {
-		t.Fatalf("legacy fallback: %v", err)
-	}
-	if got.Title != "Legacy Channel" || got.TvgID != "legacy.tv" {
-		t.Fatalf("legacy fallback got %+v", got)
-	}
-
 	buildStore(t, 100)
-	if _, err := defaultStore.Get(slug); err == nil {
-		t.Fatal("legacy slug should be gone after rebuild")
+	defaultStore.reset()
+
+	file, err := os.OpenFile(indexPath(1), os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := defaultStore.Get(EncodeSlug(storeStream(50))); err != nil {
-		t.Fatalf("post-rebuild store slug: %v", err)
+	if _, err := file.WriteAt([]byte("M3USTR02"), 0); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(dataPath(1)); err != nil {
-		t.Fatalf("generation 1 data missing: %v", err)
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(dataPath(2)); err == nil {
-		t.Fatal("stale generation not cleaned up")
+	if _, err := defaultStore.Get(EncodeSlug(storeStream(50))); err == nil {
+		t.Fatal("expected old catalog format to be rejected")
 	}
 }

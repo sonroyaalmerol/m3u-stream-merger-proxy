@@ -24,6 +24,7 @@ type StreamInfo struct {
 	URLs        []StreamURL `json:"urls,omitempty"`
 	SourceM3U   string      `json:"source_m3u"`
 	SourceIndex int         `json:"source_index"`
+	backing     []byte
 }
 
 func (s *StreamInfo) AddURL(m3uIndex string, lineNum int, url string) {
@@ -55,4 +56,3 @@ func (s *StreamInfo) URLsForIndex(m3uIndex string) map[string]string {
 
 	return urls
 }
-

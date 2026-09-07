@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,8 @@ import (
 
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
+	"m3u-stream-merger/sourceproc"
+	"m3u-stream-merger/utils"
 	"m3u-stream-merger/xtream"
 
 	"github.com/cespare/xxhash"
@@ -37,16 +40,16 @@ func setupXtreamHandler(t *testing.T) *XtreamHTTPHandler {
 		DataPath: filepath.Join(tempDir, "data"),
 		TempPath: filepath.Join(tempDir, "temp"),
 	})
+	utils.ResetCaches()
 
 	m3uPath := filepath.Join(tempDir, "merged.m3u")
 	require.NoError(t, os.WriteFile(m3uPath, []byte(xtreamTestM3U), 0644))
-	require.NoError(t, xtream.GetCatalog().Rebuild(m3uPath))
+	t.Setenv("M3U_URL_1", "file://"+m3uPath)
+	t.Setenv("BASE_URL", "http://example.com")
 
-	t.Cleanup(func() {
-		_ = os.Unsetenv("CREDENTIALS")
-	})
+	require.NoError(t, sourceproc.NewProcessor().Run(context.Background(), nil))
 
-	_ = os.Setenv("CREDENTIALS", "")
+	t.Setenv("CREDENTIALS", "")
 
 	return NewXtreamHTTPHandler(
 		NewStreamHTTPHandler(NewDefaultProxyInstance(), logger.Default),

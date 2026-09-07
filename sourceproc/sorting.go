@@ -16,12 +16,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 	"unsafe"
 
 	"m3u-stream-merger/config"
 
 	"github.com/cespare/xxhash"
-	"github.com/goccy/go-json"
 )
 
 // spillLayout pins resident fold memory at ~corpus/8 on any core count, capped to stay inside a 1024 FD limit.
@@ -51,6 +51,7 @@ type spillSorter struct {
 	err        error
 	conc       int
 	parts      []*spillPart
+	arenas     chan []byte
 	scratch    sync.Pool
 }
 
@@ -73,6 +74,7 @@ func newSpillSorter() *spillSorter {
 		dir:        dir,
 		conc:       conc,
 		parts:      parts,
+		arenas:     make(chan []byte, conc),
 	}
 	s.scratch.New = func() any {
 		b := make([]byte, 0, 1024)
@@ -86,7 +88,51 @@ func (s *spillSorter) partitionPath(i int) string {
 	return filepath.Join(s.dir, fmt.Sprintf("p%04d.bin", i))
 }
 
-// Add encodes the stream into its hash partition; same-title entries co-locate so fold semantics match one in-memory map.
+func (s *spillSorter) takeArena() []byte {
+	select {
+	case b := <-s.arenas:
+		return b
+	default:
+		return nil
+	}
+}
+
+func (s *spillSorter) putArena(b []byte) {
+	select {
+	case s.arenas <- b[:0]:
+	default:
+	}
+}
+
+func readFileInto(path string, b []byte) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return b, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return b, err
+	}
+	if info.Size() < 0 || info.Size() > int64(^uint(0)>>1) {
+		_ = f.Close()
+		return b, fmt.Errorf("spill partition is too large: %d", info.Size())
+	}
+
+	n := int(info.Size())
+	if cap(b) < n {
+		b = make([]byte, n)
+	} else {
+		b = b[:n]
+	}
+	if _, err := io.ReadFull(f, b); err != nil {
+		_ = f.Close()
+		return b, err
+	}
+
+	return b, f.Close()
+}
+
 func (s *spillSorter) Add(stream *StreamInfo) error {
 	if s.err != nil {
 		return s.err
@@ -94,10 +140,11 @@ func (s *spillSorter) Add(stream *StreamInfo) error {
 
 	bp := s.scratch.Get().(*[]byte)
 	defer s.scratch.Put(bp)
-	*bp = appendStreamInfo((*bp)[:0], stream)
-	rec := *bp
 
-	idx := int(xxhash.Sum64String(sanitizeField(stream.Title)) % uint64(len(s.parts)))
+	sanitized := appendSanitized((*bp)[:0], stream.Title)
+	idx := int(xxhash.Sum64(sanitized) % uint64(len(s.parts)))
+	*bp = appendStreamInfo(sanitized[:0], stream)
+	rec := *bp
 	p := s.parts[idx]
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -132,17 +179,13 @@ type renderedEntry struct {
 // renderBuf is per-worker render scratch, so a rendered entry costs no steady-state allocation.
 type renderBuf struct {
 	m3u  bytes.Buffer
-	rec  bytes.Buffer
-	enc  *json.Encoder
+	rec  []byte
 	slug []byte
 	tvg  []byte
 }
 
 func newRenderBuf() *renderBuf {
-	rb := &renderBuf{slug: make([]byte, 0, slugBufSize)}
-	rb.enc = json.NewEncoder(&rb.rec)
-
-	return rb
+	return &renderBuf{slug: make([]byte, 0, slugBufSize)}
 }
 
 func (s *spillSorter) MergeRendered(render func(*StreamInfo, *renderBuf) renderedEntry, emit func(renderedEntry) error) error {
@@ -239,39 +282,47 @@ func (s *spillSorter) MergeRendered(render func(*StreamInfo, *renderBuf) rendere
 
 // buildRun loads one partition, folds duplicate titles (same semantics as an in-memory map), sorts, writes the rendered run.
 func (s *spillSorter) buildRun(partPath string, render func(*StreamInfo, *renderBuf) renderedEntry) (string, error) {
-	f, err := os.Open(partPath)
+	data, err := readFileInto(partPath, s.takeArena())
+	defer s.putArena(data)
 	if err != nil {
 		return "", err
 	}
+	_ = os.Remove(partPath)
 
-	folded := make(map[string]*StreamInfo)
-	br := bufio.NewReaderSize(f, 1<<16)
-	var (
-		lenBuf [4]byte
-		slab   []StreamInfo
-	)
-	for {
-		if _, err := io.ReadFull(br, lenBuf[:]); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			_ = f.Close()
+	records, totalURLs := 0, 0
+	for rest := data; len(rest) > 0; records++ {
+		if len(rest) < 4 {
+			return "", errShortRecord
+		}
+		n := uint64(binary.LittleEndian.Uint32(rest))
+		if n > uint64(len(rest)-4) {
+			return "", errShortRecord
+		}
+		rec := rest[4 : 4+int(n)]
+		urlCount, err := streamInfoURLCount(rec)
+		if err != nil {
 			return "", err
 		}
-		rec := make([]byte, binary.LittleEndian.Uint32(lenBuf[:]))
-		if _, err := io.ReadFull(br, rec); err != nil {
-			_ = f.Close()
+		totalURLs += urlCount
+		rest = rest[4+int(n):]
+	}
+
+	folded := make(map[string]*StreamInfo, records)
+	infos := make([]StreamInfo, records)
+	urls := make([]StreamURL, totalURLs)
+	off, urlOff := 0, 0
+	for i := range infos {
+		n := int(binary.LittleEndian.Uint32(data[off:]))
+		off += 4
+		rec := data[off : off+n]
+		off += n
+
+		info := &infos[i]
+		used, err := decodeStreamInfoInto(rec, info, urls[urlOff:])
+		if err != nil {
 			return "", err
 		}
-		if len(slab) == 0 {
-			slab = make([]StreamInfo, slabSize)
-		}
-		info := &slab[0]
-		if err := decodeStreamInfo(rec, info); err != nil {
-			_ = f.Close()
-			return "", err
-		}
-		slab = slab[1:]
+		urlOff += used
 
 		key := sanitizeField(info.Title)
 		if old, ok := folded[key]; ok {
@@ -280,8 +331,6 @@ func (s *spillSorter) buildRun(partPath string, render func(*StreamInfo, *render
 			folded[key] = info
 		}
 	}
-	_ = f.Close()
-	_ = os.Remove(partPath)
 
 	entries := make([]sortEntry, 0, len(folded))
 	for _, st := range folded {
@@ -477,7 +526,7 @@ func (r *binReader) raw() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if r.off+int(n) > len(r.b) {
+	if uint64(n) > uint64(len(r.b)-r.off) {
 		return nil, errShortRecord
 	}
 	b := r.b[r.off : r.off+int(n)]
@@ -495,50 +544,83 @@ func (r *binReader) str() (string, error) {
 	return unsafe.String(&b[0], len(b)), nil
 }
 
+func streamInfoURLCount(rec []byte) (int, error) {
+	r := binReader{b: rec}
+	for range 7 {
+		if _, err := r.raw(); err != nil {
+			return 0, err
+		}
+	}
+	if _, err := r.u32(); err != nil {
+		return 0, err
+	}
+	n, err := r.u32()
+	if err != nil {
+		return 0, err
+	}
+	if uint64(n) > uint64(len(rec)-r.off)/12 {
+		return 0, errShortRecord
+	}
+
+	return int(n), nil
+}
+
 // decodeStreamInfo fills s with views into rec, so rec must stay alive as long as s does.
 func decodeStreamInfo(rec []byte, s *StreamInfo) error {
+	_, err := decodeStreamInfoInto(rec, s, nil)
+
+	return err
+}
+
+func decodeStreamInfoInto(rec []byte, s *StreamInfo, urlBuf []StreamURL) (int, error) {
 	r := binReader{b: rec}
 	fields := []*string{&s.Title, &s.TvgID, &s.TvgChNo, &s.TvgType, &s.LogoURL, &s.Group, &s.SourceM3U}
 	for _, f := range fields {
 		v, err := r.str()
 		if err != nil {
-			return err
+			return 0, err
 		}
 		*f = v
 	}
 
 	srcIdx, err := r.u32()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	s.SourceIndex = int(int32(srcIdx))
 
 	n, err := r.u32()
 	if err != nil {
-		return err
+		return 0, err
 	}
-	s.URLs = nil
+	if uint64(n) > uint64(len(rec)-r.off)/12 {
+		return 0, errShortRecord
+	}
 	if n == 0 {
-		return nil
+		s.URLs = nil
+		return 0, nil
 	}
 
-	urls := make([]StreamURL, n)
+	if len(urlBuf) < int(n) {
+		urlBuf = make([]StreamURL, n)
+	}
+	urls := urlBuf[:n:n]
 	for i := range urls {
 		if urls[i].M3UIndex, err = r.str(); err != nil {
-			return err
+			return 0, err
 		}
 		lineNum, err := r.u32()
 		if err != nil {
-			return err
+			return 0, err
 		}
 		urls[i].LineNum = int(int32(lineNum))
 		if urls[i].URL, err = r.str(); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	s.URLs = urls
 
-	return nil
+	return len(urls), nil
 }
 
 type runEntry struct {
@@ -695,6 +777,52 @@ const maxFieldRunes = 100
 
 // sanitizeChars must list every fieldSanitizer key so the fast path only skips true no-ops.
 const sanitizeChars = `/\:*?"<>| `
+
+func appendSanitized(dst []byte, value string) []byte {
+	start := len(dst)
+	for len(value) > 0 {
+		r, size := utf8.DecodeRuneInString(value)
+		raw := value[:size]
+		value = value[size:]
+		if r == ' ' {
+			continue
+		}
+		switch r {
+		case '/', '\\', ':', '*', '?', '"', '<', '>', '|':
+			dst = append(dst, '_')
+		default:
+			dst = append(dst, raw...)
+		}
+	}
+
+	out := dst[start:]
+	if len(out) <= maxFieldRunes {
+		return dst
+	}
+
+	value = unsafe.String(unsafe.SliceData(out), len(out))
+	if utf8.ValidString(value) {
+		n := 0
+		for i := range value {
+			if n == maxFieldRunes {
+				return dst[:start+i]
+			}
+			n++
+		}
+		return dst
+	}
+
+	runes := []rune(value)
+	if len(runes) <= maxFieldRunes {
+		return dst
+	}
+	dst = dst[:start]
+	for _, r := range runes[:maxFieldRunes] {
+		dst = utf8.AppendRune(dst, r)
+	}
+
+	return dst
+}
 
 func sanitizeField(value string) string {
 	sanitized := value

@@ -7,9 +7,7 @@ import (
 	"m3u-stream-merger/handlers"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/sourceproc"
-	"m3u-stream-merger/xtream"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -49,7 +47,6 @@ func Initialize(ctx context.Context, logger logger.Logger, m3uHandler *handlers.
 
 		if err == nil {
 			m3uHandler.SetProcessedPath(latestM3u)
-			rebuildXtreamCatalog(logger, filepath.Join(config.GetProcessedDirPath(), latestM3u))
 		}
 
 		// Restore EPG path if a previously merged file exists.
@@ -128,7 +125,6 @@ func (instance *Updater) UpdateM3USources(ctx context.Context) {
 		}
 		if err := processor.Run(ctx, nil); err == nil {
 			instance.m3uHandler.SetProcessedPath(processor.GetResultPath())
-			rebuildXtreamCatalog(instance.logger, processor.GetResultPath())
 		}
 
 		// When EPG is on the same schedule, run it inline so the freshly
@@ -162,14 +158,5 @@ func (instance *Updater) runEPG(ctx context.Context) {
 		instance.logger.Warnf("EPG update failed (non-fatal): %v", err)
 	} else {
 		instance.epgHandler.SetProcessedPath(config.GetEPGPath())
-	}
-}
-
-func rebuildXtreamCatalog(logger logger.Logger, path string) {
-	if path == "" {
-		return
-	}
-	if err := xtream.GetCatalog().Rebuild(path); err != nil {
-		logger.Warnf("Xtream catalog rebuild failed (non-fatal): %v", err)
 	}
 }

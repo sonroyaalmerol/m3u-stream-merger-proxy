@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bufio"
 	"encoding/base64"
 	"encoding/xml"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
+	"m3u-stream-merger/sourceproc"
 	"m3u-stream-merger/utils"
 	"m3u-stream-merger/xtream"
 
@@ -24,7 +26,7 @@ import (
 
 type XtreamHTTPHandler struct {
 	logger        logger.Logger
-	catalog       *xtream.Catalog
+	catalog       *sourceproc.StreamStore
 	auth          *CredentialsAuth
 	streamHandler *StreamHTTPHandler
 }
@@ -32,7 +34,7 @@ type XtreamHTTPHandler struct {
 func NewXtreamHTTPHandler(streamHandler *StreamHTTPHandler, logger logger.Logger) *XtreamHTTPHandler {
 	return &XtreamHTTPHandler{
 		logger:        logger,
-		catalog:       xtream.GetCatalog(),
+		catalog:       sourceproc.GetStreamStore(),
 		auth:          NewCredentialsAuth(logger),
 		streamHandler: streamHandler,
 	}
@@ -69,11 +71,11 @@ func (h *XtreamHTTPHandler) ServePlayerAPI(w http.ResponseWriter, r *http.Reques
 	case "":
 		h.writeJSON(w, h.rootResponse(r, query.Get("username"), query.Get("password")))
 	case "get_live_categories":
-		h.writeJSON(w, h.catalog.Categories(xtream.TypeLive))
+		h.writeJSON(w, h.categories(xtream.TypeLive))
 	case "get_vod_categories":
-		h.writeJSON(w, h.catalog.Categories(xtream.TypeMovie))
+		h.writeJSON(w, h.categories(xtream.TypeMovie))
 	case "get_series_categories":
-		h.writeJSON(w, h.catalog.Categories(xtream.TypeSeries))
+		h.writeJSON(w, h.categories(xtream.TypeSeries))
 	case "get_live_streams":
 		h.writeJSON(w, h.liveStreams(categoryID))
 	case "get_vod_streams":
@@ -122,9 +124,9 @@ func (h *XtreamHTTPHandler) ServePanelAPI(w http.ResponseWriter, r *http.Request
 		UserInfo:   root.UserInfo,
 		ServerInfo: root.ServerInfo,
 		Categories: map[string][]xtream.RawCategory{
-			xtream.TypeLive:   h.catalog.Categories(xtream.TypeLive),
-			xtream.TypeMovie:  h.catalog.Categories(xtream.TypeMovie),
-			xtream.TypeSeries: h.catalog.Categories(xtream.TypeSeries),
+			xtream.TypeLive:   h.categories(xtream.TypeLive),
+			xtream.TypeMovie:  h.categories(xtream.TypeMovie),
+			xtream.TypeSeries: h.categories(xtream.TypeSeries),
 		},
 		AvailableChannels: channels,
 	})
@@ -187,20 +189,30 @@ func (h *XtreamHTTPHandler) rootResponse(r *http.Request, user, pass string) xtr
 	}
 }
 
-func num(i int) int { return i + 1 }
-
 const (
 	shortEPGLimit  = 4
 	dataTableLimit = 1000
 )
 
+func (h *XtreamHTTPHandler) categories(kind string) []xtream.RawCategory {
+	categories := h.catalog.Categories(kind)
+	out := make([]xtream.RawCategory, 0, len(categories))
+	for _, category := range categories {
+		out = append(out, xtream.RawCategory{
+			CategoryID:   jsonNumber(category.ID),
+			CategoryName: category.Name,
+			ParentID:     "0",
+		})
+	}
+	return out
+}
+
 func (h *XtreamHTTPHandler) liveStreams(categoryID uint64) []xtream.LiveStreamOut {
-	entries := h.catalog.Live(categoryID)
-	out := make([]xtream.LiveStreamOut, 0, len(entries))
-	for i, e := range entries {
-		catID := jsonNumber(h.catalog.CategoryID(xtream.TypeLive, e.Group))
+	var out []xtream.LiveStreamOut
+	_ = h.catalog.RangeEntries(xtream.TypeLive, categoryID, func(position int, e sourceproc.CatalogEntry) bool {
+		catID := jsonNumber(e.CategoryID)
 		out = append(out, xtream.LiveStreamOut{
-			Num:          num(i),
+			Num:          position,
 			Name:         e.Title,
 			StreamType:   xtream.TypeLive,
 			StreamID:     jsonNumber(e.StreamID),
@@ -211,17 +223,17 @@ func (h *XtreamHTTPHandler) liveStreams(categoryID uint64) []xtream.LiveStreamOu
 			CategoryID:   catID,
 			CategoryIDs:  []json.Number{catID},
 		})
-	}
+		return true
+	})
 	return out
 }
 
 func (h *XtreamHTTPHandler) vodStreams(categoryID uint64) []xtream.VodStreamOut {
-	entries := h.catalog.Vod(categoryID)
-	out := make([]xtream.VodStreamOut, 0, len(entries))
-	for i, e := range entries {
-		catID := jsonNumber(h.catalog.CategoryID(xtream.TypeMovie, e.Group))
+	var out []xtream.VodStreamOut
+	_ = h.catalog.RangeEntries(xtream.TypeMovie, categoryID, func(position int, e sourceproc.CatalogEntry) bool {
+		catID := jsonNumber(e.CategoryID)
 		out = append(out, xtream.VodStreamOut{
-			Num:                num(i),
+			Num:                position,
 			Name:               e.Title,
 			StreamType:         xtream.TypeMovie,
 			StreamID:           jsonNumber(e.StreamID),
@@ -232,17 +244,17 @@ func (h *XtreamHTTPHandler) vodStreams(categoryID uint64) []xtream.VodStreamOut 
 			CategoryIDs:        []json.Number{catID},
 			ContainerExtension: containerExt(e.Ext, "mp4"),
 		})
-	}
+		return true
+	})
 	return out
 }
 
 func (h *XtreamHTTPHandler) seriesList(categoryID uint64) []xtream.SeriesOut {
-	series := h.catalog.SeriesList(categoryID)
-	out := make([]xtream.SeriesOut, 0, len(series))
-	for i, sd := range series {
-		catID := jsonNumber(h.catalog.CategoryID(xtream.TypeSeries, sd.Group))
+	var out []xtream.SeriesOut
+	_ = h.catalog.RangeSeries(categoryID, func(position int, sd sourceproc.CatalogSeriesEntry) bool {
+		catID := jsonNumber(sd.CategoryID)
 		out = append(out, xtream.SeriesOut{
-			Num:          num(i),
+			Num:          position,
 			Name:         sd.Name,
 			SeriesID:     jsonNumber(sd.SeriesID),
 			Cover:        sd.Cover,
@@ -251,7 +263,8 @@ func (h *XtreamHTTPHandler) seriesList(categoryID uint64) []xtream.SeriesOut {
 			CategoryID:   catID,
 			CategoryIDs:  []json.Number{catID},
 		})
-	}
+		return true
+	})
 	return out
 }
 
@@ -277,7 +290,7 @@ func (h *XtreamHTTPHandler) seriesInfo(id uint64) *xtream.SeriesInfoOut {
 	info.Info.Cover = sd.Cover
 	info.Info.Genre = sd.Group
 	info.Info.BackdropPath = []string{}
-	info.Info.CategoryID = strconv.FormatUint(h.catalog.CategoryID(xtream.TypeSeries, sd.Group), 10)
+	info.Info.CategoryID = strconv.FormatUint(sd.CategoryID, 10)
 
 	seasons := make([]int, 0, len(sd.Episodes))
 	for season := range sd.Episodes {
@@ -321,7 +334,7 @@ func (h *XtreamHTTPHandler) vodInfo(id uint64) xtream.VodInfoOut {
 		return xtream.VodInfoOut{}
 	}
 
-	catID := jsonNumber(h.catalog.CategoryID(xtream.TypeMovie, e.Group))
+	catID := jsonNumber(e.CategoryID)
 	ext := containerExt(e.Ext, "mp4")
 
 	return xtream.VodInfoOut{
@@ -487,54 +500,52 @@ func (h *XtreamHTTPHandler) ServeGetPHP(w http.ResponseWriter, r *http.Request) 
 	query := r.URL.Query()
 	user, pass := query.Get("username"), query.Get("password")
 	baseURL := utils.DetermineBaseURL(r)
-
 	liveExt := ".ts"
 	if query.Get("output") == "m3u8" {
 		liveExt = ".m3u8"
 	}
 
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "#EXTM3U x-tvg-url=\"%s/xmltv.php?username=%s&password=%s\"\n", baseURL, user, pass)
+	w.Header().Set("Content-Type", "application/x-mpegurl")
+	out := bufio.NewWriterSize(w, 64<<10)
+	if _, err := fmt.Fprintf(out, "#EXTM3U x-tvg-url=\"%s/xmltv.php?username=%s&password=%s\"\n", baseURL, user, pass); err != nil {
+		return
+	}
 
-	appendEntry := func(e *xtream.Entry, urlPath string) {
-		attrs := ""
+	appendEntry := func(e sourceproc.CatalogEntry, streamType, ext string) bool {
+		if _, err := fmt.Fprint(out, "#EXTINF:-1"); err != nil {
+			return false
+		}
 		if e.TvgID != "" {
-			attrs += fmt.Sprintf(` tvg-id="%s"`, e.TvgID)
-		}
-		if e.Logo != "" {
-			attrs += fmt.Sprintf(` tvg-logo="%s"`, e.Logo)
-		}
-		if e.Group != "" {
-			attrs += fmt.Sprintf(` tvg-group="%s" group-title="%s"`, e.Group, e.Group)
-		}
-		fmt.Fprintf(&sb, "#EXTINF:-1%s,%s\n", attrs, e.Title)
-		fmt.Fprintf(&sb, "%s/%s\n", baseURL, urlPath)
-	}
-
-	for _, e := range h.catalog.Live(0) {
-		appendEntry(e, fmt.Sprintf("live/%s/%s/%d%s", user, pass, e.StreamID, liveExt))
-	}
-	for _, e := range h.catalog.Vod(0) {
-		ext := strings.TrimPrefix(e.Ext, ".")
-		if ext == "" {
-			ext = "mp4"
-		}
-		appendEntry(e, fmt.Sprintf("movie/%s/%s/%d.%s", user, pass, e.StreamID, ext))
-	}
-	for _, sd := range h.catalog.SeriesList(0) {
-		for _, episodes := range sd.Episodes {
-			for _, ep := range episodes {
-				ext := strings.TrimPrefix(ep.Ext, ".")
-				if ext == "" {
-					ext = "mkv"
-				}
-				appendEntry(ep, fmt.Sprintf("series/%s/%s/%d.%s", user, pass, ep.StreamID, ext))
+			if _, err := fmt.Fprintf(out, ` tvg-id="%s"`, e.TvgID); err != nil {
+				return false
 			}
 		}
+		if e.Logo != "" {
+			if _, err := fmt.Fprintf(out, ` tvg-logo="%s"`, e.Logo); err != nil {
+				return false
+			}
+		}
+		if e.Group != "" {
+			if _, err := fmt.Fprintf(out, ` tvg-group="%s" group-title="%s"`, e.Group, e.Group); err != nil {
+				return false
+			}
+		}
+		if _, err := fmt.Fprintf(out, ",%s\n%s/%s/%s/%s/%d%s\n", e.Title, baseURL, streamType, user, pass, e.StreamID, ext); err != nil {
+			return false
+		}
+		return true
 	}
 
-	w.Header().Set("Content-Type", "application/x-mpegurl")
-	_, _ = w.Write([]byte(sb.String()))
+	_ = h.catalog.RangeEntries(xtream.TypeLive, 0, func(_ int, e sourceproc.CatalogEntry) bool {
+		return appendEntry(e, "live", liveExt)
+	})
+	_ = h.catalog.RangeEntries(xtream.TypeMovie, 0, func(_ int, e sourceproc.CatalogEntry) bool {
+		return appendEntry(e, "movie", "."+containerExt(e.Ext, "mp4"))
+	})
+	_ = h.catalog.RangeEntries(xtream.TypeSeries, 0, func(_ int, e sourceproc.CatalogEntry) bool {
+		return appendEntry(e, "series", "."+containerExt(e.Ext, "mkv"))
+	})
+	_ = out.Flush()
 }
 
 func (h *XtreamHTTPHandler) ServeXMLTV(w http.ResponseWriter, r *http.Request) {

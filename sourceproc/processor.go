@@ -189,9 +189,9 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 		for range numWorkers {
 			go func() {
 				defer wgWorkers.Done()
-				var slab streamSlab
+				var parser streamParser
 				for ps := range streamCh {
-					stream := slab.parseLine(ps.extinf, &ps.urlLine, ps.m3uIndex)
+					stream := parser.parseLine(ps.extinf, &ps.urlLine, ps.m3uIndex)
 					if stream == nil || !checkFilter(stream) {
 						continue
 					}
@@ -246,25 +246,22 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 		p.markCriticalError(err)
 		return
 	}
+	storeWriter.reserve(int(p.streamCount.Load()))
 	p.storeWriter = storeWriter
 
 	p.tvgIDs = make(map[string]struct{})
 
 	render := func(entry *StreamInfo, rb *renderBuf) renderedEntry {
 		rb.m3u.Reset()
-		rb.rec.Reset()
 
 		key, sum := slugParts(entry.Title)
+		rb.rec = appendCatalogRecord(rb.rec[:0], sum, entry)
 		if err := writeStreamEntry(&rb.m3u, baseURL, sum, entry, rb.slug); err != nil {
 			p.markCriticalError(err)
 		}
-		if err := rb.enc.Encode(entry); err != nil {
-			p.markCriticalError(err)
-			rb.rec.Reset()
-		}
 		rb.tvg = append(rb.tvg[:0], entry.TvgID...)
 
-		return renderedEntry{storeKey: key, m3u: rb.m3u.Bytes(), storeRec: rb.rec.Bytes(), tvgID: rb.tvg}
+		return renderedEntry{storeKey: key, m3u: rb.m3u.Bytes(), storeRec: rb.rec, tvgID: rb.tvg}
 	}
 	emit := func(re renderedEntry) error {
 		if _, err := p.writer.Write(re.m3u); err != nil {

@@ -3,6 +3,7 @@ package sourceproc
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"m3u-stream-merger/config"
@@ -45,6 +46,21 @@ func TestStreamInfoCodecRoundTrip(t *testing.T) {
 	}
 	if empty.URLs != nil {
 		t.Fatalf("empty URLs decoded as %v", empty.URLs)
+	}
+}
+
+func TestAppendSanitizedMatchesSanitizeField(t *testing.T) {
+	for _, value := range []string{
+		"",
+		"normal",
+		`a b/c\d:e*f?g"h<i>j|k`,
+		strings.Repeat("\u00e9", 101),
+		strings.Repeat(" ", 120) + "kept",
+		strings.Repeat(string([]byte{0xff}), 120) + "x",
+	} {
+		if got, want := string(appendSanitized(nil, value)), sanitizeField(value); got != want {
+			t.Fatalf("sanitize mismatch: got %q, want %q", got, want)
+		}
 	}
 }
 

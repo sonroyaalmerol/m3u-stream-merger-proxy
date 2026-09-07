@@ -37,43 +37,23 @@ func forEachAttr(s string, fn func(key, val string)) {
 	}
 }
 
-const (
-	slabSize    = 256
-	slugBufSize = 48
-)
+const slugBufSize = 48
 
-// streamSlab batches per-stream allocations so a worker pays one make per slabSize lines.
-type streamSlab struct {
-	streams []StreamInfo
-	urls    []StreamURL
-}
-
-func (a *streamSlab) newStream() *StreamInfo {
-	if len(a.streams) == 0 {
-		a.streams = make([]StreamInfo, slabSize)
-	}
-	s := &a.streams[0]
-	a.streams = a.streams[1:]
-
-	// Capped at one so a later merge append reallocates instead of writing into the next slab entry.
-	if len(a.urls) == 0 {
-		a.urls = make([]StreamURL, slabSize)
-	}
-	s.URLs = a.urls[0:0:1]
-	a.urls = a.urls[1:]
-
-	return s
+type streamParser struct {
+	stream StreamInfo
+	url    [1]StreamURL
 }
 
 func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo {
-	var slab streamSlab
-	return slab.parseLine(line, nextLine, m3uIndex)
+	var parser streamParser
+	return parser.parseLine(line, nextLine, m3uIndex)
 }
 
-// parseLine parses a single M3U line into a StreamInfo
-func (a *streamSlab) parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo {
+// parseLine parses a single M3U line into a StreamInfo.
+func (p *streamParser) parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo {
 	cleanUrl := strings.TrimSpace(nextLine.Content)
-	stream := a.newStream()
+	p.stream = StreamInfo{URLs: p.url[:0]}
+	stream := &p.stream
 
 	forEachAttr(line, func(key, value string) {
 		value = strings.TrimSpace(value)

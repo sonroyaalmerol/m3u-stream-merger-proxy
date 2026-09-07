@@ -2,6 +2,12 @@ package xtream
 
 import "encoding/json"
 
+const (
+	TypeLive   = "live"
+	TypeMovie  = "movie"
+	TypeSeries = "series"
+)
+
 type RawCategory struct {
 	CategoryID   json.Number `json:"category_id"`
 	CategoryName string      `json:"category_name"`

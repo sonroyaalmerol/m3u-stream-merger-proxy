@@ -15,14 +15,7 @@ func benchDataDir(b testing.TB) {
 	config.SetConfig(&config.Config{DataPath: dir, TempPath: dir})
 	b.Cleanup(func() { config.SetConfig(prev) })
 
-	defaultStore.mu.Lock()
-	defaultStore.loaded = false
-	if defaultStore.data != nil {
-		_ = defaultStore.data.Close()
-		defaultStore.data = nil
-	}
-	defaultStore.index = nil
-	defaultStore.mu.Unlock()
+	defaultStore.reset()
 }
 
 func benchStream(i int) *StreamInfo {
