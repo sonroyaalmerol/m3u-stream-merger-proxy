@@ -6,11 +6,6 @@
 [![All Contributors](https://img.shields.io/badge/all_contributors-5-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
-> [!NOTE]
-> This project is now in **maintenance mode**. It is feature-complete and no major new features are planned.
-> Bug fixes, dependency updates, and compatibility patches will still be accepted.
-> Feature requests are welcome but will be evaluated on a case-by-case basis.
-
 Streamline your IPTV experience by consolidating multiple M3U playlists into a single source with the blazingly fast 🔥 and lightweight M3U Stream Merger Proxy. This service acts as a modern HTTP proxy server, effortlessly merging and streaming content from various M3U sources.
 
 > [!IMPORTANT]
@@ -122,12 +117,13 @@ Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
 
 ### Container Configs
 
-| ENV VAR | Description                                         | Default Value | Possible Values                                  |
-| ------- | --------------------------------------------------- | ------------- | ------------------------------------------------ |
-| PORT    | Set listening port of service inside the container. | 8080          | Any valid port                                   |
-| PUID    | Set UID of user running the container.              | 1000          | Any valid UID                                    |
-| PGID    | Set GID of user running the container.              | 1000          | Any valid GID                                    |
-| TZ      | Set timezone                                        | Etc/UTC       | [TZ Identifiers](https://nodatime.org/TimeZones) |
+| ENV VAR    | Description                                                                                                                                                                                | Default Value              | Possible Values                                  |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------- | ------------------------------------------------ |
+| PORT       | Set listening port of service inside the container.                                                                                                                                        | 8080                       | Any valid port                                   |
+| PUID       | Set UID of user running the container.                                                                                                                                                     | 1000                       | Any valid UID                                    |
+| PGID       | Set GID of user running the container.                                                                                                                                                     | 1000                       | Any valid GID                                    |
+| TZ         | Set timezone                                                                                                                                                                               | Etc/UTC                    | [TZ Identifiers](https://nodatime.org/TimeZones) |
+| GOMEMLIMIT | Cap the Go runtime soft memory limit to avoid OOM kills in memory-limited containers. When unset, the proxy auto-detects the cgroup/container memory limit and caps the heap at 90% of it. | auto (90% of cgroup limit) | Any Go memory size (e.g. `400MiB`)               |
 
 ### TLS Configs
 
@@ -174,15 +170,15 @@ services:
 
 ### Playlist Source Configs
 
-| ENV VAR                                                             | Description                                                   | Default Value                                      | Possible Values           |
-| ------------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------- | ------------------------- |
-| M3U_URL_1, M3U_URL_2, M3U_URL_X                                     | Set M3U URLs as environment variables.                        | N/A                                                | Any valid M3U URLs        |
-| M3U_MAX_CONCURRENCY_1, M3U_MAX_CONCURRENCY_2, M3U_MAX_CONCURRENCY_X | Set max concurrency. The "X" should match the M3U URL.        | 1                                                  | Any integer               |
-| USER_AGENT                                                          | Set the User-Agent of HTTP requests.                          | IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00) | Any valid user agent      |
-| HTTP_ACCEPT                                                         | Set the Accept header of HTTP requests.                       | video/MP2T, _/_                                    | Any valid Accept value    |
-| SYNC_CRON                                                           | Set cron schedule expression of the background updates.       | 0 0 * * *                                          | Any valid cron expression |
-| SYNC_ON_BOOT                                                        | Set if an initial background syncing will be executed on boot | true                                               | true/false                |
-| CLEAR_ON_BOOT                                                       | Set if an initial database clearing will be executed on boot  | false                                              | true/false                |
+| ENV VAR                                                             | Description                                                                      | Default Value                                      | Possible Values           |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------- |
+| M3U_URL_1, M3U_URL_2, M3U_URL_X                                     | Set M3U URLs as environment variables.                                           | N/A                                                | Any valid M3U URLs        |
+| M3U_MAX_CONCURRENCY_1, M3U_MAX_CONCURRENCY_2, M3U_MAX_CONCURRENCY_X | Set max concurrency. The "X" should match the M3U URL.                           | 1                                                  | Any integer               |
+| USER_AGENT                                                          | Set the User-Agent of HTTP requests.                                             | IPTV Smarters/1.0.3 (iPad; iOS 16.6.1; Scale/2.00) | Any valid user agent      |
+| HTTP_ACCEPT                                                         | Set the Accept header of HTTP requests.                                          | video/MP2T, _/_                                    | Any valid Accept value    |
+| SYNC_CRON                                                           | Set cron schedule expression of the background updates.                          | 0 0 * * *                                          | Any valid cron expression |
+| SYNC_ON_BOOT                                                        | Set if an initial background syncing will be executed on boot                    | true                                               | true/false                |
+| CLEAR_ON_BOOT                                                       | Set if the current stream cache should be cleared on boot before the first sync. | false                                              | true/false                |
 
 ### Xtream Source Configs
 
@@ -223,6 +219,7 @@ Xtream Codes providers can be used as sources directly alongside (or instead of)
 > - **Freezes for a few seconds, then resumes or fails over** - the upstream stall outlasted the shared buffer, which only bridges `BUFFER_CHUNK_NUM x 1 MiB / stream bitrate` seconds (defaults: ~11s for a 6 Mbps channel). Raise `BUFFER_CHUNK_NUM` or lower `STREAM_TIMEOUT` so failover fires before the buffer runs dry.
 > - **Streams marked down while they still play fine in a player like VLC** - `MINIMUM_THROUGHPUT` is set too high for the channel's real bitrate. Lower it.
 > - **Failover kicks in too often (source flapping)** - raise `STREAM_TIMEOUT` or `MAX_RETRIES`, but keep `STREAM_TIMEOUT` below the buffer's bridging time or freezes return.
+> - **Stream loops back to an earlier scene or reconnects every 30-60s** - the source pumps several times faster than realtime; once the player's cache fills it pauses reading long enough to lap the ring (see `reader lagged behind` logs). Set `ENABLE_PCR_PACER=true` so the proxy paces upstream reads to ~1x realtime, and raise `BUFFER_CHUNK_NUM` if the warning log suggests it.
 > - **Logs show `reader lagged behind by N chunks; rejoining at live edge`** - that client is consuming slower than the stream produces, so it is skipping forward to keep up. The bottleneck is on the client side (player, Wi-Fi, device); raising `BUFFER_CHUNK_NUM` only delays the skip, it cannot prevent it.
 
 ### Playlist Output (`/playlist.m3u`) Configs
@@ -262,7 +259,7 @@ The proxy works in both directions with the Xtream Codes API:
    - Username/password: any credentials configured in `CREDENTIALS` (leave unset to disable auth).
    - Note: the Xtream protocol sends credentials in plaintext URLs, so enable TLS (see [TLS Configs](#tls-configs)) or put a TLS-terminating reverse proxy in front when exposing the proxy to the internet.
 
-   Supported client actions on `/player_api.php`: `get_live_categories`, `get_live_streams`, `get_vod_categories`, `get_vod_streams`, `get_series_categories`, `get_series`, `get_series_info`, `get_vod_info`, `get_short_epg`. Playback uses `/live/{user}/{pass}/{id}.ts`, `/movie/{user}/{pass}/{id}.{ext}` and `/series/{user}/{pass}/{id}.{ext}`. `/get.php?type=m3u_plus` exports the whole merged catalog as an Xtream-style M3U and `/xmltv.php` serves the merged XMLTV EPG.
+   Supported client actions on `/player_api.php`: `get_live_categories`, `get_live_streams`, `get_vod_categories`, `get_vod_streams`, `get_series_categories`, `get_series`, `get_series_info`, `get_vod_info`, `get_short_epg`, `get_simple_data_table`. Playback uses `/live/{user}/{pass}/{id}.ts`, `/movie/{user}/{pass}/{id}.{ext}` and `/series/{user}/{pass}/{id}.{ext}`. `/get.php?type=m3u_plus` exports the whole merged catalog as an Xtream-style M3U and `/xmltv.php` serves the merged XMLTV EPG.
 
    Streams are classified as live, movie or series from the source `tvg-type` attribute (set automatically for Xtream ingested sources) or the original URL path (`live/`, `movie/`, `series/`), defaulting to live. Series episodes are detected by `SxxExx` title patterns (e.g. `Show S01E02`), grouped into series by show name. Stream IDs are stable hashes of the stream title.
 
