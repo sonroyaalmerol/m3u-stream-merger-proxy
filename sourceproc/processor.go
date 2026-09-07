@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
@@ -48,20 +48,46 @@ func NewProcessor() *M3UProcessor {
 	return processor
 }
 
+var progressInterval = 5 * time.Second
+
 func (p *M3UProcessor) Start(r *http.Request) {
-	processCount := 0
+	start := time.Now()
 	errors := p.processStreams(r)
+
+	done := make(chan struct{})
+	go p.reportProgress(start, done)
+
 	for err := range errors {
 		if err != nil {
 			logger.Default.Errorf("Error while processing stream: %v", err)
 		}
-		processCount++
-		batch := min(max(int(math.Pow(10, math.Floor(math.Log10(float64(processCount))))), 100), 10000)
-		if processCount%batch == 0 {
-			logger.Default.Logf("Processed %d streams so far", processCount)
+	}
+	close(done)
+
+	total := p.streamCount.Load()
+	elapsed := time.Since(start).Seconds()
+	logger.Default.Logf("Ingest complete: %d streams in %.1fs (%.0f streams/s)", total, elapsed, float64(total)/max(elapsed, 0.001))
+}
+
+func (p *M3UProcessor) reportProgress(start time.Time, done <-chan struct{}) {
+	ticker := time.NewTicker(progressInterval)
+	defer ticker.Stop()
+	last := int64(-1)
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			n := p.streamCount.Load()
+			elapsed := time.Since(start).Seconds()
+			if n == last {
+				logger.Default.Logf("Processed %d streams so far (%.0fs elapsed, no new streams in %s)", n, elapsed, progressInterval)
+				continue
+			}
+			logger.Default.Logf("Processed %d streams so far (%.0fs elapsed)", n, elapsed)
+			last = n
 		}
 	}
-	logger.Default.Logf("Completed processing %d total streams", processCount)
 }
 
 func (p *M3UProcessor) Wait(ctx context.Context) error {
@@ -199,6 +225,7 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 
 		wgWorkers.Wait()
 
+		logger.Default.Logf("Parsing complete: %d streams accepted, compiling playlist", p.streamCount.Load())
 		p.compileM3U(baseURL)
 	}()
 

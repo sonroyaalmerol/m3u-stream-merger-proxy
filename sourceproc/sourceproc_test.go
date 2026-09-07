@@ -537,3 +537,28 @@ func TestMergeAttributesToM3UFile(t *testing.T) {
 	assert.Contains(t, contentStr, `tvg-type="type-2"`, "Should contain tvg-type from merged attributes")
 	assert.Contains(t, contentStr, `tvg-logo="http://example.com/a/aHR0cDovL2xvZ28vc291cmNlNC5wbmc="`, "Should contain tvg-logo from merged attributes")
 }
+
+func TestReportProgressTerminates(t *testing.T) {
+	old := progressInterval
+	progressInterval = 2 * time.Millisecond
+	t.Cleanup(func() { progressInterval = old })
+
+	p := &M3UProcessor{}
+
+	done := make(chan struct{})
+	exited := make(chan struct{})
+	go func() {
+		p.reportProgress(time.Now(), done)
+		close(exited)
+	}()
+
+	p.streamCount.Add(42)
+	time.Sleep(10 * time.Millisecond)
+	close(done)
+
+	select {
+	case <-exited:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reportProgress did not exit after done was closed")
+	}
+}
