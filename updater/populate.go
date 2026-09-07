@@ -108,10 +108,17 @@ func (instance *Updater) populateSource(ctx context.Context, stubPath, idx strin
 	fragPath := filepath.Join(config.GetSeriesCacheDirPath(), "frag-"+idx+".m3u")
 	flush := func() {
 		mu.Lock()
+		if len(fetched) == 0 {
+			mu.Unlock()
+			return
+		}
 		entries := make([]xtream.FragmentEntry, 0, len(fetched))
 		for _, e := range fetched {
 			entries = append(entries, e)
 		}
+		// Entries are merged into the fragment file below; dropping them here
+		// bounds this map to one batch instead of the whole 47k-series pass.
+		clear(fetched)
 		mu.Unlock()
 		if err := xtream.MutateSeriesFragment(fragPath, func(existing []xtream.FragmentEntry) []xtream.FragmentEntry {
 			return mergeFragmentEntries(existing, entries, stubs)
