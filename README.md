@@ -62,7 +62,7 @@ Uses the channel title or `tvg-name` (as fallback) to merge multiple identical c
    - Modify M3U URLs, update intervals, and other configurations in the `.env` file.
 
 7. **Shared buffer without ffmpeg:**
-   - Apps like xTeVe/Threadfin commonly uses third-party projects such as ffmpeg to consolidate connections for each channel. It does work well, but it adds up a lot of weight considering the size and complexity of ffmpeg. This proxy uses common patterns used by other stream proxies such as Nginx to distribute single input stream of data to multiple clients without any video encoding/decoding. See [here](#how-does-the-shared-buffer-work) for more information.
+   - Apps like xTeVe/Threadfin commonly uses third-party projects such as ffmpeg to consolidate connections for each channel. It does work well, but it adds up a lot of weight considering the size and complexity of ffmpeg. This proxy uses common patterns used by other stream proxies such as Nginx to distribute single input stream of data to multiple clients without any video encoding/decoding. See the [streaming docs](docs/streaming.md) for more information.
 
 ## Prerequisites
 
@@ -210,7 +210,7 @@ Xtream Codes providers can be used as sources directly alongside (or instead of)
 | RETRY_WAIT         | Set a wait time before retrying (looping) across all M3Us on stream initialization error.                                                                                                                                                                                                                  | 0             | Any integer greater than or equal 0 |
 | STREAM_TIMEOUT     | How long (in seconds) to retry a failing or stalled source before the proxy considers the stream down and fails over to the next M3U. Raise it if streams switch sources too eagerly; lower it if dead streams take too long to fail over. Keep it below the buffer's stall-bridging time (see tip below). | 3             | Any positive integer greater than 0 |
 | MINIMUM_THROUGHPUT | Minimum bytes per second a source must sustain (rolling 2-second window) to stay healthy; fall below it and the stream is considered down. Lower it if healthy but slow streams get cut off; raise it to drop degrading sources sooner. 0 disables the check.                                              | 0             | 0 or any positive integer           |
-| BUFFER_CHUNK_NUM   | Number of 1 MiB chunk "containers" in the **shared buffer** that bridges upstream stalls for all clients of a stream. See [here](#how-does-the-shared-buffer-work) for more information. If streams freeze briefly when the provider hiccups, raise this to bridge longer stalls (costs more memory).      | 8             | Any integer greater than or equal 2 |
+| BUFFER_CHUNK_NUM   | Number of 1 MiB chunk "containers" in the **shared buffer** that bridges upstream stalls for all clients of a stream. See the [streaming docs](docs/streaming.md) for more information. If streams freeze briefly when the provider hiccups, raise this to bridge longer stalls (costs more memory).      | 8             | Any integer greater than or equal 2 |
 | ENABLE_PCR_PACER   | Pace live TS reads from upstream to the stream's own program clock (~1x realtime) instead of reading as fast as the source sends. Enable when a source pumps much faster than realtime and players that pause reading (cache full) make the stream loop back or reconnect. Costs a small initial latency.  | false         | Boolean (true/false, 1/0)           |
 
 > [!TIP]
@@ -263,41 +263,13 @@ The proxy works in both directions with the Xtream Codes API:
 
    Streams are classified as live, movie or series from the source `tvg-type` attribute (set automatically for Xtream ingested sources) or the original URL path (`live/`, `movie/`, `series/`), defaulting to live. Series episodes are detected by `SxxExx` title patterns (e.g. `Show S01E02`), grouped into series by show name. Stream IDs are stable hashes of the stream title.
 
-## How does the shared buffer work?
+## Technical Documentation
 
-The stream buffer system is essentially an implementation of a [Circular Buffer data structure](https://en.wikipedia.org/wiki/Circular_buffer).
+Deeper write-ups of the internals live in [docs/](docs/README.md):
 
-Imagine a circular [sushi conveyor belt](https://en.wikipedia.org/wiki/Conveyor_belt_sushi) with a fixed number of plates (`BUFFER_CHUNK_NUM`). Each plate can hold a piece of sushi (chunk of data).
-
-### The Chef (Writer)
-
-At the preparation station, there's a chef who:
-
-- Takes raw fish (stream data) and cuts it into bite-sized pieces (fixed to `1 MB`)
-- Places each piece on an empty plate
-- Puts the plate on the conveyor belt and moves to the next empty plate
-- If something goes wrong with the fish (error), marks the plate with a warning flag
-
-The chef works continuously unless:
-
-- The restaurant closes (context cancelled)
-- There are no more customers (client count drops to 0)
-- They run out of fish (EOF)
-- Something goes wrong in the kitchen (error)
-
-### You, the Customers (Readers)
-
-Customers sitting at different points around the belt:
-
-- Remember which plate they last looked at
-- Can look at all plates that have passed by since they last checked
-- Make their own copy of each piece of sushi they want (copying the data)
-- If they catch up to where the chef is currently placing plates, they wait
-- If they see a plate with a warning flag (error), they know to stop eating
-
-If a customer is too slow and takes too long to check a plate, the data might get replaced by the time they look again (buffer overwrite)
-
-This system ensures that streaming data (sushi) flows smoothly from the source (kitchen) to multiple consumers (customers) while efficiently managing memory (plates) and handling errors (food safety warnings).
+- [Ingestion Pipeline](docs/ingestion.md) - how sources are downloaded, parsed, deduplicated, sorted, and rendered
+- [On-Disk Storage Formats](docs/storage.md) - the binary catalog, spill, and series-fragment codecs
+- [Streaming Path](docs/streaming.md) - load balancing, the shared ring buffer, PCR pacing, and failover
 
 ## Sponsors ✨
 
