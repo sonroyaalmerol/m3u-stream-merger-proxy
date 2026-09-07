@@ -1292,3 +1292,39 @@ func (c *countingHTTPClient) Do(req *http.Request) (*http.Response, error) {
 		Body:       io.NopCloser(strings.NewReader("")),
 	}, nil
 }
+
+type infiniteReader struct{ reads int }
+
+func (r *infiniteReader) Read(p []byte) (int, error) {
+	r.reads++
+	for i := range p {
+		p[i] = 'x'
+	}
+	return len(p), nil
+}
+
+func TestEvaluateBufferHealthCapsSample(t *testing.T) {
+	const maxSample = 64 * 1024
+	body := &infiniteReader{}
+	resp := &http.Response{Body: io.NopCloser(body), Header: make(http.Header)}
+
+	start := time.Now()
+	health, err := evaluateBufferHealth(context.Background(), resp, maxSample)
+	if err != nil {
+		t.Fatalf("evaluateBufferHealth error: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed >= 2*time.Second {
+		t.Fatalf("probe ran the full window (%v); cap should end it early", elapsed)
+	}
+	if health <= 0 {
+		t.Fatalf("health = %f, want > 0", health)
+	}
+
+	out, err := io.ReadAll(io.LimitReader(resp.Body, 3*maxSample))
+	if err != nil {
+		t.Fatalf("reading reconstructed body: %v", err)
+	}
+	if len(out) != 3*maxSample {
+		t.Fatalf("reconstructed body len = %d, want %d (sample plus remaining reads)", len(out), 3*maxSample)
+	}
+}

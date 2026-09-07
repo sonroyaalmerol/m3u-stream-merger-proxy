@@ -24,27 +24,30 @@ type readCloser struct {
 	io.Closer
 }
 
-func evaluateBufferHealth(ctx context.Context, resp *http.Response, readChunkSize int) (float64, error) {
-	const measureDuration = 2 * time.Second
+func evaluateBufferHealth(ctx context.Context, resp *http.Response, maxSampleBytes int) (float64, error) {
+	const measureWindow = 2 * time.Second
+	const probeReadChunk = 32 * 1024
+	const defaultMaxSample = 1024 * 1024
 
 	start := time.Now()
 	originalBody := resp.Body
 	br := bufio.NewReader(originalBody)
 
-	var consumed bytes.Buffer
-	totalBytes := 0
+	if maxSampleBytes <= 0 {
+		maxSampleBytes = defaultMaxSample
+	}
 
-	temp := make([]byte, readChunkSize)
-	deadline := time.Now().Add(measureDuration)
+	var consumed []byte
+	temp := make([]byte, probeReadChunk)
+	deadline := start.Add(measureWindow)
 
-	for time.Now().Before(deadline) {
+	for len(consumed) < maxSampleBytes && time.Now().Before(deadline) {
 		if ctx.Err() != nil {
 			break
 		}
 		n, err := br.Read(temp)
 		if n > 0 {
-			totalBytes += n
-			consumed.Write(temp[:n])
+			consumed = append(consumed, temp[:n]...)
 		}
 		if err != nil {
 			if err == io.EOF {
@@ -55,15 +58,15 @@ func evaluateBufferHealth(ctx context.Context, resp *http.Response, readChunkSiz
 	}
 
 	elapsed := time.Since(start)
-	if elapsed.Seconds() == 0 {
+	if elapsed <= 0 {
 		elapsed = time.Millisecond
 	}
-	throughput := float64(totalBytes) / elapsed.Seconds()
+	throughput := float64(len(consumed)) / elapsed.Seconds()
 
 	// Reconstruct the body so that reads come from the buffered data followed
 	// by the remaining original body, but Close() still releases the underlying
 	// TCP connection.
-	newBody := io.MultiReader(bytes.NewReader(consumed.Bytes()), br)
+	newBody := io.MultiReader(bytes.NewReader(consumed), br)
 	resp.Body = readCloser{Reader: newBody, Closer: originalBody}
 	return throughput, nil
 }

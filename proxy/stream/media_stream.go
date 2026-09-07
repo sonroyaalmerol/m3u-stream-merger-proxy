@@ -54,23 +54,15 @@ func (h *StreamHandler) HandleDirectStream(
 		remoteAddr = streamClient.Request.RemoteAddr
 	}
 
+	defer lbResult.Response.Body.Close()
+	buf := make([]byte, 256*1024)
+
 	type readResult struct {
 		n   int
 		err error
 	}
-	// Buffer and channel are sized so the single reader goroutine can always
-	// send its result; the main goroutine signals readiness via doneCh.
-	buf := make([]byte, h.config.ChunkSize*h.config.SharedBufferSize)
 	readChan := make(chan readResult, 1)
 	doneCh := make(chan struct{}, 1)
-
-	defer lbResult.Response.Body.Close()
-
-	streamClient.ResponseHeaders = lbResult.Response.Header
-	_ = streamClient.WriteHeader(lbResult.Response.StatusCode)
-
-	// A single long-lived goroutine performs all reads, avoiding the overhead
-	// of spawning a new goroutine for every chunk.
 	go func() {
 		for {
 			n, err := lbResult.Response.Body.Read(buf)
@@ -82,7 +74,6 @@ func (h *StreamHandler) HandleDirectStream(
 			if err != nil {
 				return
 			}
-			// Wait until the main goroutine has consumed buf before overwriting it.
 			select {
 			case <-doneCh:
 			case <-ctx.Done():
@@ -91,26 +82,29 @@ func (h *StreamHandler) HandleDirectStream(
 		}
 	}()
 
+	streamClient.ResponseHeaders = lbResult.Response.Header
+	_ = streamClient.WriteHeader(lbResult.Response.StatusCode)
+
 	var bytesWritten int64
 	for {
 		select {
 		case <-ctx.Done():
 			return StreamResult{bytesWritten, fmt.Errorf("Context canceled for stream: %s", remoteAddr), proxy.StatusClientClosed}
-		case result := <-readChan:
-			bytesWritten += int64(result.n)
-
-			switch {
-			case result.err == io.EOF:
-				return StreamResult{bytesWritten, fmt.Errorf("EOF reached for stream: %s", remoteAddr), proxy.StatusEOF}
-			case result.err != nil:
-				return StreamResult{bytesWritten, fmt.Errorf("Server error for stream: %s", remoteAddr), proxy.StatusServerError}
-			default:
-				if _, err := streamClient.Write(buf[:result.n]); err != nil {
+		case r := <-readChan:
+			if r.n > 0 {
+				bytesWritten += int64(r.n)
+				if _, werr := streamClient.Write(buf[:r.n]); werr != nil {
 					return StreamResult{bytesWritten, fmt.Errorf("Server error for stream: %s", remoteAddr), proxy.StatusClientClosed}
 				}
 				streamClient.Flush()
-				// Signal the reader goroutine that buf is free to be reused.
+			}
+			switch r.err {
+			case nil:
 				doneCh <- struct{}{}
+			case io.EOF:
+				return StreamResult{bytesWritten, fmt.Errorf("EOF reached for stream: %s", remoteAddr), proxy.StatusEOF}
+			default:
+				return StreamResult{bytesWritten, fmt.Errorf("Server error for stream: %s", remoteAddr), proxy.StatusServerError}
 			}
 		}
 	}
