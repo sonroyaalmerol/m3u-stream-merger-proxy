@@ -84,7 +84,7 @@ func TestEndToEndSlugLookup(t *testing.T) {
 			t.Fatalf("slug %s resolved without upstream URLs", slug)
 		}
 		for _, u := range info.URLs {
-			if u.URL == "" || u.M3UIndex == "" || u.Hash == "" {
+			if u.URL == "" || u.M3UIndex == "" {
 				t.Fatalf("slug %s has an incomplete URL entry: %+v", slug, u)
 			}
 		}

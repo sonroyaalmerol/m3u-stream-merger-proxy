@@ -1,8 +1,6 @@
 package sourceproc
 
 import (
-	"crypto/sha3"
-	"encoding/hex"
 	"strings"
 
 	"m3u-stream-merger/utils"
@@ -70,12 +68,9 @@ func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo 
 		return nil
 	}
 
-	h := sha3.Sum224([]byte(cleanUrl))
-	urlHash := hex.EncodeToString(h[:])
-
 	stream.SourceM3U = m3uIndex
 	stream.SourceIndex = nextLine.LineNum
-	stream.AddURL(m3uIndex, urlHash, nextLine.LineNum, cleanUrl)
+	stream.AddURL(m3uIndex, nextLine.LineNum, cleanUrl)
 
 	return stream
 }

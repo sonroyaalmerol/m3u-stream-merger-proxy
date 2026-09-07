@@ -36,7 +36,7 @@ func benchStream(i int) *StreamInfo {
 		SourceM3U:   "1",
 		SourceIndex: i,
 	}
-	s.AddURL("1", "abc", 1, "http://example.com/live/user/pass/1234.ts")
+	s.AddURL("1", 1, "http://example.com/live/user/pass/1234.ts")
 	return s
 }
 

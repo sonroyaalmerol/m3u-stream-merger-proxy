@@ -21,7 +21,7 @@ func storeStream(i int) *StreamInfo {
 		SourceM3U:   "1",
 		SourceIndex: i,
 	}
-	s.AddURL("1", fmt.Sprintf("%064x", i), i, fmt.Sprintf("http://example.com/live/user/pass/%d.ts", i))
+	s.AddURL("1", i, fmt.Sprintf("http://example.com/live/user/pass/%d.ts", i))
 
 	return s
 }

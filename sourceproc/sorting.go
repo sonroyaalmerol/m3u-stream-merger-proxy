@@ -38,7 +38,7 @@ func newSortingManager() *SortingManager {
 func (m *SortingManager) AddToSorter(s *StreamInfo) error {
 	m.streams.Compute(sanitizeField(s.Title), func(old *StreamInfo, loaded bool) (*StreamInfo, bool) {
 		if !loaded {
-			return s.cloneForStore(), false
+			return s, false
 		}
 		return mergeStreamInfoAttributes(old, s), false
 	})
@@ -134,7 +134,7 @@ func mergeStreamInfoAttributes(base, new *StreamInfo) *StreamInfo {
 	}
 
 	for _, u := range new.URLs {
-		base.AddURL(u.M3UIndex, u.Hash, u.LineNum, u.URL)
+		base.AddURL(u.M3UIndex, u.LineNum, u.URL)
 	}
 
 	if new.SourceM3U < base.SourceM3U || (new.SourceM3U == base.SourceM3U && new.SourceIndex < base.SourceIndex) {
