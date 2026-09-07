@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 )
 
 // SeriesStub is one get_series entry cached at ingest for lazy episode resolution.
@@ -113,6 +114,16 @@ func WriteSeriesFragment(path string, entries []FragmentEntry) error {
 		}
 	}
 	return writeAtomic(path, buf.Bytes())
+}
+
+var fragMu sync.Mutex
+
+// MutateSeriesFragment read-modify-writes a fragment under the lock shared with the background populate loop.
+func MutateSeriesFragment(path string, fn func(entries []FragmentEntry) []FragmentEntry) error {
+	fragMu.Lock()
+	defer fragMu.Unlock()
+	entries, _ := ReadSeriesFragment(path)
+	return WriteSeriesFragment(path, fn(entries))
 }
 
 func ReadSeriesFragment(path string) ([]FragmentEntry, error) {

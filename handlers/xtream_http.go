@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bufio"
+	"context"
 	"encoding/base64"
 	"encoding/xml"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"m3u-stream-merger/config"
@@ -29,6 +31,11 @@ type XtreamHTTPHandler struct {
 	catalog       *sourceproc.StreamStore
 	auth          *CredentialsAuth
 	streamHandler *StreamHTTPHandler
+	stubRegistry  seriesStubRegistry
+	lazyMu        sync.Mutex
+	lazyCache     map[uint64]*lazySeries
+	lazyEpisodes  map[uint64]lazyEpisode
+	lazyOrder     []uint64
 }
 
 func NewXtreamHTTPHandler(streamHandler *StreamHTTPHandler, logger logger.Logger) *XtreamHTTPHandler {
@@ -84,7 +91,7 @@ func (h *XtreamHTTPHandler) ServePlayerAPI(w http.ResponseWriter, r *http.Reques
 		h.writeJSON(w, h.seriesList(categoryID))
 	case "get_series_info":
 		id, _ := strconv.ParseUint(query.Get("series_id"), 10, 64)
-		h.writeJSON(w, h.seriesInfo(id))
+		h.writeJSON(w, h.seriesInfo(r.Context(), id))
 	case "get_vod_info":
 		id, _ := strconv.ParseUint(query.Get("vod_id"), 10, 64)
 		h.writeJSON(w, h.vodInfo(id))
@@ -251,7 +258,9 @@ func (h *XtreamHTTPHandler) vodStreams(categoryID uint64) []xtream.VodStreamOut 
 
 func (h *XtreamHTTPHandler) seriesList(categoryID uint64) []xtream.SeriesOut {
 	out := make([]xtream.SeriesOut, 0, 16)
+	seen := make(map[uint64]struct{})
 	_ = h.catalog.RangeSeries(categoryID, func(position int, sd sourceproc.CatalogSeriesEntry) bool {
+		seen[sd.SeriesID] = struct{}{}
 		catID := jsonNumber(sd.CategoryID)
 		out = append(out, xtream.SeriesOut{
 			Num:          position,
@@ -265,6 +274,30 @@ func (h *XtreamHTTPHandler) seriesList(categoryID uint64) []xtream.SeriesOut {
 		})
 		return true
 	})
+	var stubOnly []*stubSeries
+	for id, st := range h.stubs() {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		if categoryID != 0 && st.CategoryID != categoryID {
+			continue
+		}
+		stubOnly = append(stubOnly, st)
+	}
+	sort.Slice(stubOnly, func(a, b int) bool { return stubOnly[a].SeriesID < stubOnly[b].SeriesID })
+	for _, st := range stubOnly {
+		catID := jsonNumber(st.CategoryID)
+		out = append(out, xtream.SeriesOut{
+			Num:          len(out) + 1,
+			Name:         st.Name,
+			SeriesID:     jsonNumber(st.SeriesID),
+			Cover:        st.Cover,
+			Genre:        st.Group,
+			BackdropPath: []string{},
+			CategoryID:   catID,
+			CategoryIDs:  []json.Number{catID},
+		})
+	}
 	return out
 }
 
@@ -276,9 +309,12 @@ func containerExt(ext, fallback string) string {
 	return fallback
 }
 
-func (h *XtreamHTTPHandler) seriesInfo(id uint64) *xtream.SeriesInfoOut {
+func (h *XtreamHTTPHandler) seriesInfo(ctx context.Context, id uint64) *xtream.SeriesInfoOut {
 	sd := h.catalog.SeriesInfo(id)
 	if sd == nil {
+		if ls := h.lazySeriesInfo(ctx, id); ls != nil {
+			return ls
+		}
 		return &xtream.SeriesInfoOut{Seasons: []xtream.SeasonOut{}, Episodes: map[string][]xtream.EpisodeOut{}}
 	}
 
@@ -472,6 +508,9 @@ func (h *XtreamHTTPHandler) ServeStream(w http.ResponseWriter, r *http.Request) 
 
 	entry := h.catalog.FindStream(id)
 	if entry == nil || entry.Slug == "" {
+		if h.serveLazyEpisode(w, r, id, user, pass) {
+			return
+		}
 		http.Error(w, "Stream not found", http.StatusNotFound)
 		return
 	}

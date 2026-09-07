@@ -200,6 +200,11 @@ func StreamIDFor(title string) uint64 {
 	return xxhash.Sum64String(title) & 0x7fffffffffffffff
 }
 
+// SeriesCategoryID derives the egress category id for a series group title.
+func SeriesCategoryID(group string) uint64 {
+	return categoryIDFor(catalogKindSeries, group)
+}
+
 func SeriesIDFor(show string) uint64 {
 	h := xxhash.New()
 	_, _ = h.Write([]byte("series|"))
