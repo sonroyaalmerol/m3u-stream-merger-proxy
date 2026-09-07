@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync/atomic"
+	"unsafe"
 )
 
 func GeneralParser(value string) string {
@@ -99,13 +100,21 @@ func isHTTPAbsURL(value string) bool {
 func TvgLogoParser(value string) string {
 	value = GeneralParser(value)
 
-	if isHTTPAbsURL(value) {
-		encoded := base64.URLEncoding.EncodeToString([]byte(value))
-		if base, ok := cachedBaseURL(); ok {
-			return base + "/a/" + encoded
-		}
+	if !isHTTPAbsURL(value) {
+		return value
+	}
+	base, ok := cachedBaseURL()
+	if !ok {
 		return value
 	}
 
-	return value
+	const sep = "/a/"
+	enc := base64.URLEncoding
+	buf := make([]byte, len(base)+len(sep)+enc.EncodedLen(len(value)))
+	n := copy(buf, base)
+	n += copy(buf[n:], sep)
+	enc.Encode(buf[n:], unsafe.Slice(unsafe.StringData(value), len(value)))
+
+	// buf is local and never written again, so the view is immutable.
+	return unsafe.String(unsafe.SliceData(buf), len(buf))
 }
