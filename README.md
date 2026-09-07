@@ -256,8 +256,8 @@ The proxy works in both directions with the Xtream Codes API:
 
 1. **Ingest:** add Xtream providers as sources with `XTREAM_URL_X` / `XTREAM_USERNAME_X` / `XTREAM_PASSWORD_X` (see [Xtream Source Configs](#xtream-source-configs)). Live channels, VOD and series episodes are merged into `/playlist.m3u` and share the same load balancing, filters and failover as M3U sources.
 
-2. **Serve:** point any Xtream client (TiviMate, IPTV Smarters, etc.) directly at the proxy:
-   - Server URL: `http://<server>:<port>`
+2. **Serve:** point any Xtream client (TiviMate, IPTV Smarters, open-tv, etc.) directly at the proxy:
+   - Server URL: `http://<server>:<port>` (most clients append `/player_api.php` themselves; open-tv wants the URL entered as `http://<server>:<port>/player_api.php` or accepts the bare host since API calls at `/` are also served)
    - Username/password: any credentials configured in `CREDENTIALS` (leave unset to disable auth).
    - Note: the Xtream protocol sends credentials in plaintext URLs, so enable TLS (see [TLS Configs](#tls-configs)) or put a TLS-terminating reverse proxy in front when exposing the proxy to the internet.
 

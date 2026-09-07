@@ -10,6 +10,17 @@ import (
 	"time"
 )
 
+func rootHandler(serveAPI func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if r.URL.Path == "/" && (q.Get("action") != "" || (q.Get("username") != "" && q.Get("password") != "")) {
+			serveAPI(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	}
+}
+
 func main() {
 	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -71,7 +82,8 @@ func main() {
 		})
 	}
 
-	// Start the server
+	http.HandleFunc("/", rootHandler(xtreamHandler.ServePlayerAPI))
+
 	logger.Default.Logf("Server is running on port %s...", os.Getenv("PORT"))
 	logger.Default.Log("Playlist Endpoint is running (`/playlist.m3u`)")
 	logger.Default.Log("Stream Endpoint is running (`/p/{originalBasePath}/{streamID}.{fileExt}`)")
