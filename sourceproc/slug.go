@@ -6,15 +6,19 @@ import (
 	"encoding/binary"
 )
 
-// slugParts derives the store key and the slug from one hash of the title.
-func slugParts(title string) (uint64, string) {
-	h := sha3.Sum224([]byte(title))
-	return binary.BigEndian.Uint64(h[:8]), base64.RawURLEncoding.EncodeToString(h[:])
+func slugSum(title string) [28]byte {
+	return sha3.Sum224([]byte(title))
+}
+
+// slugParts derives the store key and the slug bytes from one hash of the title.
+func slugParts(title string) (uint64, [28]byte) {
+	h := slugSum(title)
+	return binary.BigEndian.Uint64(h[:8]), h
 }
 
 func EncodeSlug(stream *StreamInfo) string {
-	_, slug := slugParts(stream.Title)
-	return slug
+	h := slugSum(stream.Title)
+	return base64.RawURLEncoding.EncodeToString(h[:])
 }
 
 func DecodeSlug(slug string) (*StreamInfo, error) {

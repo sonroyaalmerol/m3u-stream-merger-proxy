@@ -1,6 +1,7 @@
 package sourceproc
 
 import (
+	"encoding/base64"
 	"strings"
 
 	"m3u-stream-merger/utils"
@@ -36,10 +37,40 @@ func forEachAttr(s string, fn func(key, val string)) {
 	}
 }
 
-// parseLine parses a single M3U line into a StreamInfo
+const slabSize = 256
+
+// streamSlab batches per-stream allocations so a worker pays one make per slabSize lines.
+type streamSlab struct {
+	streams []StreamInfo
+	urls    []StreamURL
+}
+
+func (a *streamSlab) newStream() *StreamInfo {
+	if len(a.streams) == 0 {
+		a.streams = make([]StreamInfo, slabSize)
+	}
+	s := &a.streams[0]
+	a.streams = a.streams[1:]
+
+	// Capped at one so a later merge append reallocates instead of writing into the next slab entry.
+	if len(a.urls) == 0 {
+		a.urls = make([]StreamURL, slabSize)
+	}
+	s.URLs = a.urls[0:0:1]
+	a.urls = a.urls[1:]
+
+	return s
+}
+
 func parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo {
+	var slab streamSlab
+	return slab.parseLine(line, nextLine, m3uIndex)
+}
+
+// parseLine parses a single M3U line into a StreamInfo
+func (a *streamSlab) parseLine(line string, nextLine *LineDetails, m3uIndex string) *StreamInfo {
 	cleanUrl := strings.TrimSpace(nextLine.Content)
-	stream := &StreamInfo{}
+	stream := a.newStream()
 
 	forEachAttr(line, func(key, value string) {
 		value = strings.TrimSpace(value)
@@ -92,9 +123,9 @@ func indexUnquotedComma(s string) int {
 }
 
 // formatStreamEntry formats a stream entry for M3U output
-func formatStreamEntry(baseURL, slug string, stream *StreamInfo) string {
+func formatStreamEntry(baseURL string, sum [28]byte, stream *StreamInfo) string {
 	var entry strings.Builder
-	entry.Grow(96 + len(baseURL) + len(slug) + 2*len(stream.Title) + len(stream.LogoURL) +
+	entry.Grow(140 + len(baseURL) + 2*len(stream.Title) + len(stream.LogoURL) +
 		2*len(stream.Group) + len(stream.TvgID) + len(stream.TvgType) + len(stream.TvgChNo))
 
 	writeTag := func(key, value string) {
@@ -122,7 +153,10 @@ func formatStreamEntry(baseURL, slug string, stream *StreamInfo) string {
 	entry.WriteString("\n")
 	entry.WriteString(baseURL)
 	entry.WriteString("/p/stream/")
-	entry.WriteString(slug)
+	var slug [48]byte
+	n := base64.RawURLEncoding.EncodedLen(len(sum))
+	base64.RawURLEncoding.Encode(slug[:n], sum[:])
+	entry.Write(slug[:n])
 	entry.WriteString("\n")
 
 	return entry.String()

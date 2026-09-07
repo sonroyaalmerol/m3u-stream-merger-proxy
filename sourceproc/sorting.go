@@ -161,8 +161,14 @@ var fieldSanitizer = strings.NewReplacer(
 
 const maxFieldRunes = 100
 
+// sanitizeChars must list every fieldSanitizer key so the fast path only skips true no-ops.
+const sanitizeChars = `/\:*?"<>| `
+
 func sanitizeField(value string) string {
-	sanitized := fieldSanitizer.Replace(value)
+	sanitized := value
+	if strings.ContainsAny(value, sanitizeChars) {
+		sanitized = fieldSanitizer.Replace(value)
+	}
 
 	if len(sanitized) <= maxFieldRunes {
 		return sanitized

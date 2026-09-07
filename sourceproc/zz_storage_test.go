@@ -47,12 +47,13 @@ func buildStore(tb testing.TB, n int) {
 func BenchmarkStreamIngest(b *testing.B) {
 	benchDataDir(b)
 	i := 0
+	var slab streamSlab
 	b.ReportAllocs()
 	for b.Loop() {
 		i++
 		line := fmt.Sprintf(`#EXTINF:-1 tvg-id="chan.%d.tv" tvg-name="Chan %d" tvg-chno="%d" group-title="Sports",Chan %d`, i, i, i, i)
 		next := &LineDetails{Content: fmt.Sprintf("http://example.com/live/user/pass/%d.ts", i), LineNum: i}
-		_ = parseLine(line, next, "1")
+		_ = slab.parseLine(line, next, "1")
 	}
 }
 

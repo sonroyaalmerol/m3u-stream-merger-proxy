@@ -177,8 +177,9 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 		for range numWorkers {
 			go func() {
 				defer wgWorkers.Done()
+				var slab streamSlab
 				for ps := range streamCh {
-					stream := parseLine(ps.extinf, &ps.urlLine, ps.m3uIndex)
+					stream := slab.parseLine(ps.extinf, &ps.urlLine, ps.m3uIndex)
 					if stream == nil || !checkFilter(stream) {
 						continue
 					}
@@ -283,8 +284,8 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 
 	p.tvgIDs = make(map[string]struct{})
 	err = p.sortingMgr.GetSortedEntries(func(entry *StreamInfo) {
-		key, slug := slugParts(entry.Title)
-		_, writeErr := p.writer.WriteString(formatStreamEntry(baseURL, slug, entry))
+		key, sum := slugParts(entry.Title)
+		_, writeErr := p.writer.WriteString(formatStreamEntry(baseURL, sum, entry))
 		if writeErr != nil {
 			p.markCriticalError(writeErr)
 		}
