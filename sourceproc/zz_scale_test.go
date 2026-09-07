@@ -103,16 +103,18 @@ func BenchmarkScaleProbe(b *testing.B) {
 			for b.Loop() {
 				b.StopTimer()
 				streams := benchStreams(n)
-				m := newSortingManager()
+				m := newSpillSorter()
 				b.StartTimer()
 
 				for _, s := range streams {
-					if err := m.AddToSorter(s); err != nil {
+					if err := m.Add(s); err != nil {
 						b.Fatal(err)
 					}
 				}
 				count := 0
-				if err := m.GetSortedEntries(func(*StreamInfo) { count++ }); err != nil {
+				err := m.MergeRendered(func(*StreamInfo) renderedEntry { return renderedEntry{} },
+					func(renderedEntry) error { count++; return nil })
+				if err != nil {
 					b.Fatal(err)
 				}
 

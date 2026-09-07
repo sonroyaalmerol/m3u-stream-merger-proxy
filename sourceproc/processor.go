@@ -26,7 +26,7 @@ type M3UProcessor struct {
 	file                  *os.File
 	writer                *bufio.Writer
 	revalidatingDone      chan struct{}
-	sortingMgr            *SortingManager
+	sorter                *spillSorter
 	storeWriter           *StreamStoreWriter
 	criticalErrorOccurred atomic.Bool
 	tvgIDs                map[string]struct{}
@@ -44,7 +44,7 @@ func NewProcessor() *M3UProcessor {
 		file:             file,
 		writer:           bufio.NewWriter(file),
 		revalidatingDone: make(chan struct{}),
-		sortingMgr:       newSortingManager(),
+		sorter:           newSpillSorter(),
 	}
 
 	return processor
@@ -211,36 +211,14 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 	return errors
 }
 
-// compileBlockSize balances dispatch overhead against reorder-buffer memory at 1M streams.
-const compileBlockSize = 4096
-
-// storeRecord is a pre-marshaled store entry; key rides along for the ordered index build.
-type storeRecord struct {
-	key  uint64
-	data []byte
-}
-
-type compileBlock struct {
-	seq    int
-	m3u    string
-	recs   []storeRecord
-	tvgIDs []string
-}
-
-type inBlock struct {
-	seq     int
-	entries []*StreamInfo
-}
-
-// compileM3U renders the sorted playlist block-parallel; workers slug + render
-// + marshal while one ordered writer appends, so output matches a sequential render.
+// compileM3U folds, sorts, and renders via the spill sorter in one ordered write pass.
 func (p *M3UProcessor) compileM3U(baseURL string) {
 	p.Lock()
 	defer p.Unlock()
 
 	defer func() {
 		p.file.Close()
-		p.sortingMgr.Close()
+		p.sorter.Close()
 		close(p.revalidatingDone)
 	}()
 
@@ -263,109 +241,38 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 
 	p.tvgIDs = make(map[string]struct{})
 
-	var (
-		encMu  sync.Mutex
-		encErr error
-	)
-	setErr := func(err error) {
-		if err == nil {
-			return
+	render := func(entry *StreamInfo) renderedEntry {
+		key, sum := slugParts(entry.Title)
+		var m3u strings.Builder
+		if err := writeStreamEntry(&m3u, baseURL, sum, entry, make([]byte, 0, slugBufSize)); err != nil {
+			p.markCriticalError(err)
 		}
-		encMu.Lock()
-		if encErr == nil {
-			encErr = err
-		}
-		encMu.Unlock()
-	}
-
-	blockCh := make(chan inBlock, 4)
-	outCh := make(chan *compileBlock, 8)
-
-	var wg sync.WaitGroup
-	for range max(1, runtime.GOMAXPROCS(0)) {
-		wg.Go(func() {
-			slugBuf := make([]byte, 0, slugBufSize)
-			for blk := range blockCh {
-				out := &compileBlock{seq: blk.seq}
-				var m3u strings.Builder
-				for _, entry := range blk.entries {
-					key, sum := slugParts(entry.Title)
-					if err := writeStreamEntry(&m3u, baseURL, sum, entry, slugBuf); err != nil {
-						setErr(err)
-					}
-					data, err := json.Marshal(entry)
-					if err != nil {
-						setErr(err)
-						continue
-					}
-					out.recs = append(out.recs, storeRecord{key: key, data: append(data, '\n')})
-					if entry.TvgID != "" {
-						out.tvgIDs = append(out.tvgIDs, entry.TvgID)
-					}
-				}
-				out.m3u = m3u.String()
-				outCh <- out
-			}
-		})
-	}
-	go func() {
-		wg.Wait()
-		close(outCh)
-	}()
-
-	go func() {
-		defer close(blockCh)
-		var entries []*StreamInfo
-		seq := 0
-		flush := func() {
-			blockCh <- inBlock{seq: seq, entries: entries}
-			seq++
-			entries = nil
-		}
-		err := p.sortingMgr.GetSortedEntries(func(entry *StreamInfo) {
-			if entries == nil {
-				entries = make([]*StreamInfo, 0, compileBlockSize)
-			}
-			entries = append(entries, entry)
-			if len(entries) == compileBlockSize {
-				flush()
-			}
-		})
+		data, err := json.Marshal(entry)
 		if err != nil {
-			setErr(err)
+			p.markCriticalError(err)
+			data = nil
+		} else {
+			data = append(data, '\n')
 		}
-		if entries != nil {
-			flush()
+		return renderedEntry{storeKey: key, m3u: m3u.String(), storeRec: data, tvgID: entry.TvgID}
+	}
+	emit := func(re renderedEntry) error {
+		if _, err := p.writer.WriteString(re.m3u); err != nil {
+			return err
 		}
-	}()
-
-	pending := make(map[int]*compileBlock)
-	next := 0
-	for out := range outCh {
-		pending[out.seq] = out
-		for {
-			b, ok := pending[next]
-			if !ok {
-				break
-			}
-			delete(pending, next)
-			next++
-			if _, err := p.writer.WriteString(b.m3u); err != nil {
-				p.markCriticalError(err)
-			}
-			for _, rec := range b.recs {
-				if err := storeWriter.AddRaw(rec.key, rec.data); err != nil {
-					p.markCriticalError(err)
-				}
-			}
-			for _, id := range b.tvgIDs {
-				p.tvgIDs[id] = struct{}{}
+		if re.storeRec != nil {
+			if err := storeWriter.AddRaw(re.storeKey, re.storeRec); err != nil {
+				return err
 			}
 		}
+		if re.tvgID != "" {
+			p.tvgIDs[re.tvgID] = struct{}{}
+		}
+		return nil
 	}
 
-	if encErr != nil {
-		p.markCriticalError(encErr)
+	if err := p.sorter.MergeRendered(render, emit); err != nil {
+		p.markCriticalError(err)
 		return
 	}
 	if err := p.writer.Flush(); err != nil {
@@ -418,7 +325,7 @@ func (p *M3UProcessor) addStream(stream *StreamInfo) error {
 
 	p.streamCount.Add(1)
 
-	return p.sortingMgr.AddToSorter(stream)
+	return p.sorter.Add(stream)
 }
 
 type pendingStream struct {
