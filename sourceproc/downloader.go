@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"m3u-stream-merger/logger"
@@ -21,6 +23,8 @@ type SourceDownloaderResult struct {
 	Index string
 	Lines chan *LineDetails
 	Error chan error
+
+	lines atomic.Int64
 }
 
 type LineDetails struct {
@@ -58,16 +62,31 @@ func streamDownloadM3USources() chan *SourceDownloaderResult {
 						return
 					}
 
+					kind := "m3u"
+					if m3uURL == "" {
+						kind = "xtream"
+					} else if strings.HasPrefix(m3uURL, "file://") {
+						kind = "file"
+					}
+
+					start := time.Now()
+					done := make(chan struct{})
+					go reportDownloadProgress(idx, kind, &result.lines, start, done)
+					logger.Default.Logf("Downloading source %s (%s)", idx, kind)
+
 					if m3uURL != "" {
 						if after, ok := strings.CutPrefix(m3uURL, "file://"); ok {
 							handleLocalFile(after, result)
-							return
+						} else {
+							handleRemoteURL(m3uURL, idx, result)
 						}
-						handleRemoteURL(m3uURL, idx, result)
-						return
+					} else {
+						handleXtreamSource(idx, result)
 					}
+					close(done)
 
-					handleXtreamSource(idx, result)
+					elapsed := time.Since(start).Seconds()
+					logger.Default.Logf("Downloaded source %s (%s): %d lines in %.1fs", idx, kind, result.lines.Load(), elapsed)
 				}()
 
 				resultChan <- result
@@ -78,6 +97,28 @@ func streamDownloadM3USources() chan *SourceDownloaderResult {
 	}()
 
 	return resultChan
+}
+
+// reportDownloadProgress mirrors the ingest heartbeat: fixed-interval line counts, zero per-line cost.
+func reportDownloadProgress(idx, kind string, lines *atomic.Int64, start time.Time, done <-chan struct{}) {
+	ticker := time.NewTicker(progressInterval)
+	defer ticker.Stop()
+	last := int64(-1)
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			n := lines.Load()
+			elapsed := time.Since(start).Seconds()
+			if n == last {
+				logger.Default.Logf("Downloading source %s (%s): %d lines so far (%.0fs elapsed, no new lines in %s)", idx, kind, n, elapsed, progressInterval)
+				continue
+			}
+			logger.Default.Logf("Downloading source %s (%s): %d lines so far (%.0fs elapsed)", idx, kind, n, elapsed)
+			last = n
+		}
+	}
 }
 
 func handleLocalFile(localPath string, result *SourceDownloaderResult) {
@@ -206,6 +247,7 @@ func handleXtreamSource(idx string, result *SourceDownloaderResult) {
 			return err
 		}
 		result.Lines <- &LineDetails{Content: line, LineNum: lineNum}
+		result.lines.Add(1)
 		lineNum++
 		emitted = true
 		return nil
@@ -273,6 +315,7 @@ func scanAndStream(r io.Reader, result *SourceDownloaderResult) {
 		line.LineNum = lineNum
 
 		result.Lines <- line
+		result.lines.Add(1)
 		lineNum++
 	}
 

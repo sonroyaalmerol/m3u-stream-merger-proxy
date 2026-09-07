@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -536,6 +537,31 @@ func TestMergeAttributesToM3UFile(t *testing.T) {
 	assert.Contains(t, contentStr, `tvg-id="id-2"`, "Should contain tvg-id from merged attributes")
 	assert.Contains(t, contentStr, `tvg-type="type-2"`, "Should contain tvg-type from merged attributes")
 	assert.Contains(t, contentStr, `tvg-logo="http://example.com/a/aHR0cDovL2xvZ28vc291cmNlNC5wbmc="`, "Should contain tvg-logo from merged attributes")
+}
+
+func TestReportDownloadProgressTerminates(t *testing.T) {
+	old := progressInterval
+	progressInterval = 2 * time.Millisecond
+	t.Cleanup(func() { progressInterval = old })
+
+	var lines atomic.Int64
+
+	done := make(chan struct{})
+	exited := make(chan struct{})
+	go func() {
+		reportDownloadProgress("1", "file", &lines, time.Now(), done)
+		close(exited)
+	}()
+
+	lines.Add(42)
+	time.Sleep(10 * time.Millisecond)
+	close(done)
+
+	select {
+	case <-exited:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reportDownloadProgress did not terminate")
+	}
 }
 
 func TestReportProgressTerminates(t *testing.T) {
