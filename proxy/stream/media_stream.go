@@ -225,7 +225,10 @@ func (h *StreamHandler) HandleStream(
 						if !safeConcatTypes[strings.ToLower(contentType)] && utils.IsAnM3U8Media(lbResult.Response) {
 							return StreamResult{bytesWritten, fmt.Errorf("%s cannot be safely concatenated and is not supported by this proxy.", contentType), proxy.StatusIncompatible}
 						}
-						streamClient.ResponseHeaders = *respHeaders
+						liveHeaders := respHeaders.Clone()
+						liveHeaders.Del("Content-Length")
+						liveHeaders.Del("Content-Range")
+						streamClient.ResponseHeaders = liveHeaders
 
 						n, err := h.safeWrite(streamClient, chunk.Data)
 						if err != nil {
