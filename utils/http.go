@@ -68,12 +68,19 @@ func DetermineBaseURL(r *http.Request) string {
 	}
 
 	if r != nil {
-		if r.TLS == nil {
-			return fmt.Sprintf("http://%s", r.Host)
-		} else {
-			return fmt.Sprintf("https://%s", r.Host)
+		proto := "http"
+		if r.TLS != nil {
+			proto = "https"
+		} else if IsForwardedHTTPS(r) {
+			// ponytail: scheme only, never trust X-Forwarded-Host (spoofable redirect vector)
+			proto = "https"
 		}
+		return fmt.Sprintf("%s://%s", proto, r.Host)
 	}
 
 	return ""
+}
+
+func IsForwardedHTTPS(r *http.Request) bool {
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
 }

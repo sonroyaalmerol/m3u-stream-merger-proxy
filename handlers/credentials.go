@@ -27,7 +27,7 @@ func (a *CredentialsAuth) Authorize(user, pass string) bool {
 	}
 
 	for _, cred := range a.parseCredentials(credentials) {
-		if strings.EqualFold(user, cred[0]) && strings.EqualFold(pass, cred[1]) {
+		if user == cred[0] && pass == cred[1] {
 			return true
 		}
 	}
@@ -46,12 +46,37 @@ func (a *CredentialsAuth) parseCredentials(raw string) [][]string {
 				a.logger.Debugf("Credential expired: %s", item)
 				continue
 			}
-			result = append(result, cred[:2])
-		} else {
-			result = append(result, cred)
+			cred = cred[:2]
 		}
+		if !validCredentialPair(cred) {
+			a.logger.Warnf("skipping credential with unsafe or empty user/pass: %s", item)
+			continue
+		}
+		result = append(result, cred)
 	}
 	return result
+}
+
+// validCredentialPair enforces URL-safe printable ASCII (survives paths and queries verbatim), max 255 chars per part.
+func validCredentialPair(cred []string) bool {
+	if len(cred) < 2 || cred[0] == "" || cred[1] == "" {
+		return false
+	}
+	for _, part := range cred[:2] {
+		if len(part) > 255 {
+			return false
+		}
+		for i := 0; i < len(part); i++ {
+			c := part[i]
+			switch {
+			case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+			case c == '-' || c == '.' || c == '_' || c == '~' || c == '!' || c == '$' || c == '\'' || c == '(' || c == ')' || c == '*' || c == ',' || c == ';' || c == '=' || c == '@':
+			default:
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (a *CredentialsAuth) AuthorizeRequest(r *http.Request) bool {

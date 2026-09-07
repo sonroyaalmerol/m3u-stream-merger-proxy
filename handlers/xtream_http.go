@@ -135,7 +135,7 @@ func (h *XtreamHTTPHandler) ServePanelAPI(w http.ResponseWriter, r *http.Request
 func (h *XtreamHTTPHandler) rootResponse(r *http.Request, user, pass string) xtream.RootResponse {
 	host := r.Host
 	proto := "http"
-	if r.TLS != nil {
+	if r.TLS != nil || utils.IsForwardedHTTPS(r) {
 		proto = "https"
 	}
 	if base := os.Getenv("BASE_URL"); base != "" {

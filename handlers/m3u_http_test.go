@@ -107,11 +107,11 @@ func TestM3UHTTPHandler_BasicAuth(t *testing.T) {
 			wantStatus:  http.StatusForbidden,
 		},
 		{
-			name:        "Case insensitive username",
+			name:        "Case sensitive username",
 			credentials: "User1:pass1",
 			username:    "user1",
 			password:    "pass1",
-			wantStatus:  http.StatusNotFound,
+			wantStatus:  http.StatusForbidden,
 		},
 	}
 
