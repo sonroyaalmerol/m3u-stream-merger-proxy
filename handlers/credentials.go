@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -54,5 +55,16 @@ func (a *CredentialsAuth) parseCredentials(raw string) [][]string {
 }
 
 func (a *CredentialsAuth) AuthorizeRequest(r *http.Request) bool {
-	return a.Authorize(r.URL.Query().Get("username"), r.URL.Query().Get("password"))
+	values := RequestValues(r)
+
+	return a.Authorize(values.Get("username"), values.Get("password"))
+}
+
+// RequestValues merges query and POST form; panels accept credentials either way.
+func RequestValues(r *http.Request) url.Values {
+	if err := r.ParseForm(); err != nil {
+		return r.URL.Query()
+	}
+
+	return r.Form
 }

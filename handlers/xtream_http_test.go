@@ -80,11 +80,20 @@ func TestXtreamAuth(t *testing.T) {
 	h := setupXtreamHandler(t)
 	t.Setenv("CREDENTIALS", "u:p")
 
+	// Panels answer bad credentials with HTTP 200 and auth 0 so players show a credential error.
 	rec := playerAPIRequest(t, h, "username=u&password=wrong")
-	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var root xtream.RootResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &root))
+	assert.Equal(t, 0, root.UserInfo.Auth)
+	assert.Equal(t, "Disabled", root.UserInfo.Status)
 
 	rec = playerAPIRequest(t, h, "username=u&password=p")
-	assert.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var ok xtream.RootResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &ok))
+	assert.Equal(t, 1, ok.UserInfo.Auth)
+	assert.Contains(t, ok.UserInfo.AllowedOutputFormats, "m3u8")
 }
 
 func TestXtreamLiveStreams(t *testing.T) {
@@ -130,12 +139,50 @@ func TestXtreamSeriesInfo(t *testing.T) {
 	rec := playerAPIRequest(t, h, "action=get_series_info&series_id="+strconv.FormatUint(seriesID, 10))
 	require.Equal(t, http.StatusOK, rec.Code)
 
-	var info xtream.RawSeriesInfo
+	var info xtream.SeriesInfoOut
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &info))
 	assert.Equal(t, "Test Show", info.Info.Name)
 	require.Len(t, info.Episodes["1"], 1)
 	assert.Equal(t, "Test Show S01E02", info.Episodes["1"][0].Title)
 	assert.Equal(t, "mkv", info.Episodes["1"][0].ContainerExtension)
+	assert.Equal(t, 1, info.Episodes["1"][0].Info.Season)
+	require.Len(t, info.Seasons, 1)
+	assert.Equal(t, 1, info.Seasons[0].SeasonNumber)
+	assert.Equal(t, 1, info.Seasons[0].EpisodeCount)
+}
+
+func TestXtreamVodInfo(t *testing.T) {
+	h := setupXtreamHandler(t)
+
+	vodID := xxhash.Sum64String("Cool Movie")
+	rec := playerAPIRequest(t, h, "action=get_vod_info&vod_id="+strconv.FormatUint(vodID, 10))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var info xtream.VodInfoOut
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &info))
+	assert.Equal(t, "Cool Movie", info.Info.Name)
+	assert.Equal(t, "Cool Movie", info.MovieData.Name)
+	assert.Equal(t, "mp4", info.MovieData.ContainerExtension)
+	assert.Equal(t, strconv.FormatUint(vodID, 10), info.MovieData.StreamID.String())
+}
+
+func TestXtreamPanelAPI(t *testing.T) {
+	h := setupXtreamHandler(t)
+
+	rec := playerAPIRequest(t, h, "username=u&password=p&action=x")
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	req := httptest.NewRequest(http.MethodGet, "/panel_api.php?username=u&password=p", nil)
+	panel := httptest.NewRecorder()
+	h.ServePanelAPI(panel, req)
+	require.Equal(t, http.StatusOK, panel.Code)
+
+	var resp xtream.PanelResponse
+	require.NoError(t, json.Unmarshal(panel.Body.Bytes(), &resp))
+	assert.Equal(t, 1, resp.UserInfo.Auth)
+	require.Len(t, resp.Categories[xtream.TypeLive], 1)
+	require.Len(t, resp.Categories[xtream.TypeMovie], 1)
+	assert.NotEmpty(t, resp.AvailableChannels)
 }
 
 func TestXtreamGetPHP(t *testing.T) {
@@ -147,10 +194,37 @@ func TestXtreamGetPHP(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	body := rec.Body.String()
+	assert.Contains(t, body, "x-tvg-url=")
 	assert.Contains(t, body, "http://example.com/live/u/p/")
 	assert.Contains(t, body, "http://example.com/movie/u/p/")
 	assert.Contains(t, body, fmt.Sprintf("http://example.com/movie/u/p/%d.mp4", xxhash.Sum64String("Cool Movie")))
 	assert.Contains(t, body, fmt.Sprintf("http://example.com/series/u/p/%d.mkv", xxhash.Sum64String("Test Show S01E02")))
+}
+
+func TestXtreamGetPHPOutputFormat(t *testing.T) {
+	h := setupXtreamHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/get.php?username=u&password=p&output=m3u8", nil)
+	rec := httptest.NewRecorder()
+	h.ServeGetPHP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), ".m3u8\n")
+}
+
+func TestXtreamPlayerAPIPostForm(t *testing.T) {
+	h := setupXtreamHandler(t)
+	t.Setenv("CREDENTIALS", "u:p")
+
+	form := "username=u&password=p"
+	req := httptest.NewRequest(http.MethodPost, "/player_api.php", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	h.ServePlayerAPI(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var root xtream.RootResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &root))
+	assert.Equal(t, 1, root.UserInfo.Auth)
 }
 
 func TestXtreamServeStreamUnknownID(t *testing.T) {
@@ -194,6 +268,19 @@ func TestXtreamShortEPG(t *testing.T) {
 	rec := playerAPIRequest(t, h, "action=get_short_epg&stream_id="+strconv.FormatUint(cnnID, 10))
 	require.Equal(t, http.StatusOK, rec.Code)
 
-	body := rec.Body.String()
-	assert.True(t, strings.Contains(body, "2024-01-01 12:00:00"), "start time not formatted: %s", body)
+	var short map[string][]xtream.EPGListingOut
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &short))
+	require.Len(t, short["epg_listings"], 1)
+	listing := short["epg_listings"][0]
+	assert.Equal(t, "2024-01-01 12:00:00", listing.Start)
+	assert.Equal(t, int64(1704110400), listing.StartTimestamp)
+	assert.Equal(t, "cnn.id", listing.ChannelID)
+	assert.NotEmpty(t, listing.Title)
+
+	rec = playerAPIRequest(t, h, "action=get_simple_data_table&stream_id="+strconv.FormatUint(cnnID, 10))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var table map[string][]xtream.EPGListingOut
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &table))
+	require.Len(t, table["epg_listings"], 1)
+	assert.Equal(t, 1, table["epg_listings"][0].NowPlaying)
 }
