@@ -103,6 +103,10 @@ func GetSortDirPath() string {
 	return filepath.Join(globalConfig.TempPath, "sorter/")
 }
 
+func GetSeriesCacheDirPath() string {
+	return filepath.Join(globalConfig.DataPath, "series-cache/")
+}
+
 func GetEPGDirPath() string {
 	return filepath.Join(globalConfig.DataPath, "epg/")
 }

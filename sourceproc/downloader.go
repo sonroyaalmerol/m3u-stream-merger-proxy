@@ -13,6 +13,7 @@ import (
 	"time"
 	"unsafe"
 
+	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
 	"m3u-stream-merger/xtream"
@@ -239,9 +240,14 @@ func handleXtreamSource(ctx context.Context, idx string, result *SourceDownloade
 		return
 	}
 
+	cacheDir := config.GetSeriesCacheDirPath()
+	paths := &xtream.SeriesCachePaths{
+		Stubs: filepath.Join(cacheDir, "stubs-"+idx+".bin"),
+		Frag:  filepath.Join(cacheDir, "frag-"+idx+".m3u"),
+	}
 	lineNum := 0
 	emitted := false
-	fetchErr := xtream.FetchPlaylistLines(ctx, client, func(line string) error {
+	fetchErr := xtream.FetchPlaylistLines(ctx, client, paths, func(line string) error {
 		if _, err := writer.WriteString(line + "\n"); err != nil {
 			return err
 		}
@@ -250,8 +256,6 @@ func handleXtreamSource(ctx context.Context, idx string, result *SourceDownloade
 		lineNum++
 		emitted = true
 		return nil
-	}, func(done, total int) {
-		result.setDetail("series %d/%d", done, total)
 	})
 
 	if fetchErr != nil {

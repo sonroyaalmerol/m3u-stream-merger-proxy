@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"m3u-stream-merger/logger"
@@ -145,23 +143,55 @@ func categoryMap(categories []RawCategory) map[string]string {
 	return m
 }
 
-const seriesInfoWorkers = 8
-
-// seriesFailLimit aborts the per-series fetch loop when the panel is failing everything.
-const seriesFailLimit = 25
-
-func xtreamSeriesWorkers() int {
-	if v := os.Getenv("XTREAM_SERIES_WORKERS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return min(n, 64)
-		}
-	}
-	return seriesInfoWorkers
+// EpisodeTitle mints the synthetic episode title; catalog IDs derive from it, so any change re-keys every episode.
+func EpisodeTitle(seriesName, seasonNum string, epNum int) string {
+	return fmt.Sprintf("%s S%sE%d", seriesName, strings.TrimPrefix(seasonNum, "0"), epNum)
 }
 
-// FetchPlaylistLines fetches the catalog concurrently and emits M3U lines in stable
-// section order (live, vod, series); onSeriesProgress receives (done, total) counts.
-func FetchPlaylistLines(ctx context.Context, c *Client, emit func(line string) error, onSeriesProgress func(done, total int)) error {
+func entryPair(title, group, tvgType, logo, tvgID, streamURL string) (string, string) {
+	attrs := fmt.Sprintf(`tvg-name="%s"`, escapeAttr(title))
+	if tvgID != "" {
+		attrs += fmt.Sprintf(` tvg-id="%s"`, escapeAttr(tvgID))
+	}
+	attrs += fmt.Sprintf(` tvg-type="%s"`, tvgType)
+	if logo != "" {
+		attrs += fmt.Sprintf(` tvg-logo="%s"`, escapeAttr(logo))
+	}
+	if group != "" {
+		attrs += fmt.Sprintf(` tvg-group="%s" group-title="%s"`, escapeAttr(group), escapeAttr(group))
+	}
+	return fmt.Sprintf("#EXTINF:-1 %s,%s", attrs, title), streamURL
+}
+
+// SeriesToLines renders one fetched series into the fragment M3U lines; must stay identical to the live emit path.
+func SeriesToLines(c *Client, seriesName, group string, info *RawSeriesInfo) []string {
+	var lines []string
+	for seasonNum, episodes := range info.Episodes {
+		for _, ep := range episodes {
+			epNum := ep.EpisodeNum
+			if epNum == 0 {
+				epNum, _ = strconv.Atoi(ep.ID.String())
+			}
+			ext := ep.ContainerExtension
+			if ext == "" {
+				ext = "mkv"
+			}
+			streamURL := fmt.Sprintf("%s/series/%s/%s/%s.%s", c.Host, c.Username, c.Password, ep.ID.String(), ext)
+			inf, u := entryPair(EpisodeTitle(seriesName, seasonNum, epNum), group, "series", ep.MovieImage, "", streamURL)
+			lines = append(lines, inf, u)
+		}
+	}
+	return lines
+}
+
+type SeriesCachePaths struct {
+	Stubs string
+	Frag  string
+}
+
+// FetchPlaylistLines emits M3U lines in stable section order (live, vod, cached series).
+// Ingest is exactly 6 upstream calls; series episode fan-out lives in the background populate loop.
+func FetchPlaylistLines(ctx context.Context, c *Client, cache *SeriesCachePaths, emit func(line string) error) error {
 	var (
 		liveCats, vodCats, seriesCats []RawCategory
 		live                          []RawLiveStream
@@ -193,21 +223,11 @@ func FetchPlaylistLines(ctx context.Context, c *Client, emit func(line string) e
 	seriesNames := categoryMap(seriesCats)
 
 	writeEntry := func(title, group, tvgType, logo, tvgID, streamURL string) error {
-		attrs := fmt.Sprintf(`tvg-name="%s"`, escapeAttr(title))
-		if tvgID != "" {
-			attrs += fmt.Sprintf(` tvg-id="%s"`, escapeAttr(tvgID))
-		}
-		attrs += fmt.Sprintf(` tvg-type="%s"`, tvgType)
-		if logo != "" {
-			attrs += fmt.Sprintf(` tvg-logo="%s"`, escapeAttr(logo))
-		}
-		if group != "" {
-			attrs += fmt.Sprintf(` tvg-group="%s" group-title="%s"`, escapeAttr(group), escapeAttr(group))
-		}
-		if err := emit(fmt.Sprintf("#EXTINF:-1 %s,%s", attrs, title)); err != nil {
+		extinf, u := entryPair(title, group, tvgType, logo, tvgID, streamURL)
+		if err := emit(extinf); err != nil {
 			return err
 		}
-		return emit(streamURL)
+		return emit(u)
 	}
 
 	for _, s := range live {
@@ -228,87 +248,52 @@ func FetchPlaylistLines(ctx context.Context, c *Client, emit func(line string) e
 		}
 	}
 
-	logger.Default.Logf("Xtream: fetching info for %d series", len(seriesList))
-
-	var (
-		emitMu sync.Mutex
-		first  error
-	)
-	setError := func(err error) {
-		emitMu.Lock()
-		defer emitMu.Unlock()
-		if first == nil {
-			first = err
-		}
+	if cache == nil {
+		return nil
 	}
 
-	jobs := make(chan RawSeries)
-	var wg sync.WaitGroup
-	var failStreak atomic.Int32
-	var seriesDone atomic.Int64
-	total := len(seriesList)
-	reportProgress := func() {
-		if onSeriesProgress != nil {
-			onSeriesProgress(int(seriesDone.Load()), total)
+	stubs := make([]SeriesStub, 0, len(seriesList))
+	for _, s := range seriesList {
+		id, err := strconv.ParseUint(s.SeriesID.String(), 10, 64)
+		if err != nil {
+			continue
 		}
-	}
-	for range xtreamSeriesWorkers() {
-		wg.Go(func() {
-			for series := range jobs {
-				if failStreak.Load() >= seriesFailLimit {
-					continue
-				}
-				info, err := c.SeriesInfo(ctx, series.SeriesID.String())
-				if n := seriesDone.Add(1); n%1000 == 0 {
-					reportProgress()
-				}
-				if err != nil {
-					if n := failStreak.Add(1); n == seriesFailLimit {
-						logger.Default.Warnf("Xtream get_series_info failed %d times in a row, skipping remaining series", seriesFailLimit)
-					} else if n < seriesFailLimit {
-						logger.Default.Warnf("xtream get_series_info %s (%s): %v", series.SeriesID.String(), series.Name, err)
-					}
-					continue
-				}
-				failStreak.Store(0)
-				for seasonNum, episodes := range info.Episodes {
-					for _, ep := range episodes {
-						epNum := ep.EpisodeNum
-						if epNum == 0 {
-							epNum, _ = strconv.Atoi(ep.ID.String())
-						}
-						title := fmt.Sprintf("%s S%sE%d", series.Name, strings.TrimPrefix(seasonNum, "0"), epNum)
-						ext := ep.ContainerExtension
-						if ext == "" {
-							ext = "mkv"
-						}
-						streamURL := fmt.Sprintf("%s/series/%s/%s/%s.%s", c.Host, c.Username, c.Password, ep.ID.String(), ext)
-						emitMu.Lock()
-						err := writeEntry(title, seriesNames[series.CategoryID.String()], "series", ep.MovieImage, "", streamURL)
-						emitMu.Unlock()
-						if err != nil {
-							setError(err)
-							return
-						}
-					}
-				}
-			}
+		stubs = append(stubs, SeriesStub{
+			UpstreamID: id,
+			Name:       s.Name,
+			Group:      seriesNames[s.CategoryID.String()],
+			Cover:      s.Cover,
 		})
 	}
-	for _, series := range seriesList {
-		select {
-		case jobs <- series:
-		case <-ctx.Done():
-			close(jobs)
-			wg.Wait()
-			return ctx.Err()
+	if err := WriteSeriesStubs(cache.Stubs, stubs); err != nil {
+		logger.Default.Warnf("Xtream series stub write failed: %v", err)
+	}
+
+	entries, err := ReadSeriesFragment(cache.Frag)
+	if err != nil {
+		return nil
+	}
+	byID := make(map[uint64][]string, len(entries))
+	for _, e := range entries {
+		byID[e.UpstreamID] = e.Lines
+	}
+	replayed := 0
+	for _, s := range seriesList {
+		id, err := strconv.ParseUint(s.SeriesID.String(), 10, 64)
+		if err != nil {
+			continue
+		}
+		for _, line := range byID[id] {
+			if err := emit(line); err != nil {
+				return err
+			}
+			replayed++
 		}
 	}
-	close(jobs)
-	wg.Wait()
-	reportProgress()
-
-	return first
+	if replayed > 0 {
+		logger.Default.Logf("Xtream: replayed %d cached series lines", replayed)
+	}
+	return nil
 }
 
 // escapeAttr escapes a value for use inside a double-quoted M3U attribute.

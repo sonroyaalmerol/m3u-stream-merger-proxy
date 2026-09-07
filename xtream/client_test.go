@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -48,10 +49,10 @@ func TestFetchPlaylistLines(t *testing.T) {
 	client := NewClient(server.URL, "user", "pass")
 
 	var lines []string
-	err := FetchPlaylistLines(context.Background(), client, func(line string) error {
+	err := FetchPlaylistLines(context.Background(), client, nil, func(line string) error {
 		lines = append(lines, line)
 		return nil
-	}, nil)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,13 +63,58 @@ func TestFetchPlaylistLines(t *testing.T) {
 		fmt.Sprintf("%s/live/user/pass/100.ts", server.URL),
 		`#EXTINF:-1 tvg-name="Cool Movie" tvg-type="movie" tvg-logo="http://img/m.png" tvg-group="Movies" group-title="Movies",Cool Movie`,
 		fmt.Sprintf("%s/movie/user/pass/200.mp4", server.URL),
-		`#EXTINF:-1 tvg-name="Test Show S1E2" tvg-type="series" tvg-logo="http://img/ep.png" tvg-group="Drama" group-title="Drama",Test Show S1E2`,
-		fmt.Sprintf("%s/series/user/pass/301.mkv", server.URL),
 	}
 	for _, want := range wantSubstrings {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing line:\n%s\ngot:\n%s", want, joined)
 		}
+	}
+	if strings.Contains(joined, "Test Show") {
+		t.Fatal("series episodes must not be fetched at ingest")
+	}
+}
+
+func TestFetchPlaylistLinesFragmentReplay(t *testing.T) {
+	server := httptest.NewServer(fakePanel())
+	defer server.Close()
+
+	client := NewClient(server.URL, "user", "pass")
+	info, err := client.SeriesInfo(context.Background(), "300")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	frag := filepath.Join(dir, "frag.m3u")
+	entry := FragmentEntry{UpstreamID: 300, Lines: SeriesToLines(client, "Test Show", "Drama", info)}
+	if err := WriteSeriesFragment(frag, []FragmentEntry{entry}); err != nil {
+		t.Fatal(err)
+	}
+
+	cache := &SeriesCachePaths{Stubs: filepath.Join(dir, "stubs.bin"), Frag: frag}
+	var lines []string
+	if err := FetchPlaylistLines(context.Background(), client, cache, func(line string) error {
+		lines = append(lines, line)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	joined := strings.Join(lines, "\n")
+	want := []string{
+		`#EXTINF:-1 tvg-name="Test Show S1E2" tvg-type="series" tvg-logo="http://img/ep.png" tvg-group="Drama" group-title="Drama",Test Show S1E2`,
+		fmt.Sprintf("%s/series/user/pass/301.mkv", server.URL),
+	}
+	for _, w := range want {
+		if !strings.Contains(joined, w) {
+			t.Errorf("missing:\n%s\ngot:\n%s", w, joined)
+		}
+	}
+	stubs, err := ReadSeriesStubs(cache.Stubs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stubs) != 1 || stubs[0].UpstreamID != 300 || stubs[0].Name != "Test Show" || stubs[0].Group != "Drama" || stubs[0].Cover != "http://img/show.png" {
+		t.Fatalf("unexpected stubs: %+v", stubs)
 	}
 }
 
@@ -77,7 +123,7 @@ func TestFetchPlaylistLinesBadAuth(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, "user", "wrong")
-	err := FetchPlaylistLines(context.Background(), client, func(string) error { return nil }, nil)
+	err := FetchPlaylistLines(context.Background(), client, nil, func(string) error { return nil })
 	if err == nil {
 		t.Fatal("expected error for bad credentials")
 	}
@@ -100,10 +146,10 @@ func TestFetchRetriesTruncatedResponse(t *testing.T) {
 
 	client := NewClient(server.URL, "user", "pass")
 	var lines []string
-	err := FetchPlaylistLines(context.Background(), client, func(line string) error {
+	err := FetchPlaylistLines(context.Background(), client, nil, func(line string) error {
 		lines = append(lines, line)
 		return nil
-	}, nil)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,27 +158,3 @@ func TestFetchRetriesTruncatedResponse(t *testing.T) {
 	}
 }
 
-func TestSeriesInfoFailFast(t *testing.T) {
-	var calls int32
-	panel := fakePanel()
-	mux := http.NewServeMux()
-	mux.HandleFunc("/player_api.php", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("action") == "get_series_info" {
-			atomic.AddInt32(&calls, 1)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		panel.ServeHTTP(w, r)
-	})
-	server := httptest.NewServer(mux)
-	defer server.Close()
-
-	client := NewClient(server.URL, "user", "pass")
-	err := FetchPlaylistLines(context.Background(), client, func(string) error { return nil }, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := atomic.LoadInt32(&calls); n > seriesFailLimit+seriesInfoWorkers {
-		t.Fatalf("get_series_info called %d times, expected <= %d", n, seriesFailLimit+seriesInfoWorkers)
-	}
-}
