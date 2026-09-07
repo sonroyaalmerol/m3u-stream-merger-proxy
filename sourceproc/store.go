@@ -181,8 +181,23 @@ type StreamStoreWriter struct {
 	gen   uint64
 	file  *os.File
 	buf   *bufio.Writer
+	count *countingWriter
+	enc   *json.Encoder
 	off   uint64
 	index []indexEntry
+}
+
+// countingWriter reports record length so Add can encode straight into the buffer instead of marshaling to a slice.
+type countingWriter struct {
+	w *bufio.Writer
+	n int
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += n
+
+	return n, err
 }
 
 func NewStreamStoreWriter() (*StreamStoreWriter, error) {
@@ -204,23 +219,24 @@ func NewStreamStoreWriter() (*StreamStoreWriter, error) {
 		return nil, err
 	}
 
+	buf := bufio.NewWriterSize(file, 1<<20)
+	count := &countingWriter{w: buf}
+
 	return &StreamStoreWriter{
-		gen:  gen,
-		file: file,
-		buf:  bufio.NewWriterSize(file, 1<<20),
+		gen:   gen,
+		file:  file,
+		buf:   buf,
+		count: count,
+		enc:   json.NewEncoder(count),
 	}, nil
 }
 
 func (w *StreamStoreWriter) Add(key uint64, stream *StreamInfo) error {
-	payload, err := json.Marshal(stream)
-	if err != nil {
+	w.count.n = 0
+	if err := w.enc.Encode(stream); err != nil {
 		return err
 	}
-
-	n, err := w.buf.Write(payload)
-	if err != nil {
-		return err
-	}
+	n := w.count.n
 
 	w.index = append(w.index, indexEntry{key: key, off: w.off, size: uint32(n)})
 	w.off += uint64(n)
