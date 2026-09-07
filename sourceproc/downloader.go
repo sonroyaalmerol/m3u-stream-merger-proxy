@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"unsafe"
 
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
@@ -234,16 +235,44 @@ func handleXtreamSource(idx string, result *SourceDownloaderResult) {
 	}
 }
 
+// ponytail: 32 KiB arena chunks, one pinned per surviving line; shrink if a heavy EXCLUDE filter keeps few lines per chunk.
+const (
+	lineArenaChunk = 32 << 10
+	lineSlabSize   = 512
+)
+
 func scanAndStream(r io.Reader, result *SourceDownloaderResult) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 
+	var (
+		arena []byte
+		slab  []LineDetails
+	)
+
 	lineNum := 0
 	for scanner.Scan() {
-		result.Lines <- &LineDetails{
-			Content: scanner.Text(),
-			LineNum: lineNum,
+		b := scanner.Bytes()
+		content := ""
+		if len(b) > 0 {
+			if len(arena) < len(b) {
+				arena = make([]byte, max(lineArenaChunk, len(b)))
+			}
+			n := copy(arena, b)
+			// Arena bytes are written once and never revised, so the view cannot observe a mutation.
+			content = unsafe.String(unsafe.SliceData(arena), n)
+			arena = arena[n:]
 		}
+
+		if len(slab) == 0 {
+			slab = make([]LineDetails, lineSlabSize)
+		}
+		line := &slab[0]
+		slab = slab[1:]
+		line.Content = content
+		line.LineNum = lineNum
+
+		result.Lines <- line
 		lineNum++
 	}
 
