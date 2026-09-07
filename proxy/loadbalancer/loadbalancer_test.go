@@ -37,7 +37,7 @@ func testURLs(index string, m map[string]string) []sourceproc.StreamURL {
 			line, url = "0", m[hash]
 		}
 		n, _ := strconv.Atoi(line)
-		out = append(out, sourceproc.StreamURL{M3UIndex: index, Hash: hash, LineNum: n, URL: url})
+		out = append(out, sourceproc.StreamURL{M3UIndex: index, LineNum: n, URL: url})
 	}
 
 	return out
@@ -287,7 +287,7 @@ func TestLoadBalancer(t *testing.T) {
 			expectErr:      false,
 			expectedURL:    "http://test1.com/stream",
 			expectedIndex:  "1",
-			expectedSubIdx: "a",
+			expectedSubIdx: sourceproc.URLKey("http://test1.com/stream"),
 		},
 		{
 			name: "fallback to backup stream",
@@ -303,7 +303,7 @@ func TestLoadBalancer(t *testing.T) {
 			expectErr:      false,
 			expectedURL:    "http://test1.com/backup",
 			expectedIndex:  "1",
-			expectedSubIdx: "b",
+			expectedSubIdx: sourceproc.URLKey("http://test1.com/backup"),
 		},
 		{
 			name: "all attempts fail",

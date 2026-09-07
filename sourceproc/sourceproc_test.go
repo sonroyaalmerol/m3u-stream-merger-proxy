@@ -510,7 +510,7 @@ func TestMergeAttributesToM3UFile(t *testing.T) {
 	s1 = mergeStreamInfoAttributes(s1, s5)
 
 	baseURL := "http://dummy" // base URL for stream generation
-	entry := formatStreamEntry(baseURL, s1)
+	entry := formatStreamEntry(baseURL, EncodeSlug(s1), s1)
 	m3uContent := "#EXTM3U\n" + entry
 
 	tempFile, err := os.CreateTemp("", "merged-*.m3u")
