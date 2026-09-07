@@ -303,7 +303,7 @@ func TestSortingVariations(t *testing.T) {
 	}{
 		{
 			name:      "sort by name ascending",
-			key:       "",
+			key:       "title",
 			direction: "asc",
 			validate: func(t *testing.T, streams []testStreamInfo) {
 				// Verify ALL channels are in ascending alphabetical order
@@ -318,7 +318,7 @@ func TestSortingVariations(t *testing.T) {
 		},
 		{
 			name:      "sort by name descending",
-			key:       "",
+			key:       "title",
 			direction: "desc",
 			validate: func(t *testing.T, streams []testStreamInfo) {
 				// Verify ALL channels are in descending alphabetical order
