@@ -30,3 +30,13 @@ func IsAnM3U8Media(resp *http.Response) bool {
 
 	return slices.Contains(knownMimeTypes, strings.ToLower(resp.Header.Get("Content-Type"))) || conditionTwo
 }
+
+func IsATSMedia(resp *http.Response) bool {
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "mp2t") {
+		return true
+	}
+	if resp.Request != nil && resp.Request.URL != nil {
+		return strings.EqualFold(filepath.Ext(resp.Request.URL.Path), ".ts")
+	}
+	return false
+}
