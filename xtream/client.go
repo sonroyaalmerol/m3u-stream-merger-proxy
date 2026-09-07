@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -149,15 +150,43 @@ const seriesInfoWorkers = 8
 // seriesFailLimit aborts the per-series fetch loop when the panel is failing everything.
 const seriesFailLimit = 25
 
-// FetchPlaylistLines pulls the full account catalog from the panel and emits
-// synthesized M3U lines through emit. Line order between live, vod and series
-// sections is stable but episode order within series is not (concurrent fetch).
-// ponytail: fixed 8-worker pool keeps per-series get_series_info calls polite;
-// make it configurable if large panels need faster syncs.
-func FetchPlaylistLines(ctx context.Context, c *Client, emit func(line string) error) error {
-	liveCats, _ := c.LiveCategories(ctx)
-	vodCats, _ := c.VodCategories(ctx)
-	seriesCats, _ := c.SeriesCategories(ctx)
+func xtreamSeriesWorkers() int {
+	if v := os.Getenv("XTREAM_SERIES_WORKERS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return min(n, 64)
+		}
+	}
+	return seriesInfoWorkers
+}
+
+// FetchPlaylistLines fetches the catalog concurrently and emits M3U lines in stable
+// section order (live, vod, series); onSeriesProgress receives (done, total) counts.
+func FetchPlaylistLines(ctx context.Context, c *Client, emit func(line string) error, onSeriesProgress func(done, total int)) error {
+	var (
+		liveCats, vodCats, seriesCats []RawCategory
+		live                          []RawLiveStream
+		vod                           []RawVodStream
+		seriesList                    []RawSeries
+		liveErr, vodErr, seriesErr    error
+		fetchWg                       sync.WaitGroup
+	)
+	fetchWg.Go(func() { liveCats, _ = c.LiveCategories(ctx) })
+	fetchWg.Go(func() { vodCats, _ = c.VodCategories(ctx) })
+	fetchWg.Go(func() { seriesCats, _ = c.SeriesCategories(ctx) })
+	fetchWg.Go(func() { live, liveErr = c.LiveStreams(ctx) })
+	fetchWg.Go(func() { vod, vodErr = c.VodStreams(ctx) })
+	fetchWg.Go(func() { seriesList, seriesErr = c.SeriesList(ctx) })
+	fetchWg.Wait()
+
+	if liveErr != nil {
+		return fmt.Errorf("get_live_streams: %w", liveErr)
+	}
+	if vodErr != nil {
+		return fmt.Errorf("get_vod_streams: %w", vodErr)
+	}
+	if seriesErr != nil {
+		return fmt.Errorf("get_series: %w", seriesErr)
+	}
 
 	liveNames := categoryMap(liveCats)
 	vodNames := categoryMap(vodCats)
@@ -181,10 +210,6 @@ func FetchPlaylistLines(ctx context.Context, c *Client, emit func(line string) e
 		return emit(streamURL)
 	}
 
-	live, err := c.LiveStreams(ctx)
-	if err != nil {
-		return fmt.Errorf("get_live_streams: %w", err)
-	}
 	for _, s := range live {
 		streamURL := fmt.Sprintf("%s/live/%s/%s/%s.ts", c.Host, c.Username, c.Password, s.StreamID.String())
 		if err := writeEntry(s.Name, liveNames[s.CategoryID.String()], "live", s.StreamIcon, s.EPGChannelID, streamURL); err != nil {
@@ -192,10 +217,6 @@ func FetchPlaylistLines(ctx context.Context, c *Client, emit func(line string) e
 		}
 	}
 
-	vod, err := c.VodStreams(ctx)
-	if err != nil {
-		return fmt.Errorf("get_vod_streams: %w", err)
-	}
 	for _, s := range vod {
 		ext := s.ContainerExtension
 		if ext == "" {
@@ -205,11 +226,6 @@ func FetchPlaylistLines(ctx context.Context, c *Client, emit func(line string) e
 		if err := writeEntry(s.Name, vodNames[s.CategoryID.String()], "movie", s.StreamIcon, "", streamURL); err != nil {
 			return err
 		}
-	}
-
-	seriesList, err := c.SeriesList(ctx)
-	if err != nil {
-		return fmt.Errorf("get_series: %w", err)
 	}
 
 	logger.Default.Logf("Xtream: fetching info for %d series", len(seriesList))
@@ -229,13 +245,23 @@ func FetchPlaylistLines(ctx context.Context, c *Client, emit func(line string) e
 	jobs := make(chan RawSeries)
 	var wg sync.WaitGroup
 	var failStreak atomic.Int32
-	for range seriesInfoWorkers {
+	var seriesDone atomic.Int64
+	total := len(seriesList)
+	reportProgress := func() {
+		if onSeriesProgress != nil {
+			onSeriesProgress(int(seriesDone.Load()), total)
+		}
+	}
+	for range xtreamSeriesWorkers() {
 		wg.Go(func() {
 			for series := range jobs {
 				if failStreak.Load() >= seriesFailLimit {
 					continue
 				}
 				info, err := c.SeriesInfo(ctx, series.SeriesID.String())
+				if n := seriesDone.Add(1); n%1000 == 0 {
+					reportProgress()
+				}
 				if err != nil {
 					if n := failStreak.Add(1); n == seriesFailLimit {
 						logger.Default.Warnf("Xtream get_series_info failed %d times in a row, skipping remaining series", seriesFailLimit)
@@ -280,6 +306,7 @@ func FetchPlaylistLines(ctx context.Context, c *Client, emit func(line string) e
 	}
 	close(jobs)
 	wg.Wait()
+	reportProgress()
 
 	return first
 }

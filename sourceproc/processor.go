@@ -16,6 +16,8 @@ import (
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
+
+	"github.com/goccy/go-json"
 )
 
 type M3UProcessor struct {
@@ -48,46 +50,19 @@ func NewProcessor() *M3UProcessor {
 	return processor
 }
 
-var progressInterval = 5 * time.Second
-
 func (p *M3UProcessor) Start(r *http.Request) {
 	start := time.Now()
 	errors := p.processStreams(r)
-
-	done := make(chan struct{})
-	go p.reportProgress(start, done)
 
 	for err := range errors {
 		if err != nil {
 			logger.Default.Errorf("Error while processing stream: %v", err)
 		}
 	}
-	close(done)
 
 	total := p.streamCount.Load()
 	elapsed := time.Since(start).Seconds()
 	logger.Default.Logf("Ingest complete: %d streams in %.1fs (%.0f streams/s)", total, elapsed, float64(total)/max(elapsed, 0.001))
-}
-
-func (p *M3UProcessor) reportProgress(start time.Time, done <-chan struct{}) {
-	ticker := time.NewTicker(progressInterval)
-	defer ticker.Stop()
-	last := int64(-1)
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			n := p.streamCount.Load()
-			elapsed := time.Since(start).Seconds()
-			if n == last {
-				logger.Default.Logf("Processed %d streams so far (%.0fs elapsed, no new streams in %s)", n, elapsed, progressInterval)
-				continue
-			}
-			logger.Default.Logf("Processed %d streams so far (%.0fs elapsed)", n, elapsed)
-			last = n
-		}
-	}
 }
 
 func (p *M3UProcessor) Wait(ctx context.Context) error {
@@ -172,15 +147,18 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 		p.revalidatingDone = make(chan struct{})
 	}
 
-	results := streamDownloadM3USources()
+	tracker := newIngestProgress(p.streamCount.Load)
+	results := streamDownloadM3USources(tracker)
 	baseURL := utils.DetermineBaseURL(r)
 
-	streamCh := make(chan pendingStream, 4096)
+	streamCh := make(chan pendingStream, 8192)
 	errors := make(chan error, 4096)
 
 	go func() {
 		defer close(errors)
 		defer p.cleanup()
+
+		go tracker.run()
 
 		var wgProducers sync.WaitGroup
 		for result := range results {
@@ -224,12 +202,175 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 		}
 
 		wgWorkers.Wait()
+		tracker.stop()
 
 		logger.Default.Logf("Parsing complete: %d streams accepted, compiling playlist", p.streamCount.Load())
 		p.compileM3U(baseURL)
 	}()
 
 	return errors
+}
+
+// compileBlockSize balances dispatch overhead against reorder-buffer memory at 1M streams.
+const compileBlockSize = 4096
+
+// storeRecord is a pre-marshaled store entry; key rides along for the ordered index build.
+type storeRecord struct {
+	key  uint64
+	data []byte
+}
+
+type compileBlock struct {
+	seq    int
+	m3u    string
+	recs   []storeRecord
+	tvgIDs []string
+}
+
+type inBlock struct {
+	seq     int
+	entries []*StreamInfo
+}
+
+// compileM3U renders the sorted playlist block-parallel; workers slug + render
+// + marshal while one ordered writer appends, so output matches a sequential render.
+func (p *M3UProcessor) compileM3U(baseURL string) {
+	p.Lock()
+	defer p.Unlock()
+
+	defer func() {
+		p.file.Close()
+		p.sortingMgr.Close()
+		close(p.revalidatingDone)
+	}()
+
+	header := "#EXTM3U"
+	if len(utils.GetEPGIndexes()) > 0 {
+		header += fmt.Sprintf(` url-tvg="%s/epg.xml"`, baseURL)
+	}
+	header += "\n"
+	if _, err := p.writer.WriteString(header); err != nil {
+		p.markCriticalError(err)
+		return
+	}
+
+	storeWriter, err := NewStreamStoreWriter()
+	if err != nil {
+		p.markCriticalError(err)
+		return
+	}
+	p.storeWriter = storeWriter
+
+	p.tvgIDs = make(map[string]struct{})
+
+	var (
+		encMu  sync.Mutex
+		encErr error
+	)
+	setErr := func(err error) {
+		if err == nil {
+			return
+		}
+		encMu.Lock()
+		if encErr == nil {
+			encErr = err
+		}
+		encMu.Unlock()
+	}
+
+	blockCh := make(chan inBlock, 4)
+	outCh := make(chan *compileBlock, 8)
+
+	var wg sync.WaitGroup
+	for range max(1, runtime.GOMAXPROCS(0)) {
+		wg.Go(func() {
+			slugBuf := make([]byte, 0, slugBufSize)
+			for blk := range blockCh {
+				out := &compileBlock{seq: blk.seq}
+				var m3u strings.Builder
+				for _, entry := range blk.entries {
+					key, sum := slugParts(entry.Title)
+					if err := writeStreamEntry(&m3u, baseURL, sum, entry, slugBuf); err != nil {
+						setErr(err)
+					}
+					data, err := json.Marshal(entry)
+					if err != nil {
+						setErr(err)
+						continue
+					}
+					out.recs = append(out.recs, storeRecord{key: key, data: append(data, '\n')})
+					if entry.TvgID != "" {
+						out.tvgIDs = append(out.tvgIDs, entry.TvgID)
+					}
+				}
+				out.m3u = m3u.String()
+				outCh <- out
+			}
+		})
+	}
+	go func() {
+		wg.Wait()
+		close(outCh)
+	}()
+
+	go func() {
+		defer close(blockCh)
+		var entries []*StreamInfo
+		seq := 0
+		flush := func() {
+			blockCh <- inBlock{seq: seq, entries: entries}
+			seq++
+			entries = nil
+		}
+		err := p.sortingMgr.GetSortedEntries(func(entry *StreamInfo) {
+			if entries == nil {
+				entries = make([]*StreamInfo, 0, compileBlockSize)
+			}
+			entries = append(entries, entry)
+			if len(entries) == compileBlockSize {
+				flush()
+			}
+		})
+		if err != nil {
+			setErr(err)
+		}
+		if entries != nil {
+			flush()
+		}
+	}()
+
+	pending := make(map[int]*compileBlock)
+	next := 0
+	for out := range outCh {
+		pending[out.seq] = out
+		for {
+			b, ok := pending[next]
+			if !ok {
+				break
+			}
+			delete(pending, next)
+			next++
+			if _, err := p.writer.WriteString(b.m3u); err != nil {
+				p.markCriticalError(err)
+			}
+			for _, rec := range b.recs {
+				if err := storeWriter.AddRaw(rec.key, rec.data); err != nil {
+					p.markCriticalError(err)
+				}
+			}
+			for _, id := range b.tvgIDs {
+				p.tvgIDs[id] = struct{}{}
+			}
+		}
+	}
+
+	if encErr != nil {
+		p.markCriticalError(encErr)
+		return
+	}
+	if err := p.writer.Flush(); err != nil {
+		p.markCriticalError(err)
+	}
 }
 
 func (p *M3UProcessor) applyNewRemoteFiles() {
@@ -242,7 +383,6 @@ func (p *M3UProcessor) applyNewRemoteFiles() {
 		finalPath := utils.GetM3UFilePathByIndex(idx)
 		tmpPath := finalPath + ".new"
 		if _, err := os.Stat(tmpPath); err == nil {
-			// Rename the temporary file to the final file.
 			if err := os.Rename(tmpPath, finalPath); err != nil {
 				logger.Default.Errorf("Error renaming remote file %s: %v", tmpPath, err)
 			}
@@ -281,70 +421,6 @@ func (p *M3UProcessor) addStream(stream *StreamInfo) error {
 	return p.sortingMgr.AddToSorter(stream)
 }
 
-func (p *M3UProcessor) compileM3U(baseURL string) {
-	p.Lock()
-	defer p.Unlock()
-
-	defer func() {
-		p.file.Close()
-		p.sortingMgr.Close()
-		close(p.revalidatingDone)
-	}()
-
-	header := "#EXTM3U"
-	if len(utils.GetEPGIndexes()) > 0 {
-		header += fmt.Sprintf(` url-tvg="%s/epg.xml"`, baseURL)
-	}
-	header += "\n"
-	_, err := p.writer.WriteString(header)
-	if err != nil {
-		p.markCriticalError(err)
-		return
-	}
-
-	storeWriter, err := NewStreamStoreWriter()
-	if err != nil {
-		p.markCriticalError(err)
-		return
-	}
-	p.storeWriter = storeWriter
-
-	p.tvgIDs = make(map[string]struct{})
-	slugBuf := make([]byte, 0, slugBufSize)
-	err = p.sortingMgr.GetSortedEntries(func(entry *StreamInfo) {
-		key, sum := slugParts(entry.Title)
-		writeErr := writeStreamEntry(p.writer, baseURL, sum, entry, slugBuf)
-		if writeErr != nil {
-			p.markCriticalError(writeErr)
-		}
-		if storeErr := storeWriter.Add(key, entry); storeErr != nil {
-			p.markCriticalError(storeErr)
-		}
-		if entry.TvgID != "" {
-			p.tvgIDs[entry.TvgID] = struct{}{}
-		}
-	})
-	if err != nil {
-		p.markCriticalError(err)
-		return
-	}
-
-	if flushErr := p.writer.Flush(); flushErr != nil {
-		p.markCriticalError(flushErr)
-		return
-	}
-}
-
-func (p *M3UProcessor) cleanup() {
-	if p.writer != nil {
-		p.writer.Flush()
-	}
-	if p.file != nil {
-		p.file.Close()
-	}
-}
-
-// pendingStream carries one raw EXTINF/URL pair from the producer to the worker pool.
 type pendingStream struct {
 	extinf   string
 	urlLine  LineDetails
@@ -373,8 +449,7 @@ func (p *M3UProcessor) handleDownloaded(result *SourceDownloaderResult, streamCh
 	}
 }
 
-// saveTvgIDs writes the collected tvg-id set to disk so the EPG processor can
-// filter out channels and programmes not present in the merged playlist.
+// saveTvgIDs persists the tvg-id set so the EPG processor can filter to merged channels.
 func (p *M3UProcessor) saveTvgIDs() {
 	if len(p.tvgIDs) == 0 {
 		return
@@ -393,10 +468,18 @@ func (p *M3UProcessor) saveTvgIDs() {
 	}
 }
 
-// GetTvgIDs returns the set of tvg-id values seen in the last successful
-// M3U compilation.  Returns nil when no compilation has run yet.
+// GetTvgIDs returns the tvg-id set from the last successful compile, nil before one runs.
 func (p *M3UProcessor) GetTvgIDs() map[string]struct{} {
 	return p.tvgIDs
+}
+
+func (p *M3UProcessor) cleanup() {
+	if p.writer != nil {
+		p.writer.Flush()
+	}
+	if p.file != nil {
+		p.file.Close()
+	}
 }
 
 func createResultFile(path string) (*os.File, error) {

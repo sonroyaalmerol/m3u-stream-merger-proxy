@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -19,20 +18,39 @@ import (
 	"m3u-stream-merger/xtream"
 )
 
-type SourceDownloaderResult struct {
-	Index string
-	Lines chan *LineDetails
-	Error chan error
-
-	lines atomic.Int64
-}
-
 type LineDetails struct {
 	Content string
 	LineNum int
 }
 
-func streamDownloadM3USources() chan *SourceDownloaderResult {
+type SourceDownloaderResult struct {
+	Index string
+	Kind  string
+	Lines chan *LineDetails
+	Error chan error
+
+	sp *sourceProgress
+}
+
+// Count reports lines seen so far for this source.
+func (r *SourceDownloaderResult) Count() int64 {
+	if r.sp == nil {
+		return 0
+	}
+	return r.sp.lines.Load()
+}
+func (r *SourceDownloaderResult) addLine() {
+	r.sp.lines.Add(1)
+}
+
+func (r *SourceDownloaderResult) setDetail(format string, args ...any) {
+	if r.sp != nil {
+		r.sp.setDetail(format, args...)
+	}
+}
+
+// streamDownloadM3USources runs one goroutine per source; progress goes through the shared tracker.
+func streamDownloadM3USources(tracker *ingestProgress) chan *SourceDownloaderResult {
 	resultChan := make(chan *SourceDownloaderResult)
 	indexes := utils.GetM3UIndexes()
 
@@ -45,11 +63,14 @@ func streamDownloadM3USources() chan *SourceDownloaderResult {
 			go func(idx string) {
 				defer wg.Done()
 
+				kind := sourceKind(idx)
 				result := &SourceDownloaderResult{
 					Index: idx,
+					Kind:  kind,
 					Lines: make(chan *LineDetails, 1000),
 					Error: make(chan error, 1),
 				}
+				result.sp = tracker.register(idx, kind)
 
 				go func() {
 					defer close(result.Lines)
@@ -62,16 +83,7 @@ func streamDownloadM3USources() chan *SourceDownloaderResult {
 						return
 					}
 
-					kind := "m3u"
-					if m3uURL == "" {
-						kind = "xtream"
-					} else if strings.HasPrefix(m3uURL, "file://") {
-						kind = "file"
-					}
-
 					start := time.Now()
-					done := make(chan struct{})
-					go reportDownloadProgress(idx, kind, &result.lines, start, done)
 					logger.Default.Logf("Downloading source %s (%s)", idx, kind)
 
 					if m3uURL != "" {
@@ -81,12 +93,11 @@ func streamDownloadM3USources() chan *SourceDownloaderResult {
 							handleRemoteURL(m3uURL, idx, result)
 						}
 					} else {
-						handleXtreamSource(idx, result)
+						handleXtreamSource(context.Background(), idx, result)
 					}
-					close(done)
 
 					elapsed := time.Since(start).Seconds()
-					logger.Default.Logf("Downloaded source %s (%s): %d lines in %.1fs", idx, kind, result.lines.Load(), elapsed)
+					logger.Default.Logf("Downloaded source %s (%s): %d lines in %.1fs", idx, kind, result.Count(), elapsed)
 				}()
 
 				resultChan <- result
@@ -99,26 +110,15 @@ func streamDownloadM3USources() chan *SourceDownloaderResult {
 	return resultChan
 }
 
-// reportDownloadProgress mirrors the ingest heartbeat: fixed-interval line counts, zero per-line cost.
-func reportDownloadProgress(idx, kind string, lines *atomic.Int64, start time.Time, done <-chan struct{}) {
-	ticker := time.NewTicker(progressInterval)
-	defer ticker.Stop()
-	last := int64(-1)
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			n := lines.Load()
-			elapsed := time.Since(start).Seconds()
-			if n == last {
-				logger.Default.Logf("Downloading source %s (%s): %d lines so far (%.0fs elapsed, no new lines in %s)", idx, kind, n, elapsed, progressInterval)
-				continue
-			}
-			logger.Default.Logf("Downloading source %s (%s): %d lines so far (%.0fs elapsed)", idx, kind, n, elapsed)
-			last = n
-		}
+func sourceKind(idx string) string {
+	m3uURL := os.Getenv(fmt.Sprintf("M3U_URL_%s", idx))
+	if m3uURL == "" {
+		return "xtream"
 	}
+	if strings.HasPrefix(m3uURL, "file://") {
+		return "file"
+	}
+	return "m3u"
 }
 
 func handleLocalFile(localPath string, result *SourceDownloaderResult) {
@@ -195,8 +195,7 @@ func handleRemoteURL(m3uURL, idx string, result *SourceDownloaderResult) {
 	scanAndStream(reader, result)
 }
 
-// handleXtreamSource: fetch, tee into .new cache + Lines channel, fallback to last good cache.
-func handleXtreamSource(idx string, result *SourceDownloaderResult) {
+func handleXtreamSource(ctx context.Context, idx string, result *SourceDownloaderResult) {
 	finalPath := utils.GetM3UFilePathByIndex(idx)
 	tmpPath := finalPath + ".new"
 
@@ -242,15 +241,17 @@ func handleXtreamSource(idx string, result *SourceDownloaderResult) {
 
 	lineNum := 0
 	emitted := false
-	fetchErr := xtream.FetchPlaylistLines(context.Background(), client, func(line string) error {
+	fetchErr := xtream.FetchPlaylistLines(ctx, client, func(line string) error {
 		if _, err := writer.WriteString(line + "\n"); err != nil {
 			return err
 		}
 		result.Lines <- &LineDetails{Content: line, LineNum: lineNum}
-		result.lines.Add(1)
+		result.addLine()
 		lineNum++
 		emitted = true
 		return nil
+	}, func(done, total int) {
+		result.setDetail("series %d/%d", done, total)
 	})
 
 	if fetchErr != nil {
@@ -301,7 +302,6 @@ func scanAndStream(r io.Reader, result *SourceDownloaderResult) {
 				arena = make([]byte, max(lineArenaChunk, len(b)))
 			}
 			n := copy(arena, b)
-			// Arena bytes are written once and never revised, so the view cannot observe a mutation.
 			content = unsafe.String(unsafe.SliceData(arena), n)
 			arena = arena[n:]
 		}
@@ -315,7 +315,7 @@ func scanAndStream(r io.Reader, result *SourceDownloaderResult) {
 		line.LineNum = lineNum
 
 		result.Lines <- line
-		result.lines.Add(1)
+		result.addLine()
 		lineNum++
 	}
 

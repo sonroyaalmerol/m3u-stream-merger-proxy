@@ -51,7 +51,7 @@ func TestFetchPlaylistLines(t *testing.T) {
 	err := FetchPlaylistLines(context.Background(), client, func(line string) error {
 		lines = append(lines, line)
 		return nil
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestFetchPlaylistLinesBadAuth(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, "user", "wrong")
-	err := FetchPlaylistLines(context.Background(), client, func(string) error { return nil })
+	err := FetchPlaylistLines(context.Background(), client, func(string) error { return nil }, nil)
 	if err == nil {
 		t.Fatal("expected error for bad credentials")
 	}
@@ -103,7 +103,7 @@ func TestFetchRetriesTruncatedResponse(t *testing.T) {
 	err := FetchPlaylistLines(context.Background(), client, func(line string) error {
 		lines = append(lines, line)
 		return nil
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestSeriesInfoFailFast(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, "user", "pass")
-	err := FetchPlaylistLines(context.Background(), client, func(string) error { return nil })
+	err := FetchPlaylistLines(context.Background(), client, func(string) error { return nil }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -72,7 +73,8 @@ func streamID(title string) uint64 { return xxhash.Sum64String(title) }
 func seriesID(show string) uint64  { return xxhash.Sum64String("series|" + show) }
 func categoryID(key string) uint64 { return xxhash.Sum64String("cat|"+key) & 0x7FFFFFFF }
 
-// Rebuild parses the merged M3U and atomically swaps the catalog contents.
+// Rebuild parses the merged M3U and atomically swaps the catalog contents;
+// regexp-heavy entry parsing fans out across cores behind a file-order reorder buffer.
 func (c *Catalog) Rebuild(path string) error {
 	file, err := os.Open(path)
 	if err != nil {
@@ -86,28 +88,76 @@ func (c *Catalog) Rebuild(path string) error {
 		catIDs: make(map[string]uint64),
 		byID:   make(map[uint64]*Entry),
 	}
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 
-	var pending string
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "#EXTINF:") {
-			pending = line
-			continue
-		}
-		if pending == "" || strings.HasPrefix(line, "#") || !strings.HasPrefix(line, "http") {
-			pending = ""
-			continue
-		}
-		if entry := parseEntry(pending, line); entry != nil {
-			newC.add(entry)
-			newC.addCategory(entry)
-		}
-		pending = ""
+	type rawPair struct {
+		seq    int
+		extinf string
+		url    string
 	}
-	if err := scanner.Err(); err != nil {
-		return err
+	type parsedPair struct {
+		seq   int
+		entry *Entry
+	}
+	pairs := make(chan rawPair, 4096)
+	parsed := make(chan parsedPair, 4096)
+
+	var scanErr error
+	go func() {
+		defer close(pairs)
+		scanner := bufio.NewScanner(file)
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+
+		seq := 0
+		var pending string
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if strings.HasPrefix(line, "#EXTINF:") {
+				pending = line
+				continue
+			}
+			if pending == "" || strings.HasPrefix(line, "#") || !strings.HasPrefix(line, "http") {
+				pending = ""
+				continue
+			}
+			pairs <- rawPair{seq: seq, extinf: pending, url: line}
+			seq++
+			pending = ""
+		}
+		scanErr = scanner.Err()
+	}()
+
+	var pwg sync.WaitGroup
+	for range max(1, runtime.GOMAXPROCS(0)) {
+		pwg.Go(func() {
+			for p := range pairs {
+				parsed <- parsedPair{seq: p.seq, entry: parseEntry(p.extinf, p.url)}
+			}
+		})
+	}
+	go func() {
+		pwg.Wait()
+		close(parsed)
+	}()
+
+	reorder := make(map[int]*Entry)
+	next := 0
+	for res := range parsed {
+		reorder[res.seq] = res.entry
+		for {
+			e, ok := reorder[next]
+			if !ok {
+				break
+			}
+			delete(reorder, next)
+			next++
+			if e != nil {
+				newC.add(e)
+				newC.addCategory(e)
+			}
+		}
+	}
+	if scanErr != nil {
+		return scanErr
 	}
 
 	for _, list := range newC.cats {

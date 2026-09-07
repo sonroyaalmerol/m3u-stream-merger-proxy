@@ -188,11 +188,12 @@ services:
 
 Xtream Codes providers can be used as sources directly alongside (or instead of) M3U URLs. The proxy fetches live channels, VOD and full series episode listings via the provider's `player_api.php` and merges everything into `/playlist.m3u` like any other source. Indexes share the same namespace as `M3U_URL_X`, so filters and `M3U_MAX_CONCURRENCY_X` apply to Xtream sources as well.
 
-| ENV VAR                                                 | Description                                                                                             | Default Value | Possible Values            |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------- | -------------------------- |
-| XTREAM_URL_1, XTREAM_URL_2, XTREAM_URL_X                | Set the Xtream provider base URL (e.g. `http://provider:80`). Use an index not used by any `M3U_URL_X`. | N/A           | Any valid Xtream panel URL |
-| XTREAM_USERNAME_1, XTREAM_USERNAME_2, XTREAM_USERNAME_X | Set the username for the matching Xtream provider index.                                                | N/A           | Any string                 |
-| XTREAM_PASSWORD_1, XTREAM_PASSWORD_2, XTREAM_PASSWORD_X | Set the password for the matching Xtream provider index.                                                | N/A           | Any string                 |
+| ENV VAR                                                 | Description                                                                                                                      | Default Value | Possible Values            |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------- | -------------------------- |
+| XTREAM_URL_1, XTREAM_URL_2, XTREAM_URL_X                | Set the Xtream provider base URL (e.g. `http://provider:80`). Use an index not used by any `M3U_URL_X`.                          | N/A           | Any valid Xtream panel URL |
+| XTREAM_USERNAME_1, XTREAM_USERNAME_2, XTREAM_USERNAME_X | Set the username for the matching Xtream provider index.                                                                         | N/A           | Any string                 |
+| XTREAM_PASSWORD_1, XTREAM_PASSWORD_2, XTREAM_PASSWORD_X | Set the password for the matching Xtream provider index.                                                                         | N/A           | Any string                 |
+| XTREAM_SERIES_WORKERS                                   | Concurrent per-series `get_series_info` requests per Xtream source. Raise for large accounts; panels may rate-limit high values. | 8             | 1-64                       |
 
 ### EPG Source Configs
 

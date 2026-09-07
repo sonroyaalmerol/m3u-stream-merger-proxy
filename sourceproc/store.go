@@ -244,6 +244,17 @@ func (w *StreamStoreWriter) Add(key uint64, stream *StreamInfo) error {
 	return nil
 }
 
+// AddRaw appends a pre-marshaled record; compile workers marshal in parallel, one ordered caller keeps offsets sequential.
+func (w *StreamStoreWriter) AddRaw(key uint64, record []byte) error {
+	if _, err := w.buf.Write(record); err != nil {
+		return err
+	}
+	w.index = append(w.index, indexEntry{key: key, off: w.off, size: uint32(len(record))})
+	w.off += uint64(len(record))
+
+	return nil
+}
+
 func (w *StreamStoreWriter) Commit() error {
 	if err := w.buf.Flush(); err != nil {
 		_ = w.file.Close()
