@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"m3u-stream-merger/logger"
-	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/proxy/stream/config"
 	"m3u-stream-merger/store"
@@ -29,6 +28,9 @@ type ChunkData struct {
 	Timestamp time.Time
 	seq       int64
 }
+
+// Seq exposes the stream sequence number of the chunk.
+func (c *ChunkData) Seq() int64 { return c.seq }
 
 // Internal state constants.
 const (
@@ -205,11 +207,7 @@ func (c *StreamCoordinator) shouldTimeout(lastSuccess time.Time, timeout time.Du
 	return shouldTimeout
 }
 
-// shouldRetry indicates whether the writer should retry reading on error.
-func (c *StreamCoordinator) shouldRetry(timeout time.Duration) bool {
-	return c.config.TimeoutSeconds == 0 || timeout > 0
-}
-
+// shouldTimeout reports whether no data has been read for a full timeout window.
 func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 	if chunk == nil {
 		c.logger.Debug("Write: Received nil chunk")
@@ -254,12 +252,52 @@ func (c *StreamCoordinator) InitialPosition() *ring.Ring {
 	return c.Buffer.Prev()
 }
 
+// ResumePosition returns the ring slot holding the first chunk published
+// after lastSeq, so a reader can continue where it stopped across writer
+// restarts. ok is false when that data is no longer in the ring.
+func (c *StreamCoordinator) ResumePosition(lastSeq int64) (*ring.Ring, bool) {
+	c.Mu.RLock()
+	defer c.Mu.RUnlock()
+
+	current := c.Buffer.Next()
+	for i := 0; i < c.config.SharedBufferSize; i++ {
+		if chunk, ok := current.Value.(*ChunkData); ok && chunk != nil && chunk.seq > lastSeq {
+			return current, true
+		}
+		current = current.Next()
+	}
+	return nil, false
+}
+
+// EnsureActiveForWriter transitions the coordinator to the active state
+// for a writer that is about to start, clearing any terminal state left by
+// the previous writer. Stale error-marker chunks are wiped (they carry no
+// data) while data chunks are preserved so readers can resume.
+func (c *StreamCoordinator) EnsureActiveForWriter() {
+	c.Mu.Lock()
+	current := c.Buffer
+	for i := 0; i < c.config.SharedBufferSize; i++ {
+		if chunk, ok := current.Value.(*ChunkData); ok && chunk != nil &&
+			(chunk.Error != nil || chunk.Status != 0) {
+			current.Value = (*ChunkData)(nil)
+		}
+		current = current.Next()
+	}
+	if atomic.LoadInt32(&c.state) != stateActive {
+		atomic.StoreInt32(&c.state, stateActive)
+		c.LastError.Store((*ChunkData)(nil))
+		c.resetHeaderChan()
+	}
+	c.Mu.Unlock()
+}
+
 // ReadChunks retrieves chunks from the ring for a client, given a starting position.
 // clientSeq is the sequence number of the last chunk the client successfully read;
 // pass 0 on the first call. The returned int64 is the updated sequence to pass next time.
 func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.Ring, clientSeq int64) (
-	[]*ChunkData, *ChunkData, *ring.Ring, int64,
+	[]*ChunkData, *ChunkData, *ring.Ring, int64, bool,
 ) {
+	rejoined := false
 	c.Mu.RLock()
 	if fromPosition == nil {
 		c.logger.Debug("ReadChunks: fromPosition is nil, using current buffer")
@@ -274,6 +312,7 @@ func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.R
 			c.logger.Logf("Stream %s: reader lagged behind by %d chunks; rejoining at live edge",
 				c.streamID, jumped)
 			fromPosition = c.Buffer
+			rejoined = true
 		}
 	}
 
@@ -283,7 +322,7 @@ func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.R
 		select {
 		case <-ch:
 		case <-ctx.Done():
-			return nil, nil, fromPosition, clientSeq
+			return nil, nil, fromPosition, clientSeq, rejoined
 		}
 		c.Mu.RLock()
 	}
@@ -316,16 +355,16 @@ func (c *StreamCoordinator) ReadChunks(ctx context.Context, fromPosition *ring.R
 	c.Mu.RUnlock()
 
 	if errorChunk != nil {
-		return chunks, errorChunk, current, newClientSeq
+		return chunks, errorChunk, current, newClientSeq, rejoined
 	}
 
 	if lastErr := c.LastError.Load(); lastErr != nil {
 		if errChunk, ok := lastErr.(*ChunkData); ok && errChunk != nil {
-			return chunks, errChunk, current, newClientSeq
+			return chunks, errChunk, current, newClientSeq, rejoined
 		}
 	}
 
-	return chunks, nil, current, newClientSeq
+	return chunks, nil, current, newClientSeq, rejoined
 }
 
 func (c *StreamCoordinator) ClearBuffer() {
@@ -364,11 +403,7 @@ func (c *StreamCoordinator) readAndWriteStream(
 ) error {
 	var slab []byte
 	timeout := c.getTimeoutDuration()
-	backoff := proxy.NewBackoffStrategy(c.config.InitialBackoff,
-		time.Duration(c.config.TimeoutSeconds-1)*time.Second)
-
 	lastSuccess := time.Now()
-	lastErr := time.Now()
 	zeroReads := 0
 
 	var totalBytesRead int64
@@ -400,7 +435,6 @@ func (c *StreamCoordinator) readAndWriteStream(
 				continue
 			}
 
-			lastSuccess = time.Now()
 			zeroReads = 0
 			totalBytesRead += int64(n)
 
@@ -438,22 +472,16 @@ func (c *StreamCoordinator) readAndWriteStream(
 			}
 
 			if err != nil {
-				if c.shouldRetry(timeout) {
-					backoff.Sleep(ctx)
-					lastErr = time.Now()
-					continue
-				}
+				// Body read errors are terminal; retrying belongs to the
+				// handler, which re-runs the load balancer.
 				return err
 			}
 
 			if err = processChunk(chunk); err != nil {
 				return err
 			}
-
-			if time.Since(lastErr) >= time.Second {
-				backoff.Reset()
-				lastErr = time.Now()
-			}
+			// Paced publishing can take seconds; it is progress, not a stall.
+			lastSuccess = time.Now()
 		}
 	}
 	return nil

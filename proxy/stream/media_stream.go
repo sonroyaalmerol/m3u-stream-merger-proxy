@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"container/ring"
 	"context"
 	"fmt"
 	"io"
@@ -16,6 +17,20 @@ import (
 	"sync/atomic"
 	"time"
 )
+
+func alignToPayloadStart(data []byte) []byte {
+	limit := min(len(data), 8192)
+	for i := 0; i+188 <= limit; i++ {
+		if data[i] != 0x47 || data[i+1]&0x40 == 0 {
+			continue
+		}
+		if i+188 < limit && data[i+188] != 0x47 {
+			continue
+		}
+		return data[i:]
+	}
+	return data
+}
 
 var safeConcatTypes = map[string]bool{
 	"video/mp2t": true,
@@ -125,11 +140,20 @@ func (h *StreamHandler) HandleStream(
 	}
 
 	// Lock the initialization (writer-start) section.
+	// Register the client before starting the writer: RegisterClient resets
+	// a closed/draining coordinator, so the writer can never observe a
+	// stale closed state.
 	h.coordinator.InitializationMu.Lock()
+	if err := h.coordinator.RegisterClient(); err != nil {
+		h.coordinator.InitializationMu.Unlock()
+		return StreamResult{0, err, proxy.StatusServerError}
+	}
+
 	// Check if we have already started the writer.
 	if !h.coordinator.WriterActive.Load() {
 		// Mark the writer as started.
 		h.coordinator.WriterActive.Store(true)
+		h.coordinator.EnsureActiveForWriter()
 
 		h.coordinator.WriterCtxMu.Lock()
 		if h.coordinator.WriterCtx == nil {
@@ -137,9 +161,6 @@ func (h *StreamHandler) HandleStream(
 		}
 		writerCtx := h.coordinator.WriterCtx
 		h.coordinator.WriterCtxMu.Unlock()
-
-		h.coordinator.LastError.Store((*buffer.ChunkData)(nil))
-		h.coordinator.ClearBuffer()
 
 		// Start the writer in its own goroutine.
 		go func() {
@@ -155,11 +176,6 @@ func (h *StreamHandler) HandleStream(
 				h.coordinator.StartMediaWriter(writerCtx, lbResult)
 			}
 		}()
-	}
-
-	if err := h.coordinator.RegisterClient(); err != nil {
-		h.coordinator.InitializationMu.Unlock()
-		return StreamResult{0, err, proxy.StatusServerError}
 	}
 	h.coordinator.InitializationMu.Unlock()
 
@@ -180,17 +196,35 @@ func (h *StreamHandler) HandleStream(
 			h.coordinator.WriterCtx = nil
 			h.coordinator.WriterCtxMu.Unlock()
 
-			h.coordinator.LastError.Store((*buffer.ChunkData)(nil))
-			h.coordinator.ClearBuffer()
+			// On a writer error the handler retries immediately and the
+			// reader resumes from the ring; keep the backlog for that. When
+			// the client itself is gone the ring can be freed.
+			if ctx.Err() != nil {
+				h.coordinator.LastError.Store((*buffer.ChunkData)(nil))
+				h.coordinator.ClearBuffer()
+			}
 		}
 	}
 	defer cleanup()
 
 	var (
 		bytesWritten int64
-		lastPosition = h.coordinator.InitialPosition()
+		lastPosition *ring.Ring
 		lastSeq      int64
+		needAlign    = true
 	)
+	// Prefer resuming where this client left off (handler retry after a
+	// writer failover) over jumping to the live edge, which would skip data.
+	if streamClient.LastSeq > 0 {
+		if pos, ok := h.coordinator.ResumePosition(streamClient.LastSeq); ok {
+			lastPosition = pos
+			lastSeq = streamClient.LastSeq
+		}
+	}
+	if lastPosition == nil {
+		lastPosition = h.coordinator.InitialPosition()
+	}
+	defer func() { streamClient.LastSeq = lastSeq }()
 
 	for {
 		select {
@@ -199,8 +233,10 @@ func (h *StreamHandler) HandleStream(
 			return StreamResult{bytesWritten, ctx.Err(), proxy.StatusClientClosed}
 
 		default:
-			chunks, errChunk, newPos, newSeq := h.coordinator.ReadChunks(ctx, lastPosition, lastSeq)
-			lastSeq = newSeq
+			chunks, errChunk, newPos, _, rejoined := h.coordinator.ReadChunks(ctx, lastPosition, lastSeq)
+			if rejoined {
+				needAlign = true
+			}
 
 			// Process any available chunks first
 			if len(chunks) > 0 {
@@ -230,11 +266,17 @@ func (h *StreamHandler) HandleStream(
 						liveHeaders.Del("Content-Range")
 						streamClient.ResponseHeaders = liveHeaders
 
-						n, err := h.safeWrite(streamClient, chunk.Data)
+						data := chunk.Data
+						if needAlign {
+							data = alignToPayloadStart(data)
+							needAlign = false
+						}
+						n, err := h.safeWrite(streamClient, data)
 						if err != nil {
 							return StreamResult{bytesWritten, err, proxy.StatusClientClosed}
 						}
 						bytesWritten += int64(n)
+						lastSeq = chunk.Seq()
 
 						if err := h.safeFlush(streamClient); err != nil {
 							return StreamResult{bytesWritten, err, proxy.StatusClientClosed}
