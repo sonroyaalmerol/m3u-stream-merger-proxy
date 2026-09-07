@@ -2,6 +2,19 @@
 
 The proxy is stateless in the sense that there is no external database - everything is derived from sources and cached as flat files with small binary codecs. All formats are little-endian. Code: `sourceproc/store.go`, `sourceproc/sorting.go`, `xtream/series_cache.go`, `config/config.go` (paths).
 
+## Why binary formats (and not JSON)
+
+Every hot path needs record-level random access, not whole-file reads. A stream request resolves to `Get(slug)` (`store.go`): hash the slug, binary-search a sorted section of fixed-width 12-byte entries, decode one record. O(log n), one small heap allocation. JSON gives you no fixed-width sorted keys, so a JSON catalog forces one of two shapes: re-parse the entire file per lookup, or keep the entire corpus decoded on the heap forever. For ~800k streams that is hundreds of MB of live Go heap - the exact whole-file-decode pattern that OOM-killed the pod when the EPG and list endpoints did it.
+
+The rest follows:
+
+- Fixed-width sections are what make binary search possible; a JSON side index of `id -> offset` entries would just be this format with a JSON payload behind it.
+- Mmap reads keep the corpus in page cache, not Go heap; a generation swap is one pointer-file rename with readers never seeing a torn state.
+- The spill sorter streams length-prefixed frames through partition files and k-way merges them - appendable, sequential, no quoting/escaping overhead. A JSON array cannot be appended to or merged without a full reparse.
+- Length-prefixed frames are self-delimiting and skip per-record field names; records are roughly half the size of their JSON rendering.
+
+Text is used where the data is already text and consumed wholesale: the playlist is M3U, EPG is XMLTV, series fragments are rendered M3U lines replayed through the normal parser.
+
 ## Directory layout
 
 ```
