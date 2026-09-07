@@ -19,6 +19,8 @@ const (
 	populatePassGap     = time.Hour
 )
 
+var populateBackoffMax = 30 * time.Second
+
 func seriesBGWorkers() int {
 	if n, err := strconv.Atoi(os.Getenv("XTREAM_SERIES_BG_WORKERS")); err == nil && n > 0 {
 		return min(n, 16)
@@ -37,11 +39,16 @@ func seriesBGDelay() time.Duration {
 func (instance *Updater) populateSeriesLoop(ctx context.Context) {
 	for ctx.Err() == nil {
 		time.Sleep(30 * time.Second)
-		if ctx.Err() != nil {
-			return
-		}
-		if instance.populateSeriesPass(ctx) > 0 {
-			instance.UpdateM3USources(ctx)
+		if ctx.Err() == nil {
+			start := time.Now()
+			fetched := instance.populateSeriesPass(ctx)
+			switch {
+			case fetched > 0:
+				instance.logger.Logf("Series populate: pass fetched %d series in %s, reingesting playlist", fetched, time.Since(start).Round(time.Second))
+				instance.UpdateM3USources(ctx)
+			case ctx.Err() == nil:
+				instance.logger.Logf("Series populate: catalog up to date (%s)", time.Since(start).Round(time.Second))
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -53,6 +60,10 @@ func (instance *Updater) populateSeriesLoop(ctx context.Context) {
 
 func (instance *Updater) populateSeriesPass(ctx context.Context) int {
 	files, _ := filepath.Glob(filepath.Join(config.GetSeriesCacheDirPath(), "stubs-*.bin"))
+	if len(files) == 0 {
+		return 0
+	}
+	instance.logger.Logf("Series populate: pass starting (%d source file(s))", len(files))
 	var (
 		mu    sync.Mutex
 		wg    sync.WaitGroup
@@ -84,8 +95,9 @@ func (instance *Updater) populateSource(ctx context.Context, stubPath, idx strin
 	if err != nil || len(stubs) == 0 {
 		return 0
 	}
+	instance.logger.Logf("Series populate: refreshing %d series for source %s", len(stubs), idx)
 
-	jobs := make(chan xtream.SeriesStub)
+	jobs := make(chan xtream.SeriesStub, len(stubs))
 	var (
 		mu         sync.Mutex
 		fetched    = make(map[uint64]xtream.FragmentEntry)
@@ -105,6 +117,8 @@ func (instance *Updater) populateSource(ctx context.Context, stubPath, idx strin
 			return mergeFragmentEntries(existing, entries, stubs)
 		}); err != nil {
 			instance.logger.Errorf("series populate fragment write failed for %s: %v", idx, err)
+		} else {
+			instance.logger.Logf("Series populate: source %s at %d/%d", idx, len(entries), len(stubs))
 		}
 	}
 
@@ -131,7 +145,7 @@ func (instance *Updater) populateSource(ctx context.Context, stubPath, idx strin
 						return
 					}
 					if successesNow == 0 {
-						time.Sleep(min(backoff, 30*time.Second))
+						time.Sleep(min(backoff, populateBackoffMax))
 						backoff *= 2
 					} else {
 						backoff = seriesBGDelay()
@@ -170,6 +184,9 @@ func (instance *Updater) populateSource(ctx context.Context, stubPath, idx strin
 	flush()
 	mu.Lock()
 	defer mu.Unlock()
+	if successes > 0 {
+		instance.logger.Logf("Series populate: source %s done, %d fetched", idx, successes)
+	}
 	return successes
 }
 

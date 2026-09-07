@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/robfig/cron/v3"
 )
@@ -125,8 +126,12 @@ func (instance *Updater) UpdateM3USources(ctx context.Context) {
 			instance.logger.Error("BASE_URL is required for M3U processing to work.")
 			return
 		}
-		if err := processor.Run(ctx, nil); err == nil {
+		syncStart := time.Now()
+		if err := processor.Run(ctx, nil); err != nil {
+			instance.logger.Errorf("M3U update failed: %v", err)
+		} else {
 			instance.m3uHandler.SetProcessedPath(processor.GetResultPath())
+			instance.logger.Logf("M3U sync complete in %s", time.Since(syncStart).Round(time.Millisecond))
 		}
 
 		// When EPG is on the same schedule, run it inline so the freshly
@@ -155,10 +160,12 @@ func (instance *Updater) UpdateEPGSources(ctx context.Context) {
 
 func (instance *Updater) runEPG(ctx context.Context) {
 	instance.logger.Log("Background process: Building merged EPG...")
+	syncStart := time.Now()
 	epgProcessor := epg.NewProcessor(instance.logger)
 	if err := epgProcessor.Run(ctx); err != nil {
 		instance.logger.Warnf("EPG update failed (non-fatal): %v", err)
 	} else {
 		instance.epgHandler.SetProcessedPath(config.GetEPGPath())
+		instance.logger.Logf("EPG sync complete in %s", time.Since(syncStart).Round(time.Millisecond))
 	}
 }
