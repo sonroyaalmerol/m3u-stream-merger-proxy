@@ -24,13 +24,13 @@ type numberedValue[T any] struct {
 	value T
 }
 
-func (r *listResponse[T]) decodeJSON(dec *json.Decoder) error {
+// walkList yields list elements in panel order without holding the whole list.
+func walkList[T any](dec *json.Decoder, fn func(*T) error) error {
 	token, err := dec.Token()
 	if err != nil {
 		return err
 	}
 	if token == nil {
-		*r = listResponse[T]{}
 		return nil
 	}
 
@@ -41,19 +41,17 @@ func (r *listResponse[T]) decodeJSON(dec *json.Decoder) error {
 
 	switch delim {
 	case '[':
-		values := make(listResponse[T], 0)
 		for dec.More() {
 			var value T
 			if err := dec.Decode(&value); err != nil {
 				return err
 			}
-			values = append(values, value)
+			if err := fn(&value); err != nil {
+				return err
+			}
 		}
-		if _, err := dec.Token(); err != nil {
-			return err
-		}
-		*r = values
-		return nil
+		_, err := dec.Token()
+		return err
 	case '{':
 		values := make([]numberedValue[T], 0)
 		for dec.More() {
@@ -84,15 +82,48 @@ func (r *listResponse[T]) decodeJSON(dec *json.Decoder) error {
 			}
 			return values[i].key < values[j].key
 		})
-		result := make(listResponse[T], len(values))
 		for i := range values {
-			result[i] = values[i].value
+			if err := fn(&values[i].value); err != nil {
+				return err
+			}
 		}
-		*r = result
 		return nil
 	default:
 		return fmt.Errorf("xtream list must be an array or numbered object")
 	}
+}
+
+func (r *listResponse[T]) decodeJSON(dec *json.Decoder) error {
+	values := make(listResponse[T], 0)
+	if err := walkList(dec, func(value *T) error {
+		values = append(values, *value)
+		return nil
+	}); err != nil {
+		return err
+	}
+	*r = values
+	return nil
+}
+
+func expectEOF(dec *json.Decoder) error {
+	var trailing json.RawMessage
+	err := dec.Decode(&trailing)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("xtream response contains multiple JSON values")
+}
+
+// streamAPIList decodes element by element so a 100MB list never becomes a slice.
+func streamAPIList[T any](reader io.Reader, fn func(*T) error) error {
+	dec := json.NewDecoder(reader)
+	if err := walkList(dec, fn); err != nil {
+		return err
+	}
+	return expectEOF(dec)
 }
 
 func decodeAPIResponse[T any](reader io.Reader, result *T) error {
@@ -106,16 +137,7 @@ func decodeAPIResponse[T any](reader io.Reader, result *T) error {
 	if err != nil {
 		return err
 	}
-
-	var trailing json.RawMessage
-	err = dec.Decode(&trailing)
-	if errors.Is(err, io.EOF) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return fmt.Errorf("xtream response contains multiple JSON values")
+	return expectEOF(dec)
 }
 
 func retryableJSONError(err error) bool {

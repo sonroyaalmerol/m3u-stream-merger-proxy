@@ -160,6 +160,62 @@ func TestFetchRetriesTruncatedResponse(t *testing.T) {
 	}
 }
 
+func TestFetchPlaylistLinesRunsLargeListsSequentially(t *testing.T) {
+	var active, overlap atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("action") {
+		case "get_live_categories", "get_vod_categories", "get_series_categories":
+			_, _ = w.Write([]byte(`[]`))
+		case "get_live_streams", "get_vod_streams", "get_series":
+			if active.Add(1) > 1 {
+				overlap.Add(1)
+			}
+			time.Sleep(20 * time.Millisecond)
+			active.Add(-1)
+			_, _ = w.Write([]byte(`[]`))
+		}
+	}))
+	defer server.Close()
+
+	if err := FetchPlaylistLines(context.Background(), NewClient(server.URL, "u", "p"), nil, func(string) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if overlap.Load() != 0 {
+		t.Fatalf("large list requests overlapped %d time(s)", overlap.Load())
+	}
+}
+
+func TestFetchStreamDoesNotRetryAfterDelivery(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("action") {
+		case "get_live_categories", "get_vod_categories", "get_series_categories":
+			_, _ = w.Write([]byte(`[]`))
+		case "get_live_streams":
+			calls.Add(1)
+			_, _ = w.Write([]byte(`[{"name":"First","stream_id":1},{"name":"Trunc`))
+		default:
+			_, _ = w.Write([]byte(`[]`))
+		}
+	}))
+	defer server.Close()
+
+	var lines []string
+	err := FetchPlaylistLines(context.Background(), NewClient(server.URL, "u", "p"), nil, func(line string) error {
+		lines = append(lines, line)
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "get_live_streams") {
+		t.Fatalf("error = %v", err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("partial stream retried %d times", calls.Load())
+	}
+	if len(lines) != 2 || !strings.Contains(lines[0], "First") {
+		t.Fatalf("lines = %v", lines)
+	}
+}
+
 func TestFetchTimeoutUnblocksTruncatedResponse(t *testing.T) {
 	t.Setenv("XTREAM_FETCH_TIMEOUT", "1")
 	var calls int32

@@ -3,6 +3,7 @@ package xtream
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,7 +14,6 @@ import (
 
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
-
 )
 
 // Client talks to an upstream Xtream Codes panel via player_api.php.
@@ -55,36 +55,46 @@ func fetchTimeout() time.Duration {
 	return 5 * time.Minute
 }
 
-// fetchOnce performs one API attempt; retryable marks truncated 200s and 5xx.
-func fetchOnce[T any](ctx context.Context, c *Client, action string, extra url.Values) (*T, bool, error) {
+// callOnce performs one API attempt; the bool marks truncated 200s and 5xx as retryable.
+func callOnce(ctx context.Context, c *Client, action string, extra url.Values, consume func(io.Reader) error) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout())
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiURL(action, extra), nil)
 	if err != nil {
-		return nil, false, err
+		return false, err
 	}
 
 	resp, err := utils.HTTPClient.Do(req)
 	if err != nil {
-		return nil, false, err
+		return false, err
 	}
 	if resp.StatusCode >= 500 {
 		_ = resp.Body.Close()
-		return nil, true, fmt.Errorf("xtream api %s returned status %d", action, resp.StatusCode)
+		return true, fmt.Errorf("xtream api %s returned status %d", action, resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()
-		return nil, false, fmt.Errorf("xtream api %s returned status %d", action, resp.StatusCode)
+		return false, fmt.Errorf("xtream api %s returned status %d", action, resp.StatusCode)
 	}
 
-	var result T
-	decodeErr := decodeAPIResponse(resp.Body, &result)
+	consumeErr := consume(resp.Body)
 	_ = resp.Body.Close()
-	if decodeErr != nil {
+	if consumeErr != nil {
 		if ctx.Err() != nil {
-			return nil, false, fmt.Errorf("xtream api %s: %w", action, ctx.Err())
+			return false, fmt.Errorf("xtream api %s: %w", action, ctx.Err())
 		}
-		return nil, retryableJSONError(decodeErr), fmt.Errorf("xtream api %s decode error: %w", action, decodeErr)
+		return retryableJSONError(consumeErr), fmt.Errorf("xtream api %s decode error: %w", action, consumeErr)
+	}
+	return false, nil
+}
+
+func fetchOnce[T any](ctx context.Context, c *Client, action string, extra url.Values) (*T, bool, error) {
+	var result T
+	retryable, err := callOnce(ctx, c, action, extra, func(body io.Reader) error {
+		return decodeAPIResponse(body, &result)
+	})
+	if err != nil {
+		return nil, retryable, err
 	}
 	return &result, false, nil
 }
@@ -116,6 +126,39 @@ func fetchList[T any](ctx context.Context, c *Client, action string) ([]T, error
 	return []T(*result), nil
 }
 
+// fetchStream hands rows to fn as they decode. A retry is only safe before the
+// first row escapes: replaying a half-consumed list would duplicate entries.
+func fetchStream[T any](ctx context.Context, c *Client, action string, fn func(*T) error) error {
+	delivered := 0
+	for attempt := 1; ; attempt++ {
+		before := delivered
+		retryable, err := callOnce(ctx, c, action, nil, func(body io.Reader) error {
+			return streamAPIList(body, func(value *T) error {
+				delivered++
+				return fn(value)
+			})
+		})
+		if err == nil || !retryable || delivered != before || attempt >= 3 {
+			return err
+		}
+		logger.Default.Warnf("xtream api %s attempt %d/3 failed, retrying: %v", action, attempt, err)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(attempt) * time.Second):
+		}
+	}
+}
+
+func collectStream[T any](ctx context.Context, c *Client, action string) ([]T, error) {
+	var out []T
+	err := fetchStream(ctx, c, action, func(value *T) error {
+		out = append(out, *value)
+		return nil
+	})
+	return out, err
+}
+
 func (c *Client) LiveCategories(ctx context.Context) ([]RawCategory, error) {
 	return fetchList[RawCategory](ctx, c, "get_live_categories")
 }
@@ -129,15 +172,15 @@ func (c *Client) SeriesCategories(ctx context.Context) ([]RawCategory, error) {
 }
 
 func (c *Client) LiveStreams(ctx context.Context) ([]RawLiveStream, error) {
-	return fetchList[RawLiveStream](ctx, c, "get_live_streams")
+	return collectStream[RawLiveStream](ctx, c, "get_live_streams")
 }
 
 func (c *Client) VodStreams(ctx context.Context) ([]RawVodStream, error) {
-	return fetchList[RawVodStream](ctx, c, "get_vod_streams")
+	return collectStream[RawVodStream](ctx, c, "get_vod_streams")
 }
 
 func (c *Client) SeriesList(ctx context.Context) ([]RawSeries, error) {
-	return fetchList[RawSeries](ctx, c, "get_series")
+	return collectStream[RawSeries](ctx, c, "get_series")
 }
 
 func (c *Client) SeriesInfo(ctx context.Context, seriesID string) (*RawSeriesInfo, error) {
@@ -208,24 +251,19 @@ type SeriesCachePaths struct {
 
 // FetchPlaylistLines emits M3U lines in stable section order (live, vod, cached series).
 // Ingest is exactly 6 upstream calls; series episode fan-out lives in the background populate loop.
+// The three large lists stream one at a time: decoding them concurrently held
+// three multi-hundred-MB responses plus their slices per source, which OOMs.
 func FetchPlaylistLines(ctx context.Context, c *Client, cache *SeriesCachePaths, emit func(line string) error) error {
 	var (
 		liveCats, vodCats, seriesCats []RawCategory
-		live                          []RawLiveStream
-		vod                           []RawVodStream
-		seriesList                    []RawSeries
 		liveCatsErr, vodCatsErr       error
 		seriesCatsErr                 error
-		liveErr, vodErr, seriesErr    error
 		fetchWg                       sync.WaitGroup
 	)
 	started := time.Now()
 	fetchWg.Go(func() { liveCats, liveCatsErr = c.LiveCategories(ctx) })
 	fetchWg.Go(func() { vodCats, vodCatsErr = c.VodCategories(ctx) })
 	fetchWg.Go(func() { seriesCats, seriesCatsErr = c.SeriesCategories(ctx) })
-	fetchWg.Go(func() { live, liveErr = c.LiveStreams(ctx) })
-	fetchWg.Go(func() { vod, vodErr = c.VodStreams(ctx) })
-	fetchWg.Go(func() { seriesList, seriesErr = c.SeriesList(ctx) })
 	fetchWg.Wait()
 
 	if liveCatsErr != nil {
@@ -237,16 +275,6 @@ func FetchPlaylistLines(ctx context.Context, c *Client, cache *SeriesCachePaths,
 	if seriesCatsErr != nil {
 		return fmt.Errorf("get_series_categories: %w", seriesCatsErr)
 	}
-	if liveErr != nil {
-		return fmt.Errorf("get_live_streams: %w", liveErr)
-	}
-	if vodErr != nil {
-		return fmt.Errorf("get_vod_streams: %w", vodErr)
-	}
-	if seriesErr != nil {
-		return fmt.Errorf("get_series: %w", seriesErr)
-	}
-	logger.Default.Logf("xtream preamble %s: %d live, %d vod, %d series lists fetched in %.1fs", c.Host, len(live), len(vod), len(seriesList), time.Since(started).Seconds())
 
 	liveNames := categoryMap(liveCats)
 	vodNames := categoryMap(vodCats)
@@ -260,49 +288,47 @@ func FetchPlaylistLines(ctx context.Context, c *Client, cache *SeriesCachePaths,
 		return emit(u)
 	}
 
-	skippedLive := 0
-	for _, s := range live {
+	liveCount, skippedLive := 0, 0
+	if err := fetchStream(ctx, c, "get_live_streams", func(s *RawLiveStream) error {
 		if !usableEntry(s.Name, s.StreamID) {
 			skippedLive++
-			continue
+			return nil
 		}
+		liveCount++
 		streamURL := fmt.Sprintf("%s/live/%s/%s/%s.ts", c.Host, c.Username, c.Password, s.StreamID.String())
-		if err := writeEntry(s.Name, liveNames[s.CategoryID.String()], "live", s.StreamIcon, s.EPGChannelID, streamURL); err != nil {
-			return err
-		}
+		return writeEntry(s.Name, liveNames[s.CategoryID.String()], "live", s.StreamIcon, s.EPGChannelID, streamURL)
+	}); err != nil {
+		return fmt.Errorf("get_live_streams: %w", err)
 	}
 	if skippedLive > 0 {
 		logger.Default.Warnf("Xtream: skipped %d live entries without a name or valid stream_id", skippedLive)
 	}
 
-	skippedVod := 0
-	for _, s := range vod {
+	vodCount, skippedVod := 0, 0
+	if err := fetchStream(ctx, c, "get_vod_streams", func(s *RawVodStream) error {
 		if !usableEntry(s.Name, s.StreamID) {
 			skippedVod++
-			continue
+			return nil
 		}
+		vodCount++
 		ext := s.ContainerExtension
 		if ext == "" {
 			ext = "mp4"
 		}
 		streamURL := fmt.Sprintf("%s/movie/%s/%s/%s.%s", c.Host, c.Username, c.Password, s.StreamID.String(), ext)
-		if err := writeEntry(s.Name, vodNames[s.CategoryID.String()], "movie", s.StreamIcon, "", streamURL); err != nil {
-			return err
-		}
+		return writeEntry(s.Name, vodNames[s.CategoryID.String()], "movie", s.StreamIcon, "", streamURL)
+	}); err != nil {
+		return fmt.Errorf("get_vod_streams: %w", err)
 	}
 	if skippedVod > 0 {
 		logger.Default.Warnf("Xtream: skipped %d vod entries without a name or valid stream_id", skippedVod)
 	}
 
-	if cache == nil {
-		return nil
-	}
-
-	stubs := make([]SeriesStub, 0, len(seriesList))
-	for _, s := range seriesList {
+	stubs := make([]SeriesStub, 0, 1024)
+	if err := fetchStream(ctx, c, "get_series", func(s *RawSeries) error {
 		id, err := strconv.ParseUint(s.SeriesID.String(), 10, 64)
 		if err != nil || id == 0 || strings.TrimSpace(s.Name) == "" {
-			continue
+			return nil
 		}
 		stubs = append(stubs, SeriesStub{
 			UpstreamID: id,
@@ -310,6 +336,14 @@ func FetchPlaylistLines(ctx context.Context, c *Client, cache *SeriesCachePaths,
 			Group:      seriesNames[s.CategoryID.String()],
 			Cover:      s.Cover,
 		})
+		return nil
+	}); err != nil {
+		return fmt.Errorf("get_series: %w", err)
+	}
+	logger.Default.Logf("xtream preamble %s: %d live, %d vod, %d series lists fetched in %.1fs", c.Host, liveCount, vodCount, len(stubs), time.Since(started).Seconds())
+
+	if cache == nil {
+		return nil
 	}
 	if err := WriteSeriesStubs(cache.Stubs, stubs); err != nil {
 		logger.Default.Warnf("Xtream series stub write failed: %v", err)
@@ -324,12 +358,8 @@ func FetchPlaylistLines(ctx context.Context, c *Client, cache *SeriesCachePaths,
 		byID[e.UpstreamID] = e.Lines
 	}
 	replayed := 0
-	for _, s := range seriesList {
-		id, err := strconv.ParseUint(s.SeriesID.String(), 10, 64)
-		if err != nil {
-			continue
-		}
-		for _, line := range byID[id] {
+	for _, stub := range stubs {
+		for _, line := range byID[stub.UpstreamID] {
 			if err := emit(line); err != nil {
 				return err
 			}
