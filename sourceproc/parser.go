@@ -122,42 +122,68 @@ func indexUnquotedComma(s string) int {
 	return -1
 }
 
-// formatStreamEntry formats a stream entry for M3U output
-func formatStreamEntry(baseURL string, sum [28]byte, stream *StreamInfo) string {
-	var entry strings.Builder
-	entry.Grow(140 + len(baseURL) + 2*len(stream.Title) + len(stream.LogoURL) +
-		2*len(stream.Group) + len(stream.TvgID) + len(stream.TvgType) + len(stream.TvgChNo))
+// entryWriter is satisfied by *bufio.Writer and *strings.Builder.
+type entryWriter interface {
+	WriteString(string) (int, error)
+	Write([]byte) (int, error)
+}
 
-	writeTag := func(key, value string) {
-		if value == "" {
-			return
-		}
-		entry.WriteString(" ")
-		entry.WriteString(key)
-		entry.WriteString(`="`)
-		entry.WriteString(value)
-		entry.WriteString(`"`)
+// entrySink defers error handling to the end of the entry instead of checking every field write.
+type entrySink struct {
+	w   entryWriter
+	err error
+}
+
+func (e *entrySink) str(s string) {
+	if e.err == nil {
+		_, e.err = e.w.WriteString(s)
 	}
+}
 
-	entry.WriteString("#EXTINF:-1")
-	writeTag("tvg-id", stream.TvgID)
-	writeTag("tvg-chno", stream.TvgChNo)
-	writeTag("tvg-logo", stream.LogoURL)
-	writeTag("tvg-group", stream.Group)
-	writeTag("group-title", stream.Group)
-	writeTag("tvg-type", stream.TvgType)
-	writeTag("tvg-name", stream.Title)
+func (e *entrySink) tag(key, value string) {
+	if value == "" {
+		return
+	}
+	e.str(" ")
+	e.str(key)
+	e.str(`="`)
+	e.str(value)
+	e.str(`"`)
+}
 
-	entry.WriteString(",")
-	entry.WriteString(stream.Title)
-	entry.WriteString("\n")
-	entry.WriteString(baseURL)
-	entry.WriteString("/p/stream/")
+// writeStreamEntry writes one M3U entry straight to w, so no per-entry string is built.
+func writeStreamEntry(w entryWriter, baseURL string, sum [28]byte, stream *StreamInfo) error {
+	e := entrySink{w: w}
+
+	e.str("#EXTINF:-1")
+	e.tag("tvg-id", stream.TvgID)
+	e.tag("tvg-chno", stream.TvgChNo)
+	e.tag("tvg-logo", stream.LogoURL)
+	e.tag("tvg-group", stream.Group)
+	e.tag("group-title", stream.Group)
+	e.tag("tvg-type", stream.TvgType)
+	e.tag("tvg-name", stream.Title)
+
+	e.str(",")
+	e.str(stream.Title)
+	e.str("\n")
+	e.str(baseURL)
+	e.str("/p/stream/")
+
 	var slug [48]byte
 	n := base64.RawURLEncoding.EncodedLen(len(sum))
 	base64.RawURLEncoding.Encode(slug[:n], sum[:])
-	entry.Write(slug[:n])
-	entry.WriteString("\n")
+	if e.err == nil {
+		_, e.err = e.w.Write(slug[:n])
+	}
+	e.str("\n")
+
+	return e.err
+}
+
+func formatStreamEntry(baseURL string, sum [28]byte, stream *StreamInfo) string {
+	var entry strings.Builder
+	_ = writeStreamEntry(&entry, baseURL, sum, stream)
 
 	return entry.String()
 }

@@ -285,7 +285,7 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 	p.tvgIDs = make(map[string]struct{})
 	err = p.sortingMgr.GetSortedEntries(func(entry *StreamInfo) {
 		key, sum := slugParts(entry.Title)
-		_, writeErr := p.writer.WriteString(formatStreamEntry(baseURL, sum, entry))
+		writeErr := writeStreamEntry(p.writer, baseURL, sum, entry)
 		if writeErr != nil {
 			p.markCriticalError(writeErr)
 		}
