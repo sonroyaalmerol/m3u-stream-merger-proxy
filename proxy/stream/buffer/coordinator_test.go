@@ -71,11 +71,7 @@ func TestWaitHeaders_SurvivesChannelSwap(t *testing.T) {
 			close(done)
 		}()
 
-		fresh := make(chan struct{})
-		old := coord.respHeaderSet.Swap(&fresh)
-		if old != nil {
-			close(*old)
-		}
+		coord.resetHeaderChan()
 
 		select {
 		case <-done:
@@ -84,7 +80,7 @@ func TestWaitHeaders_SurvivesChannelSwap(t *testing.T) {
 		}
 
 		coord.WriterRespHeader.Store(&http.Header{"Content-Type": []string{"video/mp2t"}})
-		close(fresh)
+		coord.signalHeaderChan()
 
 		select {
 		case <-done:
@@ -92,6 +88,25 @@ func TestWaitHeaders_SurvivesChannelSwap(t *testing.T) {
 			t.Fatalf("iteration %d: WaitHeaders never woke after headers were set", i)
 		}
 	}
+}
+
+// Regression test: concurrent reset/signal must never double-close the channel.
+func TestHeaderChanNoDoubleClose(t *testing.T) {
+	coord := newCoordForTest(t)
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			coord.resetHeaderChan()
+		}()
+		go func() {
+			defer wg.Done()
+			coord.signalHeaderChan()
+		}()
+	}
+	wg.Wait()
 }
 
 // Writers, readers and client churn together surface lock-order deadlocks.
