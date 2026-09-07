@@ -57,11 +57,11 @@ func GetLatestProcessedM3UPath() (string, error) {
 		validFiles = append(validFiles, file)
 	}
 
-	if len(files) == 0 {
+	if len(validFiles) == 0 {
 		return "", fmt.Errorf("no files found in directory")
 	}
 
-	return validFiles[len(files)-1].Name(), nil
+	return validFiles[len(validFiles)-1].Name(), nil
 }
 
 func GetNewM3UPath() string {
