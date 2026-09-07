@@ -2,6 +2,7 @@ package sourceproc
 
 import (
 	"bufio"
+	"bytes"
 	"cmp"
 	"container/heap"
 	"encoding/binary"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unsafe"
 
 	"m3u-stream-merger/config"
 
@@ -22,9 +24,18 @@ import (
 	"github.com/goccy/go-json"
 )
 
-// spillPartitions bounds phase-2 memory to corpus/spillPartitions per fold pass.
-// ponytail: fixed 256 fits 1M streams at ~8MB slices per partition; raise for extreme scale.
-const spillPartitions = 256
+// spillLayout pins resident fold memory at ~corpus/8 on any core count, capped to stay inside a 1024 FD limit.
+func spillLayout() (nParts, conc int) {
+	g := max(1, runtime.GOMAXPROCS(0))
+	nParts = min(max(256, 8*g), 512)
+
+	return nParts, max(1, min(g, nParts/8))
+}
+
+// partBufSize holds total phase-1 write buffering near 16MB regardless of partition count.
+func partBufSize(nParts int) int {
+	return max(16<<10, (16<<20)/nParts)
+}
 
 type spillPart struct {
 	mu  sync.Mutex
@@ -32,82 +43,109 @@ type spillPart struct {
 	f   *os.File
 }
 
-// spillSorter is an external hash-partitioned sort: entries spill to partition
-// files during parse, partitions fold and render in parallel, one k-way merge streams the ordered result.
+// spillSorter is an external hash-partitioned sort: spill while parsing, fold and render partitions in parallel, k-way merge the runs.
 type spillSorter struct {
 	sortingKey string
 	sortingDir string
+	dir        string
 	err        error
+	conc       int
 	parts      []*spillPart
+	scratch    sync.Pool
 }
 
 func newSpillSorter() *spillSorter {
-	_ = os.RemoveAll(config.GetSortDirPath())
-	if err := os.MkdirAll(config.GetSortDirPath(), 0755); err != nil {
+	dir := config.GetSortDirPath()
+	_ = os.RemoveAll(dir)
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return &spillSorter{err: err}
 	}
 
-	parts := make([]*spillPart, spillPartitions)
+	nParts, conc := spillLayout()
+	parts := make([]*spillPart, nParts)
 	for i := range parts {
 		parts[i] = &spillPart{}
 	}
 
-	return &spillSorter{
+	s := &spillSorter{
 		sortingKey: os.Getenv("SORTING_KEY"),
 		sortingDir: strings.ToLower(os.Getenv("SORTING_DIRECTION")),
+		dir:        dir,
+		conc:       conc,
 		parts:      parts,
 	}
+	s.scratch.New = func() any {
+		b := make([]byte, 0, 1024)
+		return &b
+	}
+
+	return s
 }
 
-func partitionPath(i int) string {
-	return filepath.Join(config.GetSortDirPath(), fmt.Sprintf("p%03d.bin", i))
+func (s *spillSorter) partitionPath(i int) string {
+	return filepath.Join(s.dir, fmt.Sprintf("p%04d.bin", i))
 }
 
-// Add marshals the stream into its hash partition; same-title entries co-locate so fold semantics match one in-memory map.
+// Add encodes the stream into its hash partition; same-title entries co-locate so fold semantics match one in-memory map.
 func (s *spillSorter) Add(stream *StreamInfo) error {
 	if s.err != nil {
 		return s.err
 	}
 
-	data, err := json.Marshal(stream)
-	if err != nil {
-		return err
-	}
+	bp := s.scratch.Get().(*[]byte)
+	defer s.scratch.Put(bp)
+	*bp = appendStreamInfo((*bp)[:0], stream)
+	rec := *bp
 
-	idx := xxhash.Sum64String(sanitizeField(stream.Title)) % spillPartitions
+	idx := int(xxhash.Sum64String(sanitizeField(stream.Title)) % uint64(len(s.parts)))
 	p := s.parts[idx]
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	if p.buf == nil {
-		f, err := os.Create(partitionPath(int(idx)))
+		f, err := os.Create(s.partitionPath(idx))
 		if err != nil {
 			return err
 		}
 		p.f = f
-		p.buf = bufio.NewWriterSize(f, 1<<16)
+		p.buf = bufio.NewWriterSize(f, partBufSize(len(s.parts)))
 	}
 
 	var lenBuf [4]byte
-	binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(data)))
+	binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(rec)))
 	if _, err := p.buf.Write(lenBuf[:]); err != nil {
 		return err
 	}
-	_, err = p.buf.Write(data)
+	_, err := p.buf.Write(rec)
 
 	return err
 }
 
-// renderedEntry is the pre-rendered per-entry payload; storeKey rides along for the ordered store index.
+// renderedEntry is the pre-rendered per-entry payload; slices stay valid until the next render or merge step.
 type renderedEntry struct {
 	storeKey uint64
-	m3u      string
+	m3u      []byte
 	storeRec []byte
-	tvgID    string
+	tvgID    []byte
 }
 
-// MergeRendered folds duplicate titles per partition, sorts, renders in parallel, streams one ordered merge through emit.
-func (s *spillSorter) MergeRendered(render func(*StreamInfo) renderedEntry, emit func(renderedEntry) error) error {
+// renderBuf is per-worker render scratch, so a rendered entry costs no steady-state allocation.
+type renderBuf struct {
+	m3u  bytes.Buffer
+	rec  bytes.Buffer
+	enc  *json.Encoder
+	slug []byte
+	tvg  []byte
+}
+
+func newRenderBuf() *renderBuf {
+	rb := &renderBuf{slug: make([]byte, 0, slugBufSize)}
+	rb.enc = json.NewEncoder(&rb.rec)
+
+	return rb
+}
+
+func (s *spillSorter) MergeRendered(render func(*StreamInfo, *renderBuf) renderedEntry, emit func(renderedEntry) error) error {
 	if s.err != nil {
 		return s.err
 	}
@@ -124,7 +162,7 @@ func (s *spillSorter) MergeRendered(render func(*StreamInfo) renderedEntry, emit
 				p.mu.Unlock()
 				return err
 			}
-			partPaths = append(partPaths, partitionPath(i))
+			partPaths = append(partPaths, s.partitionPath(i))
 		}
 		p.mu.Unlock()
 	}
@@ -135,7 +173,7 @@ func (s *spillSorter) MergeRendered(render func(*StreamInfo) renderedEntry, emit
 		runPaths []string
 		wg       sync.WaitGroup
 	)
-	sem := make(chan struct{}, max(1, runtime.GOMAXPROCS(0)))
+	sem := make(chan struct{}, s.conc)
 	for _, path := range partPaths {
 		sem <- struct{}{}
 		wg.Go(func() {
@@ -200,7 +238,7 @@ func (s *spillSorter) MergeRendered(render func(*StreamInfo) renderedEntry, emit
 }
 
 // buildRun loads one partition, folds duplicate titles (same semantics as an in-memory map), sorts, writes the rendered run.
-func (s *spillSorter) buildRun(partPath string, render func(*StreamInfo) renderedEntry) (string, error) {
+func (s *spillSorter) buildRun(partPath string, render func(*StreamInfo, *renderBuf) renderedEntry) (string, error) {
 	f, err := os.Open(partPath)
 	if err != nil {
 		return "", err
@@ -208,7 +246,10 @@ func (s *spillSorter) buildRun(partPath string, render func(*StreamInfo) rendere
 
 	folded := make(map[string]*StreamInfo)
 	br := bufio.NewReaderSize(f, 1<<16)
-	var lenBuf [4]byte
+	var (
+		lenBuf [4]byte
+		slab   []StreamInfo
+	)
 	for {
 		if _, err := io.ReadFull(br, lenBuf[:]); err != nil {
 			if errors.Is(err, io.EOF) {
@@ -217,20 +258,26 @@ func (s *spillSorter) buildRun(partPath string, render func(*StreamInfo) rendere
 			_ = f.Close()
 			return "", err
 		}
-		buf := make([]byte, binary.LittleEndian.Uint32(lenBuf[:]))
-		if _, err := io.ReadFull(br, buf); err != nil {
+		rec := make([]byte, binary.LittleEndian.Uint32(lenBuf[:]))
+		if _, err := io.ReadFull(br, rec); err != nil {
 			_ = f.Close()
 			return "", err
 		}
-		var info StreamInfo
-		if err := json.Unmarshal(buf, &info); err != nil {
-			continue
+		if len(slab) == 0 {
+			slab = make([]StreamInfo, slabSize)
 		}
+		info := &slab[0]
+		if err := decodeStreamInfo(rec, info); err != nil {
+			_ = f.Close()
+			return "", err
+		}
+		slab = slab[1:]
+
 		key := sanitizeField(info.Title)
 		if old, ok := folded[key]; ok {
-			mergeStreamInfoAttributes(old, &info)
+			mergeStreamInfoAttributes(old, info)
 		} else {
-			folded[key] = &info
+			folded[key] = info
 		}
 	}
 	_ = f.Close()
@@ -254,8 +301,9 @@ func (s *spillSorter) buildRun(partPath string, render func(*StreamInfo) rendere
 		return "", err
 	}
 	fw := &frameWriter{w: bufio.NewWriterSize(rf, 1<<16)}
+	rb := newRenderBuf()
 	for _, e := range entries {
-		if err := writeRunRecord(fw, e, render(e.stream)); err != nil {
+		if err := fw.record(e, render(e.stream, rb)); err != nil {
 			_ = rf.Close()
 			return "", err
 		}
@@ -282,7 +330,7 @@ func (s *spillSorter) Close() {
 		}
 		p.mu.Unlock()
 	}
-	_ = os.RemoveAll(config.GetSortDirPath())
+	_ = os.RemoveAll(s.dir)
 }
 
 type sortEntry struct {
@@ -365,6 +413,134 @@ func mergeStreamInfoAttributes(base, new *StreamInfo) *StreamInfo {
 	return base
 }
 
+var errShortRecord = errors.New("sourceproc: truncated spill record")
+
+func appendStr(dst []byte, s string) []byte {
+	dst = binary.LittleEndian.AppendUint32(dst, uint32(len(s)))
+
+	return append(dst, s...)
+}
+
+func appendBytes(dst, b []byte) []byte {
+	dst = binary.LittleEndian.AppendUint32(dst, uint32(len(b)))
+
+	return append(dst, b...)
+}
+
+func appendStreamInfo(dst []byte, s *StreamInfo) []byte {
+	dst = appendStr(dst, s.Title)
+	dst = appendStr(dst, s.TvgID)
+	dst = appendStr(dst, s.TvgChNo)
+	dst = appendStr(dst, s.TvgType)
+	dst = appendStr(dst, s.LogoURL)
+	dst = appendStr(dst, s.Group)
+	dst = appendStr(dst, s.SourceM3U)
+	dst = binary.LittleEndian.AppendUint32(dst, uint32(int32(s.SourceIndex)))
+	dst = binary.LittleEndian.AppendUint32(dst, uint32(len(s.URLs)))
+	for _, u := range s.URLs {
+		dst = appendStr(dst, u.M3UIndex)
+		dst = binary.LittleEndian.AppendUint32(dst, uint32(int32(u.LineNum)))
+		dst = appendStr(dst, u.URL)
+	}
+
+	return dst
+}
+
+// binReader hands out string views into the record buffer, so decoding costs one allocation instead of one per field.
+type binReader struct {
+	b   []byte
+	off int
+}
+
+func (r *binReader) u32() (uint32, error) {
+	if r.off+4 > len(r.b) {
+		return 0, errShortRecord
+	}
+	v := binary.LittleEndian.Uint32(r.b[r.off:])
+	r.off += 4
+
+	return v, nil
+}
+
+func (r *binReader) u64() (uint64, error) {
+	if r.off+8 > len(r.b) {
+		return 0, errShortRecord
+	}
+	v := binary.LittleEndian.Uint64(r.b[r.off:])
+	r.off += 8
+
+	return v, nil
+}
+
+func (r *binReader) raw() ([]byte, error) {
+	n, err := r.u32()
+	if err != nil {
+		return nil, err
+	}
+	if r.off+int(n) > len(r.b) {
+		return nil, errShortRecord
+	}
+	b := r.b[r.off : r.off+int(n)]
+	r.off += int(n)
+
+	return b, nil
+}
+
+func (r *binReader) str() (string, error) {
+	b, err := r.raw()
+	if err != nil || len(b) == 0 {
+		return "", err
+	}
+
+	return unsafe.String(&b[0], len(b)), nil
+}
+
+// decodeStreamInfo fills s with views into rec, so rec must stay alive as long as s does.
+func decodeStreamInfo(rec []byte, s *StreamInfo) error {
+	r := binReader{b: rec}
+	fields := []*string{&s.Title, &s.TvgID, &s.TvgChNo, &s.TvgType, &s.LogoURL, &s.Group, &s.SourceM3U}
+	for _, f := range fields {
+		v, err := r.str()
+		if err != nil {
+			return err
+		}
+		*f = v
+	}
+
+	srcIdx, err := r.u32()
+	if err != nil {
+		return err
+	}
+	s.SourceIndex = int(int32(srcIdx))
+
+	n, err := r.u32()
+	if err != nil {
+		return err
+	}
+	s.URLs = nil
+	if n == 0 {
+		return nil
+	}
+
+	urls := make([]StreamURL, n)
+	for i := range urls {
+		if urls[i].M3UIndex, err = r.str(); err != nil {
+			return err
+		}
+		lineNum, err := r.u32()
+		if err != nil {
+			return err
+		}
+		urls[i].LineNum = int(int32(lineNum))
+		if urls[i].URL, err = r.str(); err != nil {
+			return err
+		}
+	}
+	s.URLs = urls
+
+	return nil
+}
+
 type runEntry struct {
 	se sortEntry
 	re renderedEntry
@@ -373,7 +549,7 @@ type runEntry struct {
 type runReader struct {
 	f   *os.File
 	br  *bufio.Reader
-	tmp [12]byte
+	buf []byte
 	cur runEntry
 	ok  bool
 }
@@ -387,26 +563,10 @@ func openRun(path string) (*runReader, error) {
 	return &runReader{f: f, br: bufio.NewReaderSize(f, 1<<16)}, nil
 }
 
-func (r *runReader) readU32() (uint32, error) {
-	if _, err := io.ReadFull(r.br, r.tmp[:4]); err != nil {
-		return 0, err
-	}
-
-	return binary.LittleEndian.Uint32(r.tmp[:4]), nil
-}
-
-func (r *runReader) readStr(n uint32) (string, error) {
-	buf := make([]byte, n)
-	if _, err := io.ReadFull(r.br, buf); err != nil {
-		return "", err
-	}
-
-	return string(buf), nil
-}
-
+// next reads one whole record into the reusable buffer; cur then only holds views, valid until the following next.
 func (r *runReader) next() error {
-	keyLen, err := r.readU32()
-	if err != nil {
+	var lenBuf [4]byte
+	if _, err := io.ReadFull(r.br, lenBuf[:]); err != nil {
 		if errors.Is(err, io.EOF) {
 			r.ok = false
 			return nil
@@ -414,59 +574,45 @@ func (r *runReader) next() error {
 		return err
 	}
 
-	e := runEntry{}
-	e.se.key, err = r.readStr(keyLen)
-	if err != nil {
-		return err
+	n := int(binary.LittleEndian.Uint32(lenBuf[:]))
+	if cap(r.buf) < n {
+		r.buf = make([]byte, n)
 	}
-	if _, err := io.ReadFull(r.br, r.tmp[:4]); err != nil {
-		return err
-	}
-	num := int(int32(binary.LittleEndian.Uint32(r.tmp[:4])))
-	if _, err := io.ReadFull(r.br, r.tmp[:1]); err != nil {
-		return err
-	}
-	numOK := r.tmp[0] == 1
-	titleLen, err := r.readU32()
-	if err != nil {
-		return err
-	}
-	e.se.num, e.se.numOK = num, numOK
-	e.se.title, err = r.readStr(titleLen)
-	if err != nil {
+	r.buf = r.buf[:n]
+	if _, err := io.ReadFull(r.br, r.buf); err != nil {
 		return err
 	}
 
-	if _, err := io.ReadFull(r.br, r.tmp[:8]); err != nil {
+	br := binReader{b: r.buf}
+	var (
+		e   runEntry
+		err error
+	)
+	if e.se.key, err = br.str(); err != nil {
 		return err
 	}
-	e.re.storeKey = binary.LittleEndian.Uint64(r.tmp[:8])
-
-	m3uLen, err := r.readU32()
+	num, err := br.u32()
 	if err != nil {
 		return err
 	}
-	e.re.m3u, err = r.readStr(m3uLen)
+	numOK, err := br.raw()
 	if err != nil {
 		return err
 	}
-	recLen, err := r.readU32()
-	if err != nil {
+	e.se.num, e.se.numOK = int(int32(num)), len(numOK) == 1 && numOK[0] == 1
+	if e.se.title, err = br.str(); err != nil {
 		return err
 	}
-	if recLen > 0 {
-		buf := make([]byte, recLen)
-		if _, err := io.ReadFull(r.br, buf); err != nil {
-			return err
-		}
-		e.re.storeRec = buf
-	}
-	tvgLen, err := r.readU32()
-	if err != nil {
+	if e.re.storeKey, err = br.u64(); err != nil {
 		return err
 	}
-	e.re.tvgID, err = r.readStr(tvgLen)
-	if err != nil {
+	if e.re.m3u, err = br.raw(); err != nil {
+		return err
+	}
+	if e.re.storeRec, err = br.raw(); err != nil {
+		return err
+	}
+	if e.re.tvgID, err = br.raw(); err != nil {
 		return err
 	}
 
@@ -501,82 +647,34 @@ func (h *runHeap) Pop() any {
 
 type frameWriter struct {
 	w   *bufio.Writer
-	tmp [12]byte
+	buf []byte
 }
 
-func (fw *frameWriter) u8(v byte) error {
-	fw.tmp[0] = v
-	_, err := fw.w.Write(fw.tmp[:1])
-	return err
-}
-
-func (fw *frameWriter) u32(v uint32) error {
-	binary.LittleEndian.PutUint32(fw.tmp[:4], v)
-	_, err := fw.w.Write(fw.tmp[:4])
-	return err
-}
-
-func (fw *frameWriter) u64(v uint64) error {
-	binary.LittleEndian.PutUint64(fw.tmp[:8], v)
-	_, err := fw.w.Write(fw.tmp[:8])
-	return err
-}
-
-func (fw *frameWriter) bytes(b []byte) error {
-	_, err := fw.w.Write(b)
-	return err
-}
-
-func (fw *frameWriter) str(s string) error {
-	_, err := fw.w.WriteString(s)
-	return err
-}
-
-// writeRunRecord frames one rendered entry: sort key first (merge heap never decodes payloads), then pre-rendered bytes.
-func writeRunRecord(fw *frameWriter, e sortEntry, re renderedEntry) error {
-	if err := fw.u32(uint32(len(e.key))); err != nil {
-		return err
-	}
-	if err := fw.str(e.key); err != nil {
-		return err
-	}
-	if err := fw.u32(uint32(e.num)); err != nil {
-		return err
-	}
-	numOK := byte(0)
+// record frames one rendered entry: sort key first so the merge heap never decodes payloads, then the rendered bytes.
+func (fw *frameWriter) record(e sortEntry, re renderedEntry) error {
+	numOK := []byte{0}
 	if e.numOK {
-		numOK = 1
-	}
-	if err := fw.u8(numOK); err != nil {
-		return err
-	}
-	if err := fw.u32(uint32(len(e.title))); err != nil {
-		return err
-	}
-	if err := fw.str(e.title); err != nil {
-		return err
+		numOK[0] = 1
 	}
 
-	if err := fw.u64(re.storeKey); err != nil {
-		return err
-	}
-	if err := fw.u32(uint32(len(re.m3u))); err != nil {
-		return err
-	}
-	if err := fw.str(re.m3u); err != nil {
-		return err
-	}
-	if err := fw.u32(uint32(len(re.storeRec))); err != nil {
-		return err
-	}
-	if err := fw.bytes(re.storeRec); err != nil {
-		return err
-	}
-	if err := fw.u32(uint32(len(re.tvgID))); err != nil {
-		return err
-	}
+	b := appendStr(fw.buf[:0], e.key)
+	b = binary.LittleEndian.AppendUint32(b, uint32(int32(e.num)))
+	b = appendBytes(b, numOK)
+	b = appendStr(b, e.title)
+	b = binary.LittleEndian.AppendUint64(b, re.storeKey)
+	b = appendBytes(b, re.m3u)
+	b = appendBytes(b, re.storeRec)
+	b = appendBytes(b, re.tvgID)
+	fw.buf = b
 
-	return fw.str(re.tvgID)
+	var lenBuf [4]byte
+	binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(b)))
+	if _, err := fw.w.Write(lenBuf[:]); err != nil {
+		return err
+	}
+	_, err := fw.w.Write(b)
+
+	return err
 }
 
 // fieldSanitizer is built once; strings.NewReplacer costs ~7KB per construction.

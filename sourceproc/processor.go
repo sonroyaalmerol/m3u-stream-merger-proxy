@@ -16,8 +16,6 @@ import (
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
-
-	"github.com/goccy/go-json"
 )
 
 type M3UProcessor struct {
@@ -69,12 +67,19 @@ func (p *M3UProcessor) Wait(ctx context.Context) error {
 	select {
 	case <-p.revalidatingDone:
 	case <-ctx.Done():
+		p.Lock()
+		defer p.Unlock()
+
 		logger.Default.Errorf("Revalidation failed due to context cancellation, keeping old data.")
 		os.Remove(p.file.Name())
 		p.cleanFailedRemoteFiles()
 
 		return ctx.Err()
 	}
+
+	p.Lock()
+	defer p.Unlock()
+
 	logger.Default.Debug("Finished revalidation")
 
 	if !p.criticalErrorOccurred.Load() {
@@ -117,6 +122,9 @@ func (p *M3UProcessor) clearOldResults() {
 }
 
 func (p *M3UProcessor) GetResultPath() string {
+	p.RLock()
+	defer p.RUnlock()
+
 	if p.file == nil {
 		LockSources()
 		defer UnlockSources()
@@ -188,9 +196,10 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 						continue
 					}
 					err := p.addStream(stream)
-					if err != nil {
-						p.markCriticalError(err)
+					if err == nil {
+						continue
 					}
+					p.markCriticalError(err)
 
 					select {
 					case errors <- err:
@@ -241,32 +250,35 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 
 	p.tvgIDs = make(map[string]struct{})
 
-	render := func(entry *StreamInfo) renderedEntry {
+	render := func(entry *StreamInfo, rb *renderBuf) renderedEntry {
+		rb.m3u.Reset()
+		rb.rec.Reset()
+
 		key, sum := slugParts(entry.Title)
-		var m3u strings.Builder
-		if err := writeStreamEntry(&m3u, baseURL, sum, entry, make([]byte, 0, slugBufSize)); err != nil {
+		if err := writeStreamEntry(&rb.m3u, baseURL, sum, entry, rb.slug); err != nil {
 			p.markCriticalError(err)
 		}
-		data, err := json.Marshal(entry)
-		if err != nil {
+		if err := rb.enc.Encode(entry); err != nil {
 			p.markCriticalError(err)
-			data = nil
-		} else {
-			data = append(data, '\n')
+			rb.rec.Reset()
 		}
-		return renderedEntry{storeKey: key, m3u: m3u.String(), storeRec: data, tvgID: entry.TvgID}
+		rb.tvg = append(rb.tvg[:0], entry.TvgID...)
+
+		return renderedEntry{storeKey: key, m3u: rb.m3u.Bytes(), storeRec: rb.rec.Bytes(), tvgID: rb.tvg}
 	}
 	emit := func(re renderedEntry) error {
-		if _, err := p.writer.WriteString(re.m3u); err != nil {
+		if _, err := p.writer.Write(re.m3u); err != nil {
 			return err
 		}
-		if re.storeRec != nil {
+		if len(re.storeRec) > 0 {
 			if err := storeWriter.AddRaw(re.storeKey, re.storeRec); err != nil {
 				return err
 			}
 		}
-		if re.tvgID != "" {
-			p.tvgIDs[re.tvgID] = struct{}{}
+		if len(re.tvgID) > 0 {
+			if _, ok := p.tvgIDs[string(re.tvgID)]; !ok {
+				p.tvgIDs[string(re.tvgID)] = struct{}{}
+			}
 		}
 		return nil
 	}
@@ -375,12 +387,10 @@ func (p *M3UProcessor) saveTvgIDs() {
 	}
 }
 
-// GetTvgIDs returns the tvg-id set from the last successful compile, nil before one runs.
-func (p *M3UProcessor) GetTvgIDs() map[string]struct{} {
-	return p.tvgIDs
-}
-
 func (p *M3UProcessor) cleanup() {
+	p.Lock()
+	defer p.Unlock()
+
 	if p.writer != nil {
 		p.writer.Flush()
 	}
