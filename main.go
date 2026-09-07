@@ -22,7 +22,8 @@ func rootHandler(serveAPI func(http.ResponseWriter, *http.Request)) http.Handler
 }
 
 func main() {
-	// Context for graceful shutdown
+	applyMemoryLimit()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
