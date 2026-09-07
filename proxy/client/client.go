@@ -16,9 +16,9 @@ type StreamClient struct {
 	HeadersSent     atomic.Bool
 	// LastSeq is the stream sequence number last delivered to this client,
 	// used to resume seamlessly across handler retries.
-	LastSeq   int64
+	LastSeq    int64
 	respWriter http.ResponseWriter
-	flusher         http.Flusher
+	flusher    http.Flusher
 }
 
 func NewStreamClient(w http.ResponseWriter, r *http.Request) *StreamClient {
