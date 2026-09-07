@@ -37,7 +37,10 @@ func forEachAttr(s string, fn func(key, val string)) {
 	}
 }
 
-const slabSize = 256
+const (
+	slabSize    = 256
+	slugBufSize = 48
+)
 
 // streamSlab batches per-stream allocations so a worker pays one make per slabSize lines.
 type streamSlab struct {
@@ -152,7 +155,8 @@ func (e *entrySink) tag(key, value string) {
 }
 
 // writeStreamEntry writes one M3U entry straight to w, so no per-entry string is built.
-func writeStreamEntry(w entryWriter, baseURL string, sum [28]byte, stream *StreamInfo) error {
+// slugBuf is caller-owned scratch; a local array would escape through the writer interface.
+func writeStreamEntry(w entryWriter, baseURL string, sum [28]byte, stream *StreamInfo, slugBuf []byte) error {
 	e := entrySink{w: w}
 
 	e.str("#EXTINF:-1")
@@ -170,11 +174,9 @@ func writeStreamEntry(w entryWriter, baseURL string, sum [28]byte, stream *Strea
 	e.str(baseURL)
 	e.str("/p/stream/")
 
-	var slug [48]byte
-	n := base64.RawURLEncoding.EncodedLen(len(sum))
-	base64.RawURLEncoding.Encode(slug[:n], sum[:])
+	slug := base64.RawURLEncoding.AppendEncode(slugBuf[:0], sum[:])
 	if e.err == nil {
-		_, e.err = e.w.Write(slug[:n])
+		_, e.err = e.w.Write(slug)
 	}
 	e.str("\n")
 
@@ -183,7 +185,7 @@ func writeStreamEntry(w entryWriter, baseURL string, sum [28]byte, stream *Strea
 
 func formatStreamEntry(baseURL string, sum [28]byte, stream *StreamInfo) string {
 	var entry strings.Builder
-	_ = writeStreamEntry(&entry, baseURL, sum, stream)
+	_ = writeStreamEntry(&entry, baseURL, sum, stream, make([]byte, 0, slugBufSize))
 
 	return entry.String()
 }
