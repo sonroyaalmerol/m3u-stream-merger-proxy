@@ -107,6 +107,43 @@ func TestSpillSorterOrderAndFold(t *testing.T) {
 	s.Close()
 }
 
+func TestSpillSorterProviderOrder(t *testing.T) {
+	t.Setenv("SORTING_KEY", "provider-order")
+	config.SetConfig(&config.Config{DataPath: t.TempDir() + "/data/", TempPath: t.TempDir() + "/tmp/"})
+	s := newSpillSorter()
+
+	for _, st := range []*StreamInfo{
+		{Title: "A", SourceM3U: "2", SourceIndex: 5},
+		{Title: "B", SourceM3U: "1", SourceIndex: 40},
+		{Title: "C", SourceM3U: "2", SourceIndex: 60},
+		{Title: "D", SourceM3U: "2", SourceIndex: 70},
+		{Title: "D", SourceM3U: "1", SourceIndex: 10},
+		{Title: "E", SourceM3U: "1", SourceIndex: 1000},
+	} {
+		if err := s.Add(st); err != nil {
+			t.Fatal("add:", err)
+		}
+	}
+
+	var got []string
+	err := s.MergeRendered(func(e *StreamInfo, rb *renderBuf) renderedEntry {
+		rb.m3u.Reset()
+		rb.m3u.WriteString(e.Title)
+		return renderedEntry{m3u: rb.m3u.Bytes()}
+	}, func(re renderedEntry) error {
+		got = append(got, string(re.m3u))
+		return nil
+	})
+	if err != nil {
+		t.Fatal("merge:", err)
+	}
+	want := []string{"D", "B", "E", "A", "C"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("provider order: got %v, want %v", got, want)
+	}
+	s.Close()
+}
+
 func TestSpillSorterDescNumeric(t *testing.T) {
 	t.Setenv("SORTING_KEY", "tvg-chno")
 	t.Setenv("SORTING_DIRECTION", "desc")

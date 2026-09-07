@@ -405,6 +405,8 @@ func sortEntryFor(s *StreamInfo, sortingKey string) sortEntry {
 		e.key = strings.ToLower(s.Group)
 	case "tvg-type":
 		e.key = strings.ToLower(s.TvgType)
+	case "provider-order", "source-order":
+		e.key = providerOrderKey(s)
 	default:
 		e.key = strings.ToLower(s.Title)
 	}
@@ -416,6 +418,16 @@ func sortEntryFor(s *StreamInfo, sortingKey string) sortEntry {
 	}
 
 	return e
+}
+
+// providerOrderKey orders by provider position; fold keeps the min (source, line) of merged dupes.
+func providerOrderKey(s *StreamInfo) string {
+	src := s.SourceM3U
+	if n, err := strconv.Atoi(strings.TrimPrefix(src, "M3U_")); err == nil {
+		src = fmt.Sprintf("%08d", n)
+	}
+
+	return src + "\x00" + fmt.Sprintf("%011d", s.SourceIndex)
 }
 
 func compareSortEntries(a, b sortEntry) int {
