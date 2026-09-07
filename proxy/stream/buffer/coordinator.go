@@ -49,6 +49,8 @@ type StreamCoordinator struct {
 
 	WriterRespHeader atomic.Pointer[http.Header]
 	respHeaderSet    atomic.Pointer[chan struct{}]
+	headerMu         sync.Mutex
+	headerSignaled   bool
 	m3uHeaderSet     atomic.Bool
 
 	LastError atomic.Value
@@ -107,6 +109,33 @@ func NewStreamCoordinator(streamID string, config *config.StreamConfig, cm *stor
 	return coord
 }
 
+// resetHeaderChan swaps in a fresh header-notify channel, closing the
+// previous one at most once so waiters are released without a double close.
+func (c *StreamCoordinator) resetHeaderChan() {
+	c.headerMu.Lock()
+	defer c.headerMu.Unlock()
+
+	newCh := make(chan struct{})
+	if old := c.respHeaderSet.Swap(&newCh); old != nil && !c.headerSignaled {
+		close(*old)
+	}
+	c.headerSignaled = false
+}
+
+// signalHeaderChan closes the current header-notify channel exactly once,
+// waking WaitHeaders callers. No-op if it was already closed or swapped out.
+func (c *StreamCoordinator) signalHeaderChan() {
+	c.headerMu.Lock()
+	defer c.headerMu.Unlock()
+
+	ch := c.respHeaderSet.Load()
+	if ch == nil || c.headerSignaled {
+		return
+	}
+	c.headerSignaled = true
+	close(*ch)
+}
+
 func (c *StreamCoordinator) WaitHeaders(ctx context.Context) {
 	for c.WriterRespHeader.Load() == nil {
 		ch := c.respHeaderSet.Load()
@@ -142,11 +171,7 @@ func (c *StreamCoordinator) RegisterClient() error {
 
 		// Reset error state
 		c.LastError.Store((*ChunkData)(nil))
-
-		newHeaderChan := make(chan struct{})
-		if old := c.respHeaderSet.Swap(&newHeaderChan); old != nil {
-			close(*old)
-		}
+		c.resetHeaderChan()
 	}
 
 	count := atomic.AddInt32(&c.ClientCount, 1)

@@ -20,10 +20,7 @@ func (c *StreamCoordinator) StartMediaWriter(ctx context.Context, lbResult *load
 
 	c.LBResultOnWrite.Store(lbResult)
 	c.WriterRespHeader.Store(nil)
-	newHeaderChan := make(chan struct{})
-	if old := c.respHeaderSet.Swap(&newHeaderChan); old != nil {
-		close(*old)
-	}
+	c.resetHeaderChan()
 
 	c.logger.Debug("StartMediaWriter: Beginning read loop")
 
@@ -35,9 +32,7 @@ func (c *StreamCoordinator) StartMediaWriter(ctx context.Context, lbResult *load
 	defer c.cm.UpdateConcurrency(lbResult.Index, false)
 
 	c.WriterRespHeader.Store(&lbResult.Response.Header)
-	if ch := c.respHeaderSet.Load(); ch != nil {
-		close(*ch)
-	}
+	c.signalHeaderChan()
 
 	err := c.readAndWriteStream(ctx, lbResult.Response.Body, c.writeChunk)
 	if err != nil {

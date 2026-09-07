@@ -44,10 +44,7 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 	c.LBResultOnWrite.Store(lbResult)
 	c.WriterRespHeader.Store(nil)
 
-	newHeaderChan := make(chan struct{})
-	if old := c.respHeaderSet.Swap(&newHeaderChan); old != nil {
-		close(*old)
-	}
+	c.resetHeaderChan()
 	c.m3uHeaderSet.Store(false)
 	c.logger.Debug("StartHLSWriter: Beginning read loop")
 
@@ -227,10 +224,7 @@ func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string
 	if c.m3uHeaderSet.CompareAndSwap(false, true) {
 		resp.Header.Del("Content-Length")
 		c.WriterRespHeader.Store(&resp.Header)
-
-		if ch := c.respHeaderSet.Load(); ch != nil {
-			close(*ch)
-		}
+		c.signalHeaderChan()
 	}
 
 	return c.readAndWriteStream(ctx, resp.Body, c.writeChunk)
