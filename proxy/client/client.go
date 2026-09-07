@@ -8,12 +8,15 @@ import (
 	"github.com/google/uuid"
 )
 
+const clientWriteDeadline = 10 * time.Second
+
 type StreamClient struct {
-	ID              string
-	Request         *http.Request
-	StartedAt       time.Time
-	ResponseHeaders http.Header
-	HeadersSent     atomic.Bool
+	ID                 string
+	Request            *http.Request
+	StartedAt          time.Time
+	ResponseHeaders    http.Header
+	HeadersSent        atomic.Bool
+	responseController *http.ResponseController
 	// LastSeq is the stream sequence number last delivered to this client,
 	// used to resume seamlessly across handler retries.
 	LastSeq    int64
@@ -28,12 +31,13 @@ func NewStreamClient(w http.ResponseWriter, r *http.Request) *StreamClient {
 	}
 
 	return &StreamClient{
-		ID:              uuid.New().String(),
-		Request:         r,
-		StartedAt:       time.Now(),
-		ResponseHeaders: make(http.Header),
-		respWriter:      w,
-		flusher:         flusher,
+		ID:                 uuid.New().String(),
+		Request:            r,
+		StartedAt:          time.Now(),
+		ResponseHeaders:    make(http.Header),
+		respWriter:         w,
+		flusher:            flusher,
+		responseController: http.NewResponseController(w),
 	}
 }
 
@@ -77,6 +81,7 @@ func (sc *StreamClient) Write(data []byte) (int, error) {
 	if !sc.HeadersSent.Load() {
 		_ = sc.WriteHeader(http.StatusOK)
 	}
+	_ = sc.responseController.SetWriteDeadline(time.Now().Add(clientWriteDeadline))
 	return sc.respWriter.Write(data)
 }
 
