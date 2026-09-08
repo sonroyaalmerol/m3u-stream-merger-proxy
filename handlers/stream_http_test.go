@@ -294,6 +294,57 @@ func TestStreamHTTPHandler_ServeHTTP(t *testing.T) {
 	}
 }
 
+func TestHandleStreamReleasesProxyAfterClientDisconnect(t *testing.T) {
+	cm := store.NewConcurrencyManager()
+	cfg := config.NewDefaultStreamConfig()
+	registry := buffer.NewStreamRegistry(cfg, cm, logger.Default, 0)
+	proxyStarted := make(chan struct{})
+	releaseProxy := make(chan struct{})
+	proxyReturned := make(chan struct{})
+
+	manager := &mockStreamManager{
+		loadBalancerFunc: func(context.Context, *http.Request, *loadbalancer.LoadBalancerInstance) (*loadbalancer.LoadBalancerResult, error) {
+			return &loadbalancer.LoadBalancerResult{
+				Response: mockResponse(http.StatusOK, "test content"),
+				URL:      "http://example.com",
+				Index:    "1",
+			}, nil
+		},
+		proxyStreamFunc: func(_ context.Context, _ *buffer.StreamCoordinator, _ *loadbalancer.LoadBalancerResult, _ *client.StreamClient, exitStatus chan<- int) {
+			close(proxyStarted)
+			<-releaseProxy
+			exitStatus <- proxy.StatusClientClosed
+			close(proxyReturned)
+		},
+		getCmFunc:       func() *store.ConcurrencyManager { return cm },
+		getRegistryFunc: func() *buffer.StreamRegistry { return registry },
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/test.m3u8", nil).WithContext(ctx)
+	streamClient := client.NewStreamClient(httptest.NewRecorder(), req)
+	handlerDone := make(chan struct{})
+	go func() {
+		NewStreamHTTPHandler(manager, logger.Default).handleStream(ctx, streamClient)
+		close(handlerDone)
+	}()
+
+	<-proxyStarted
+	cancel()
+	select {
+	case <-handlerDone:
+	case <-time.After(time.Second):
+		t.Fatal("handler did not return after client disconnect")
+	}
+
+	close(releaseProxy)
+	select {
+	case <-proxyReturned:
+	case <-time.After(time.Second):
+		t.Fatal("proxy goroutine blocked reporting its final status")
+	}
+}
+
 func TestStreamHTTPHandler_DisconnectionConcurrency(t *testing.T) {
 	cm := store.NewConcurrencyManager()
 	config := config.NewDefaultStreamConfig()

@@ -80,7 +80,7 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, streamClient *clie
 			}
 		}
 
-		exitStatus := make(chan int)
+		exitStatus := make(chan int, 1)
 		h.logger.Logf("Proxying %s to %s", r.URL.Path, lbResult.URL)
 
 		proxyCtx, cancel := context.WithCancel(ctx)
