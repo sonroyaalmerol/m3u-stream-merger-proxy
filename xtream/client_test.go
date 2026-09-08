@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"m3u-stream-merger/utils"
 )
 
 func fakePanel() http.Handler {
@@ -128,6 +131,33 @@ func TestFetchPlaylistLinesBadAuth(t *testing.T) {
 	err := FetchPlaylistLines(context.Background(), client, nil, func(string) error { return nil })
 	if err == nil {
 		t.Fatal("expected error for bad credentials")
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestCallOnceMarksNetworkTimeoutRetryable(t *testing.T) {
+	originalClient := utils.HTTPClient
+	utils.HTTPClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, &net.DNSError{Err: "i/o timeout", Name: "panel.example", IsTimeout: true}
+	})}
+	t.Cleanup(func() { utils.HTTPClient = originalClient })
+
+	_, retryable, err := fetchOnce[listResponse[RawCategory]](
+		context.Background(),
+		NewClient("http://panel.example", "user", "pass"),
+		"get_live_categories",
+		nil,
+	)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !retryable {
+		t.Fatal("network timeout was not marked retryable")
 	}
 }
 

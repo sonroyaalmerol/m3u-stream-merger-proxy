@@ -3,6 +3,7 @@ package sourceproc
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -17,6 +18,8 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/utils"
 )
+
+var errSourceProcessing = errors.New("source processing failed")
 
 type M3UProcessor struct {
 	sync.RWMutex
@@ -99,6 +102,7 @@ func (p *M3UProcessor) Wait(ctx context.Context) error {
 		os.Remove(p.file.Name())
 		p.file = nil
 		p.cleanFailedRemoteFiles()
+		return errSourceProcessing
 	}
 
 	return nil
@@ -213,7 +217,6 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 		wgWorkers.Wait()
 		tracker.stop()
 
-		logger.Default.Logf("Parsing complete: %d streams accepted, compiling playlist", p.streamCount.Load())
 		p.compileM3U(baseURL)
 	}()
 
@@ -230,6 +233,12 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 		p.sorter.Close()
 		close(p.revalidatingDone)
 	}()
+
+	if p.criticalErrorOccurred.Load() {
+		logger.Default.Warnf("Parsing failed after %d streams; skipping playlist compilation", p.streamCount.Load())
+		return
+	}
+	logger.Default.Logf("Parsing complete: %d streams accepted, compiling playlist", p.streamCount.Load())
 
 	header := "#EXTM3U"
 	if len(utils.GetEPGIndexes()) > 0 {

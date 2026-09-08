@@ -2,8 +2,10 @@ package xtream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -55,7 +57,7 @@ func fetchTimeout() time.Duration {
 	return 5 * time.Minute
 }
 
-// callOnce performs one API attempt; the bool marks truncated 200s and 5xx as retryable.
+// callOnce performs one API attempt; the bool marks truncated 200s, 5xx, and transport timeouts as retryable.
 func callOnce(ctx context.Context, c *Client, action string, extra url.Values, consume func(io.Reader) error) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout())
 	defer cancel()
@@ -66,7 +68,8 @@ func callOnce(ctx context.Context, c *Client, action string, extra url.Values, c
 
 	resp, err := utils.HTTPClient.Do(req)
 	if err != nil {
-		return false, err
+		var netErr net.Error
+		return ctx.Err() == nil && errors.As(err, &netErr) && netErr.Timeout(), err
 	}
 	if resp.StatusCode >= 500 {
 		_ = resp.Body.Close()
@@ -99,8 +102,6 @@ func fetchOnce[T any](ctx context.Context, c *Client, action string, extra url.V
 	return &result, false, nil
 }
 
-// fetchAPI retries transient panel failures: truncated 200s and 5xx.
-// Per-item actions (get_series_info) must call fetchOnce instead: retrying
 // thousands of per-series calls multiplies a panel outage into hours.
 func fetchAPI[T any](ctx context.Context, c *Client, action string, extra url.Values) (*T, error) {
 	for attempt := 1; ; attempt++ {

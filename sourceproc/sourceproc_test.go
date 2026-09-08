@@ -564,6 +564,26 @@ func TestIngestProgressStopsIdempotently(t *testing.T) {
 	tracker.stop()
 }
 
+func TestFailedIngestSkipsCompilation(t *testing.T) {
+	cleanup := setupTestEnvironment(t)
+	defer cleanup()
+
+	failedSource := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	failedURL := failedSource.URL
+	failedSource.Close()
+
+	t.Setenv("M3U_URL_1", failedURL)
+	require.NoError(t, os.Unsetenv("M3U_URL_2"))
+	require.NoError(t, os.Unsetenv("M3U_URL_3"))
+	utils.ResetCaches()
+
+	processor := NewProcessor()
+	err := processor.Run(context.Background(), httptest.NewRequest(http.MethodGet, "http://example.com", nil))
+
+	require.Error(t, err)
+	assert.Nil(t, processor.storeWriter)
+}
+
 func TestHandleDownloadedMarksSourceError(t *testing.T) {
 	result := &SourceDownloaderResult{
 		Index: "1",
