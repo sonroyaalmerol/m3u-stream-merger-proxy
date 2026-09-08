@@ -1344,3 +1344,101 @@ func TestEvaluateBufferHealthCapsSample(t *testing.T) {
 		t.Fatalf("reconstructed body len = %d, want %d (sample plus remaining reads)", len(out), 3*maxSample)
 	}
 }
+
+// stallingBody blocks in Read until Close is called; response bodies have no read deadline.
+type stallingBody struct {
+	closed      chan struct{}
+	started     chan struct{}
+	closeOnce   sync.Once
+	startedOnce sync.Once
+}
+
+func newStallingBody() *stallingBody {
+	return &stallingBody{closed: make(chan struct{}), started: make(chan struct{})}
+}
+
+func (b *stallingBody) Read([]byte) (int, error) {
+	b.startedOnce.Do(func() { close(b.started) })
+	<-b.closed
+	return 0, io.EOF
+}
+
+func (b *stallingBody) Close() error {
+	b.closeOnce.Do(func() { close(b.closed) })
+	return nil
+}
+
+// gatedBody holds its first Read until gate closes, so the winner cannot race ahead of the stalled candidate.
+type gatedBody struct {
+	io.ReadCloser
+	gate chan struct{}
+	once sync.Once
+}
+
+func (b *gatedBody) Read(p []byte) (int, error) {
+	b.once.Do(func() { <-b.gate })
+	return b.ReadCloser.Read(p)
+}
+
+// TestStalledCandidateDoesNotWedgeTryStreamUrls asserts a stalled candidate cannot hold wg.Wait open forever.
+func TestStalledCandidateDoesNotWedgeTryStreamUrls(t *testing.T) {
+	stalled := newStallingBody()
+	good := &gatedBody{
+		ReadCloser: io.NopCloser(strings.NewReader(strings.Repeat("a", 512))),
+		gate:       stalled.started,
+	}
+
+	client := &mockHTTPClient{
+		responses: map[string]*http.Response{
+			"http://stalled.test/s": {StatusCode: http.StatusOK, Body: stalled},
+			"http://good.test/s":    {StatusCode: http.StatusOK, Body: good},
+		},
+		errors: make(map[string]error),
+	}
+
+	var urls []sourceproc.StreamURL
+	urls = append(urls, testURLs("1", map[string]string{
+		"a": "http://stalled.test/s",
+		"b": "http://good.test/s",
+	})...)
+	slugParser := &mockSlugParser{
+		streams: map[string]*sourceproc.StreamInfo{
+			"test-stream": {Title: "Test Stream", URLs: urls},
+		},
+	}
+
+	cm := store.NewConcurrencyManager()
+	cfg := &LBConfig{MaxRetries: 1, RetryWait: 0, HealthSampleBytes: 512}
+	instance := NewLoadBalancerInstance(cm, cfg,
+		WithHTTPClient(client),
+		WithLogger(logger.Default),
+		WithIndexProvider(&mockIndexProvider{indexes: []string{"1"}}),
+		WithSlugParser(slugParser),
+	)
+	if err := instance.fetchBackendUrls("test-stream"); err != nil {
+		t.Fatalf("fetchBackendUrls: %v", err)
+	}
+	innerMap := instance.GetStreamInfo().URLsForIndex("1")
+
+	type outcome struct {
+		result *LoadBalancerResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := instance.tryStreamUrls(context.Background(), newTestRequest(http.MethodGet), "test-stream", "1", innerMap)
+		done <- outcome{result, err}
+	}()
+
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("tryStreamUrls returned error: %v", got.err)
+		}
+		if got.result != nil {
+			_ = got.result.Response.Body.Close()
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("tryStreamUrls never returned: a stalled candidate wedged wg.Wait, leaking the goroutine and connection")
+	}
+}

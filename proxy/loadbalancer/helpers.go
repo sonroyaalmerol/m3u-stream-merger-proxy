@@ -28,11 +28,22 @@ type readCloser struct {
 
 func evaluateBufferHealth(ctx context.Context, resp *http.Response, maxSampleBytes int) (float64, error) {
 	const measureWindow = 2 * time.Second
+	const stallWindow = 2 * measureWindow
 	const probeReadChunk = 32 * 1024
 
 	start := time.Now()
 	originalBody := resp.Body
 	br := bufio.NewReader(originalBody)
+
+	stopOnCancel := context.AfterFunc(ctx, func() { _ = originalBody.Close() })
+	defer stopOnCancel()
+
+	stalled := make(chan struct{})
+	stallTimer := time.AfterFunc(stallWindow, func() {
+		close(stalled)
+		_ = originalBody.Close()
+	})
+	defer stallTimer.Stop()
 
 	if maxSampleBytes <= 0 || maxSampleBytes > maxHealthSampleBytes {
 		maxSampleBytes = maxHealthSampleBytes
@@ -57,6 +68,11 @@ func evaluateBufferHealth(ctx context.Context, resp *http.Response, maxSampleByt
 		}
 	}
 	consumed = consumed[:consumedBytes]
+
+	if !stallTimer.Stop() {
+		<-stalled
+		return 0, fmt.Errorf("stream stalled during health measurement after %s", stallWindow)
+	}
 
 	elapsed := time.Since(start)
 	if elapsed <= 0 {
