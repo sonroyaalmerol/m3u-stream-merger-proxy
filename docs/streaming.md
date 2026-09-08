@@ -56,6 +56,8 @@ Pacing applies only to the shared-buffer TS writer - never to VOD direct passthr
 
 Per actively-watched channel: one upstream connection, one ring (`BUFFER_CHUNK_NUM` x 1 MiB, lazily filled) plus one in-flight slab. Per additional viewer of the same channel: only a cursor and a copy buffer. The catalog is mmap'd, series fragments live on disk, so steady-state RSS is roughly `baseline + 26 MiB per active channel` at the default `BUFFER_CHUNK_NUM=8`. In memory-limited containers (k8s), the Go heap soft limit is auto-capped at 90% of the cgroup limit unless `GOMEMLIMIT` is set explicitly.
 
+Ingest, not streaming, sets the high-water mark. Measured on 800k streams with `GOMAXPROCS=2`: peak RSS 114.8 MiB at `GOMEMLIMIT=115MiB` (a 128 MB container's auto-cap), 93.6 MiB at `GOMEMLIMIT=90MiB`, same 2s runtime. Live heap at the peak is ~57 MiB, dominated by the catalog index slices, so a lower `GOMEMLIMIT` buys headroom for concurrent viewers at no measured throughput cost. For a 128 MB deployment: `GOMEMLIMIT=90MiB` and `BUFFER_CHUNK_NUM=2`.
+
 ## Goroutine and connection hygiene
 
 - Header notification, state transitions, and writer swaps inside a coordinator are mutex-guarded (a header channel is closed exactly once per generation; `headerMu`).

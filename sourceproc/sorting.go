@@ -32,9 +32,9 @@ func spillLayout() (nParts, conc int) {
 	return nParts, max(1, min(g, nParts/8))
 }
 
-// partBufSize holds total phase-1 write buffering near 16MB regardless of partition count.
+// partBufSize holds total phase-1 write buffering near 4MB regardless of partition count.
 func partBufSize(nParts int) int {
-	return max(16<<10, (16<<20)/nParts)
+	return max(16<<10, (4<<20)/nParts)
 }
 
 type spillPart struct {
@@ -658,7 +658,7 @@ func openRun(path string) (*runReader, error) {
 		return nil, err
 	}
 
-	return &runReader{f: f, br: bufio.NewReaderSize(f, 1<<16)}, nil
+	return &runReader{f: f, br: bufio.NewReaderSize(f, 16<<10)}, nil
 }
 
 // next reads one whole record into the reusable buffer; cur then only holds views, valid until the following next.
