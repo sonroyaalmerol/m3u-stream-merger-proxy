@@ -418,7 +418,7 @@ func (c *StreamCoordinator) readAndWriteStream(
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			if len(slab) < c.config.ChunkSize/4+1 {
+			if len(slab) == 0 {
 				slab = make([]byte, c.config.ChunkSize)
 			}
 

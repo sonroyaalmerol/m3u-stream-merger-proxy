@@ -161,13 +161,13 @@ func BenchmarkShortReads(b *testing.B) {
 	readSize := 32 * 1024
 
 	b.ReportAllocs()
-	b.SetBytes(int64(readSize * 64))
+	b.SetBytes(int64(readSize * 63))
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		c := NewStreamCoordinator("bench", cfg, store.NewConcurrencyManager(), nopLogger{})
 		_ = c.RegisterClient()
-		body := &slowReader{chunk: make([]byte, readSize), remaining: 64}
+		body := &slowReader{chunk: make([]byte, readSize), remaining: 63}
 		b.StartTimer()
 
 		_ = c.readAndWriteStream(context.Background(), body, c.writeChunk)

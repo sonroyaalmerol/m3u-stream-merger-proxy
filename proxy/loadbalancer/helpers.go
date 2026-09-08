@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+const maxHealthSampleBytes = 1024 * 1024
+
 type streamTestResult struct {
 	result *LoadBalancerResult
 	health float64
@@ -27,28 +29,26 @@ type readCloser struct {
 func evaluateBufferHealth(ctx context.Context, resp *http.Response, maxSampleBytes int) (float64, error) {
 	const measureWindow = 2 * time.Second
 	const probeReadChunk = 32 * 1024
-	const defaultMaxSample = 1024 * 1024
 
 	start := time.Now()
 	originalBody := resp.Body
 	br := bufio.NewReader(originalBody)
 
-	if maxSampleBytes <= 0 {
-		maxSampleBytes = defaultMaxSample
+	if maxSampleBytes <= 0 || maxSampleBytes > maxHealthSampleBytes {
+		maxSampleBytes = maxHealthSampleBytes
 	}
 
-	var consumed []byte
-	temp := make([]byte, probeReadChunk)
+	consumed := make([]byte, maxSampleBytes)
+	consumedBytes := 0
 	deadline := start.Add(measureWindow)
 
-	for len(consumed) < maxSampleBytes && time.Now().Before(deadline) {
+	for consumedBytes < maxSampleBytes && time.Now().Before(deadline) {
 		if ctx.Err() != nil {
 			break
 		}
-		n, err := br.Read(temp)
-		if n > 0 {
-			consumed = append(consumed, temp[:n]...)
-		}
+		readEnd := min(consumedBytes+probeReadChunk, maxSampleBytes)
+		n, err := br.Read(consumed[consumedBytes:readEnd])
+		consumedBytes += n
 		if err != nil {
 			if err == io.EOF {
 				break
@@ -56,16 +56,14 @@ func evaluateBufferHealth(ctx context.Context, resp *http.Response, maxSampleByt
 			return 0, fmt.Errorf("error reading stream during measurement: %w", err)
 		}
 	}
+	consumed = consumed[:consumedBytes]
 
 	elapsed := time.Since(start)
 	if elapsed <= 0 {
 		elapsed = time.Millisecond
 	}
-	throughput := float64(len(consumed)) / elapsed.Seconds()
+	throughput := float64(consumedBytes) / elapsed.Seconds()
 
-	// Reconstruct the body so that reads come from the buffered data followed
-	// by the remaining original body, but Close() still releases the underlying
-	// TCP connection.
 	newBody := io.MultiReader(bytes.NewReader(consumed), br)
 	resp.Body = readCloser{Reader: newBody, Closer: originalBody}
 	return throughput, nil

@@ -845,7 +845,7 @@ func TestResponseBodyClosedOnNonOKStatus(t *testing.T) {
 	}
 
 	cm := store.NewConcurrencyManager()
-	cfg := &LBConfig{MaxRetries: 1, RetryWait: 0, BufferChunk: 512}
+	cfg := &LBConfig{MaxRetries: 1, RetryWait: 0, HealthSampleBytes: 512}
 	instance := NewLoadBalancerInstance(cm, cfg,
 		WithHTTPClient(client),
 		WithLogger(logger.Default),
@@ -895,7 +895,7 @@ func TestResponseBodyClosedOnEvaluateError(t *testing.T) {
 	}
 
 	cm := store.NewConcurrencyManager()
-	cfg := &LBConfig{MaxRetries: 1, RetryWait: 0, BufferChunk: 512}
+	cfg := &LBConfig{MaxRetries: 1, RetryWait: 0, HealthSampleBytes: 512}
 	instance := NewLoadBalancerInstance(cm, cfg,
 		WithHTTPClient(client),
 		WithLogger(logger.Default),
@@ -946,7 +946,7 @@ func TestNonWinningResponseBodiesClosed(t *testing.T) {
 	}
 
 	cm := store.NewConcurrencyManager()
-	cfg := &LBConfig{MaxRetries: 1, RetryWait: 0, BufferChunk: 512}
+	cfg := &LBConfig{MaxRetries: 1, RetryWait: 0, HealthSampleBytes: 512}
 	instance := NewLoadBalancerInstance(cm, cfg,
 		WithHTTPClient(client),
 		WithLogger(logger.Default),
@@ -1229,7 +1229,7 @@ func TestWinnerContextNotCancelledAfterHealthCheck(t *testing.T) {
 	}
 
 	cm := store.NewConcurrencyManager()
-	cfg := &LBConfig{MaxRetries: 1, RetryWait: 0, BufferChunk: 512}
+	cfg := &LBConfig{MaxRetries: 1, RetryWait: 0, HealthSampleBytes: 512}
 	instance := NewLoadBalancerInstance(cm, cfg,
 		WithHTTPClient(client),
 		WithLogger(logger.Default),
@@ -1293,14 +1293,30 @@ func (c *countingHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-type infiniteReader struct{ reads int }
+type infiniteReader struct {
+	reads int
+	bytes int
+}
 
 func (r *infiniteReader) Read(p []byte) (int, error) {
 	r.reads++
+	r.bytes += len(p)
 	for i := range p {
 		p[i] = 'x'
 	}
 	return len(p), nil
+}
+
+func TestEvaluateBufferHealthCapsConfiguredSample(t *testing.T) {
+	body := &infiniteReader{}
+	resp := &http.Response{Body: io.NopCloser(body), Header: make(http.Header)}
+
+	if _, err := evaluateBufferHealth(context.Background(), resp, 2*maxHealthSampleBytes); err != nil {
+		t.Fatal(err)
+	}
+	if body.bytes != maxHealthSampleBytes {
+		t.Fatalf("sampled %d bytes, want %d", body.bytes, maxHealthSampleBytes)
+	}
 }
 
 func TestEvaluateBufferHealthCapsSample(t *testing.T) {
