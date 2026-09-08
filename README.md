@@ -97,6 +97,7 @@ services:
       - M3U_URL_X=
       - EPG_URL_1=https://iptvprovider1.com/epg.xml
       - EPG_URL_X=
+    mem_limit: ${MEMORY_LIMIT:-512m}
     restart: always
     # [OPTIONAL] Cache persistence: This will allow you to reuse the M3U cache across container recreates.
     # volumes:
@@ -104,6 +105,8 @@ services:
 ```
 
 Access the generated M3U playlist at `http://<server ip>:8080/playlist.m3u`.
+
+`MEMORY_LIMIT` defaults to `512m`. Set it in the shell or Compose `.env` file to fit the host. This hard container limit also lets the proxy derive its lower Go heap limit instead of competing with the host until the system OOM killer runs.
 
 ## Environment Variable Configurations
 
