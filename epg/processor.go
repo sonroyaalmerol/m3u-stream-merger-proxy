@@ -178,20 +178,10 @@ func (p *Processor) fallback(cachedPath string, origErr error) (string, error) {
 }
 
 // loadTvgIDs reads the tvg-id set persisted by the M3U processor.  When the
-// file doesn't exist (e.g. EPG ran before any M3U sync) an empty map is
-// returned, which disables filtering so all channels are kept.
-func loadTvgIDs() map[string]struct{} {
-	data, err := os.ReadFile(config.GetEPGTvgIDsPath())
-	if err != nil {
-		return nil // no filter
-	}
-	ids := make(map[string]struct{})
-	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
-		if line != "" {
-			ids[line] = struct{}{}
-		}
-	}
-	return ids
+// file doesn't exist (e.g. EPG ran before any M3U sync) nil is returned, which
+// disables filtering so all channels are kept.
+func loadTvgIDs() utils.TvgIDFilter {
+	return utils.LoadTvgIDFilter(config.GetEPGTvgIDsPath())
 }
 
 // decompressIfNeeded wraps resp.Body in a gzip reader when the response
@@ -244,7 +234,7 @@ func (mc multiCloser) Close() error {
 // When tvgIDs is non-nil only channels/programmes whose id/channel attribute
 // appears in that set are written; a nil map means "keep everything".
 // channelMap remaps EPG channel ids to M3U tvg-ids (epgID → tvgID); may be nil.
-func mergeXMLTV(sources []string, outputPath string, tvgIDs map[string]struct{}, channelMap map[string]string) error {
+func mergeXMLTV(sources []string, outputPath string, tvgIDs utils.TvgIDFilter, channelMap map[string]string) error {
 	out, err := os.Create(outputPath)
 	if err != nil {
 		return err
@@ -285,7 +275,7 @@ func mergeXMLTV(sources []string, outputPath string, tvgIDs map[string]struct{},
 //     channels, channel for programmes) is not in the set
 //   - channelMap: when non-nil, remaps EPG channel ids to M3U tvg-ids before
 //     filtering and deduplication; the identity attribute is rewritten in output
-func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, tvgIDs map[string]struct{}, channelMap map[string]string, out io.Writer) error {
+func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, tvgIDs utils.TvgIDFilter, channelMap map[string]string, out io.Writer) error {
 	f, err := os.Open(srcPath)
 	if err != nil {
 		return err
@@ -333,13 +323,11 @@ func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, tvgI
 		}
 
 		// Filter: skip elements whose identity is not in the tvg-id set.
-		if tvgIDs != nil && identity != "" {
-			if _, ok := tvgIDs[identity]; !ok {
-				if err := dec.Skip(); err != nil {
-					return err
-				}
-				continue
+		if identity != "" && !tvgIDs.Has(identity) {
+			if err := dec.Skip(); err != nil {
+				return err
 			}
+			continue
 		}
 
 		// Deduplicate channels by id attribute.

@@ -72,7 +72,8 @@ func TestMemProbeIngest(t *testing.T) {
 				return
 			case <-time.After(20 * time.Millisecond):
 				anon := procStatus(t, "RssAnon:")
-				if anon > peakAnon && anon > 110<<20 && os.Getenv("MEM_PROBE_HEAP") != "" {
+				threshold, _ := strconv.ParseUint(os.Getenv("MEM_PROBE_HEAP_MIB"), 10, 64)
+				if anon > peakAnon && anon > threshold<<20 && os.Getenv("MEM_PROBE_HEAP") != "" {
 					f, err := os.Create(os.Getenv("MEM_PROBE_HEAP"))
 					if err == nil {
 						_ = pprof.WriteHeapProfile(f)

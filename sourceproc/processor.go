@@ -30,7 +30,7 @@ type M3UProcessor struct {
 	sorter                *spillSorter
 	storeWriter           *StreamStoreWriter
 	criticalErrorOccurred atomic.Bool
-	tvgIDs                map[string]struct{}
+	tvgIDHashes           []uint64
 }
 
 func NewProcessor() *M3UProcessor {
@@ -258,7 +258,7 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 	storeWriter.reserve(int(p.streamCount.Load()))
 	p.storeWriter = storeWriter
 
-	p.tvgIDs = make(map[string]struct{})
+	p.tvgIDHashes = make([]uint64, 0, p.streamCount.Load())
 
 	render := func(entry *StreamInfo, rb *renderBuf) renderedEntry {
 		rb.m3u.Reset()
@@ -282,9 +282,7 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 			}
 		}
 		if len(re.tvgID) > 0 {
-			if _, ok := p.tvgIDs[string(re.tvgID)]; !ok {
-				p.tvgIDs[string(re.tvgID)] = struct{}{}
-			}
+			p.tvgIDHashes = append(p.tvgIDHashes, utils.TvgIDHash(string(re.tvgID)))
 		}
 		return nil
 	}
@@ -387,21 +385,17 @@ func (p *M3UProcessor) handleDownloaded(result *SourceDownloaderResult, streamCh
 
 // saveTvgIDs persists the tvg-id set so the EPG processor can filter to merged channels.
 func (p *M3UProcessor) saveTvgIDs() {
-	if len(p.tvgIDs) == 0 {
+	if len(p.tvgIDHashes) == 0 {
 		return
 	}
 	if err := os.MkdirAll(config.GetEPGDirPath(), 0755); err != nil {
 		logger.Default.Warnf("saveTvgIDs: mkdir: %v", err)
 		return
 	}
-	var sb strings.Builder
-	for id := range p.tvgIDs {
-		sb.WriteString(id)
-		sb.WriteByte('\n')
-	}
-	if err := os.WriteFile(config.GetEPGTvgIDsPath(), []byte(sb.String()), 0644); err != nil {
+	if err := utils.WriteTvgIDHashes(config.GetEPGTvgIDsPath(), p.tvgIDHashes); err != nil {
 		logger.Default.Warnf("saveTvgIDs: write: %v", err)
 	}
+	p.tvgIDHashes = nil
 }
 
 func (p *M3UProcessor) cleanup() {

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -34,6 +35,15 @@ type xmlChannel struct {
 type xmlProgramme struct {
 	Channel string `xml:"channel,attr"`
 	Title   string `xml:"title"`
+}
+
+func testTvgIDFilter(ids ...string) utils.TvgIDFilter {
+	filter := make(utils.TvgIDFilter, 0, len(ids))
+	for _, id := range ids {
+		filter = append(filter, utils.TvgIDHash(id))
+	}
+	slices.Sort(filter)
+	return filter
 }
 
 func parseMergedXML(t *testing.T, path string) xmltvDoc {
@@ -204,7 +214,7 @@ func TestMergeXMLTV_FilterByTvgIDs(t *testing.T) {
 		},
 	)), 0644)
 
-	tvgIDs := map[string]struct{}{"keep": {}}
+	tvgIDs := testTvgIDFilter("keep")
 	if err := mergeXMLTV([]string{src}, out, tvgIDs, nil); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
@@ -461,7 +471,7 @@ func TestMergeXMLTV_ChannelRemapping(t *testing.T) {
 	)), 0644)
 
 	channelMap := map[string]string{"epg.channel.id": "m3u.tvg.id"}
-	tvgIDs := map[string]struct{}{"m3u.tvg.id": {}}
+	tvgIDs := testTvgIDFilter("m3u.tvg.id")
 
 	if err := mergeXMLTV([]string{src}, out, tvgIDs, channelMap); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
@@ -541,10 +551,7 @@ func TestMergeXMLTV_RemapEnablesFilterPass(t *testing.T) {
 	)), 0644)
 
 	// tvgIDs has the M3U ids; epg.old is not there but maps to m3u.new which is.
-	tvgIDs := map[string]struct{}{
-		"m3u.new":  {},
-		"epg.keep": {},
-	}
+	tvgIDs := testTvgIDFilter("m3u.new", "epg.keep")
 	channelMap := map[string]string{"epg.old": "m3u.new"}
 
 	if err := mergeXMLTV([]string{src}, out, tvgIDs, channelMap); err != nil {
