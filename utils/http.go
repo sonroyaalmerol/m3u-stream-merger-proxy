@@ -3,7 +3,6 @@ package utils
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -13,15 +12,10 @@ import (
 var HTTPClient = &http.Client{
 	Transport: func() *http.Transport {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.DialContext = (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext
 		transport.MaxIdleConns = 200
 		transport.MaxIdleConnsPerHost = 50
 		transport.IdleConnTimeout = 120 * time.Second
 		transport.TLSHandshakeTimeout = 10 * time.Second
-		transport.ResponseHeaderTimeout = 10 * time.Second
 		return transport
 	}(),
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
