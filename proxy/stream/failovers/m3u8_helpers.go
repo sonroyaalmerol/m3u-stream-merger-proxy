@@ -13,6 +13,8 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
+const maxSegmentSlugBytes = 64 << 10
+
 var (
 	encoderPool sync.Pool
 	decoderPool sync.Pool
@@ -60,7 +62,10 @@ func encodeSlug(stream *M3U8Segment) string {
 		logger.Default.Debugf("Error zstd compression for slug: %v", err)
 		return ""
 	}
-	encoder.Close()
+	if err := encoder.Close(); err != nil {
+		logger.Default.Debugf("Error closing zstd encoder: %v", err)
+		return ""
+	}
 
 	encodedData := base64.RawURLEncoding.EncodeToString(compressedData.Bytes())
 	return encodedData
@@ -69,21 +74,26 @@ func encodeSlug(stream *M3U8Segment) string {
 func decodeSlug(encodedSlug string) (*M3U8Segment, error) {
 	decodedData, err := base64.RawURLEncoding.DecodeString(encodedSlug)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding Base64 data: %v", err)
+		return nil, fmt.Errorf("decode base64 data: %w", err)
 	}
 
 	decoder := decoderPool.Get().(*zstd.Decoder)
 	defer decoderPool.Put(decoder)
-	_ = decoder.Reset(bytes.NewReader(decodedData))
+	if err := decoder.Reset(bytes.NewReader(decodedData)); err != nil {
+		return nil, fmt.Errorf("reset zstd decoder: %w", err)
+	}
 
-	decompressedData, err := io.ReadAll(decoder)
+	decompressedData, err := io.ReadAll(io.LimitReader(decoder, maxSegmentSlugBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("error reading decompressed data: %v", err)
+		return nil, fmt.Errorf("read decompressed data: %w", err)
+	}
+	if len(decompressedData) > maxSegmentSlugBytes {
+		return nil, fmt.Errorf("decompressed segment slug exceeds %d bytes", maxSegmentSlugBytes)
 	}
 
 	var result M3U8Segment
 	if err := json.Unmarshal(decompressedData, &result); err != nil {
-		return nil, fmt.Errorf("error deserializing data: %v", err)
+		return nil, fmt.Errorf("deserialize data: %w", err)
 	}
 
 	return &result, nil

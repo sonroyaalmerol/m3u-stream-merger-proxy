@@ -21,6 +21,7 @@ import (
 
 const (
 	initialSegmentCap = 32
+	maxPlaylistBytes  = 16 << 20
 )
 
 type PlaylistMetadata struct {
@@ -107,7 +108,7 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 				continue
 			}
 
-			m3uPlaylist, err := io.ReadAll(resp.Body)
+			m3uPlaylist, err := readPlaylist(resp.Body)
 			_ = resp.Body.Close()
 
 			if err != nil {
@@ -228,6 +229,17 @@ func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string
 	}
 
 	return c.readAndWriteStream(ctx, resp.Body, c.writeChunk)
+}
+
+func readPlaylist(r io.Reader) ([]byte, error) {
+	playlist, err := io.ReadAll(io.LimitReader(r, maxPlaylistBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(playlist) > maxPlaylistBytes {
+		return nil, fmt.Errorf("playlist exceeds %d bytes", maxPlaylistBytes)
+	}
+	return playlist, nil
 }
 
 func (c *StreamCoordinator) parsePlaylist(mediaURL string, content string) (*PlaylistMetadata, error) {
