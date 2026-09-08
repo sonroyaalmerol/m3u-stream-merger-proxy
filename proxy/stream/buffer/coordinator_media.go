@@ -16,7 +16,7 @@ func (c *StreamCoordinator) StartMediaWriter(ctx context.Context, lbResult *load
 			c.writeError(fmt.Errorf("internal server error"), proxy.StatusServerError)
 		}
 	}()
-	defer lbResult.Response.Body.Close()
+	defer func() { _ = lbResult.Response.Body.Close() }()
 
 	c.LBResultOnWrite.Store(lbResult)
 	c.WriterRespHeader.Store(nil)

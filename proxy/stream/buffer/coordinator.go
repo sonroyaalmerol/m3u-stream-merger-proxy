@@ -198,16 +198,6 @@ func (c *StreamCoordinator) HasClient() bool {
 	return atomic.LoadInt32(&c.ClientCount) > 0
 }
 
-// shouldTimeout checks if the time since the last successful read exceeds the timeout.
-func (c *StreamCoordinator) shouldTimeout(lastSuccess time.Time, timeout time.Duration) bool {
-	shouldTimeout := c.config.TimeoutSeconds > 0 && time.Since(lastSuccess) >= timeout
-	if shouldTimeout {
-		c.logger.Debugf("Stream timed out after %v", time.Since(lastSuccess))
-	}
-	return shouldTimeout
-}
-
-// shouldTimeout reports whether no data has been read for a full timeout window.
 func (c *StreamCoordinator) Write(chunk *ChunkData) bool {
 	if chunk == nil {
 		c.logger.Debug("Write: Received nil chunk")
@@ -403,26 +393,47 @@ func (c *StreamCoordinator) readAndWriteStream(
 ) error {
 	var slab []byte
 	timeout := c.getTimeoutDuration()
-	lastSuccess := time.Now()
 	zeroReads := 0
 
 	var totalBytesRead int64
 	lastHealthLog := time.Now()
+
+	stopContextClose := context.AfterFunc(ctx, func() { _ = body.Close() })
+	defer stopContextClose()
+
+	var timeoutTimer *time.Timer
+	var timeoutFired chan struct{}
+	if c.config.TimeoutSeconds > 0 {
+		timeoutFired = make(chan struct{})
+		timeoutTimer = time.AfterFunc(timeout, func() {
+			close(timeoutFired)
+			_ = body.Close()
+		})
+		timeoutTimer.Stop()
+		defer timeoutTimer.Stop()
+	}
 
 	for atomic.LoadInt32(&c.state) == stateActive {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			if c.shouldTimeout(lastSuccess, timeout) {
-				return ErrStreamTimeout
-			}
-
 			if len(slab) < c.config.ChunkSize/4+1 {
 				slab = make([]byte, c.config.ChunkSize)
 			}
 
+			if timeoutTimer != nil {
+				timeoutTimer.Reset(timeout)
+			}
 			n, err := body.Read(slab)
+			if timeoutTimer != nil && !timeoutTimer.Stop() {
+				<-timeoutFired
+				c.logger.Debugf("Stream timed out after %v", timeout)
+				return ErrStreamTimeout
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			if n == 0 {
 				if err != nil {
 					return err
@@ -480,8 +491,6 @@ func (c *StreamCoordinator) readAndWriteStream(
 			if err = processChunk(chunk); err != nil {
 				return err
 			}
-			// Paced publishing can take seconds; it is progress, not a stall.
-			lastSuccess = time.Now()
 		}
 	}
 	return nil

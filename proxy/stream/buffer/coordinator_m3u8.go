@@ -56,7 +56,7 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 	defer c.cm.UpdateConcurrency(lbResult.Index, false)
 
 	playlistURL := lbResult.Response.Request.URL.String()
-	lbResult.Response.Body.Close()
+	_ = lbResult.Response.Body.Close()
 
 	var lastErr error
 	lastChangeTime := time.Now()
@@ -88,7 +88,7 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 				return
 			}
 
-			resp, err := utils.CustomHttpRequest(streamC.Request, "GET", playlistURL)
+			resp, err := utils.CustomHttpRequest(ctx, streamC.Request, "GET", playlistURL)
 			if err != nil {
 				c.logger.Warnf("Failed to fetch playlist: %v", err)
 				lastErr = err
@@ -101,14 +101,14 @@ func (c *StreamCoordinator) StartHLSWriter(ctx context.Context, lbResult *loadba
 			}
 
 			if resp.StatusCode != http.StatusOK {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				c.logger.Warnf("Non-200 status for playlist: %d", resp.StatusCode)
 				lastErr = fmt.Errorf("playlist returned status %d", resp.StatusCode)
 				continue
 			}
 
 			m3uPlaylist, err := io.ReadAll(resp.Body)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 
 			if err != nil {
 				c.logger.Warnf("Failed to read playlist body: %v", err)
@@ -202,15 +202,15 @@ func (c *StreamCoordinator) processSegments(ctx context.Context, segments []stri
 }
 
 func (c *StreamCoordinator) streamSegment(ctx context.Context, segmentURL string, streamC *client.StreamClient) error {
-	resp, err := utils.CustomHttpRequest(streamC.Request, "GET", segmentURL)
+	resp, err := utils.CustomHttpRequest(ctx, streamC.Request, "GET", segmentURL)
 	if err != nil {
 		return fmt.Errorf("Error fetching segment stream: %v", err)
 	}
 
 	if resp == nil {
-		return errors.New("Returned nil response from HTTP client")
+		return errors.New("returned nil response from HTTP client")
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("Non-200 status code received: %d for %s", resp.StatusCode, segmentURL)

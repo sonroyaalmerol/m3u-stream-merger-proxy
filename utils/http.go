@@ -1,13 +1,29 @@
 package utils
 
 import (
+	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
 var HTTPClient = &http.Client{
+	Transport: func() *http.Transport {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.DialContext = (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext
+		transport.MaxIdleConns = 200
+		transport.MaxIdleConnsPerHost = 50
+		transport.IdleConnTimeout = 120 * time.Second
+		transport.TLSHandshakeTimeout = 10 * time.Second
+		transport.ResponseHeaderTimeout = 10 * time.Second
+		return transport
+	}(),
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		userAgent := GetEnv("USER_AGENT")
 		accept := GetEnv("HTTP_ACCEPT")
@@ -18,11 +34,11 @@ var HTTPClient = &http.Client{
 	},
 }
 
-func CustomHttpRequest(origReq *http.Request, method string, url string) (*http.Response, error) {
+func CustomHttpRequest(ctx context.Context, origReq *http.Request, method string, url string) (*http.Response, error) {
 	userAgent := GetEnv("USER_AGENT")
 	accept := GetEnv("HTTP_ACCEPT")
 
-	req, err := http.NewRequest(method, url, nil)
+	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
 		return nil, err
 	}

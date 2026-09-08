@@ -662,6 +662,75 @@ func TestReadAndWriteStream_ReturnsPromptlyOnEOF(t *testing.T) {
 	}
 }
 
+type blockingReadCloser struct {
+	started chan struct{}
+	closed  chan struct{}
+	once    sync.Once
+}
+
+func (r *blockingReadCloser) Read([]byte) (int, error) {
+	r.once.Do(func() { close(r.started) })
+	<-r.closed
+	return 0, io.ErrClosedPipe
+}
+
+func (r *blockingReadCloser) Close() error {
+	select {
+	case <-r.closed:
+	default:
+		close(r.closed)
+	}
+	return nil
+}
+
+func TestReadAndWriteStream_CancellationClosesBody(t *testing.T) {
+	c := newCoordForTest(t)
+	if err := c.RegisterClient(); err != nil {
+		t.Fatal(err)
+	}
+	body := &blockingReadCloser{started: make(chan struct{}), closed: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- c.readAndWriteStream(ctx, body, c.writeChunk)
+	}()
+
+	<-body.started
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != context.Canceled {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("read did not stop after context cancellation")
+	}
+}
+
+func TestReadAndWriteStream_IdleTimeoutClosesBody(t *testing.T) {
+	c := NewStreamCoordinator(t.Name(), &config.StreamConfig{
+		SharedBufferSize: 1,
+		ChunkSize:        512,
+		TimeoutSeconds:   1,
+	}, store.NewConcurrencyManager(), logger.Default)
+	if err := c.RegisterClient(); err != nil {
+		t.Fatal(err)
+	}
+	body := &blockingReadCloser{started: make(chan struct{}), closed: make(chan struct{})}
+
+	start := time.Now()
+	err := c.readAndWriteStream(context.Background(), body, c.writeChunk)
+	elapsed := time.Since(start)
+
+	if err != ErrStreamTimeout {
+		t.Fatalf("err = %v, want ErrStreamTimeout", err)
+	}
+	if elapsed < time.Second || elapsed > 2*time.Second {
+		t.Fatalf("timeout took %v, want about 1s", elapsed)
+	}
+}
+
 func TestReadAndWriteStream_ChunkNotAliasedAcrossReads(t *testing.T) {
 	c := newCoordForTest(t)
 	if err := c.RegisterClient(); err != nil {
