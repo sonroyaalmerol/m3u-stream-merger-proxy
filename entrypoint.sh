@@ -1,5 +1,7 @@
 #!/bin/sh
 
+set -eu
+
 # Add a group with the specified PGID if it doesn't already exist
 if ! getent group appgroup > /dev/null 2>&1; then
     addgroup -g "${PGID}" appgroup
@@ -12,6 +14,12 @@ fi
 
 # Change ownership of the app directory
 chown -R appuser:appgroup /m3u-proxy
+
+if [ "$#" -eq 0 ]; then
+    set -- /m3u-proxy/m3u-proxy
+fi
+
+printf 'Starting %s as %s:%s\n' "$1" "$PUID" "$PGID"
 
 # Switch to the new user and execute the main application
 exec su-exec appuser "$@"

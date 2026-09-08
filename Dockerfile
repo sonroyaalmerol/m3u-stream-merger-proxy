@@ -46,5 +46,5 @@ ENV PGID=1000
 
 ENV PORT=8080
 
-# The container entrypoint
-ENTRYPOINT ["/m3u-proxy/entrypoint.sh", "/m3u-proxy/m3u-proxy"]
+ENTRYPOINT ["/m3u-proxy/entrypoint.sh"]
+CMD ["/m3u-proxy/m3u-proxy"]
