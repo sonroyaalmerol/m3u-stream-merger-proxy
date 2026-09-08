@@ -51,7 +51,7 @@ func (r *SourceDownloaderResult) setDetail(format string, args ...any) {
 }
 
 // streamDownloadM3USources runs one goroutine per source; progress goes through the shared tracker.
-func streamDownloadM3USources(tracker *ingestProgress) chan *SourceDownloaderResult {
+func streamDownloadM3USources(ctx context.Context, tracker *ingestProgress) chan *SourceDownloaderResult {
 	resultChan := make(chan *SourceDownloaderResult)
 	indexes := utils.GetM3UIndexes()
 
@@ -89,12 +89,12 @@ func streamDownloadM3USources(tracker *ingestProgress) chan *SourceDownloaderRes
 
 					if m3uURL != "" {
 						if after, ok := strings.CutPrefix(m3uURL, "file://"); ok {
-							handleLocalFile(after, result)
+							handleLocalFile(ctx, after, result)
 						} else {
-							handleRemoteURL(m3uURL, idx, result)
+							handleRemoteURL(ctx, m3uURL, idx, result)
 						}
 					} else {
-						handleXtreamSource(context.Background(), idx, result)
+						handleXtreamSource(ctx, idx, result)
 					}
 
 					elapsed := time.Since(start).Seconds()
@@ -122,7 +122,7 @@ func sourceKind(idx string) string {
 	return "m3u"
 }
 
-func handleLocalFile(localPath string, result *SourceDownloaderResult) {
+func handleLocalFile(ctx context.Context, localPath string, result *SourceDownloaderResult) {
 	file, err := os.Open(localPath)
 	if err != nil {
 		result.Error <- fmt.Errorf("error opening local file: %v", err)
@@ -130,10 +130,10 @@ func handleLocalFile(localPath string, result *SourceDownloaderResult) {
 	}
 	defer file.Close()
 
-	scanAndStream(file, result)
+	scanAndStream(ctx, file, result)
 }
 
-func handleRemoteURL(m3uURL, idx string, result *SourceDownloaderResult) {
+func handleRemoteURL(ctx context.Context, m3uURL, idx string, result *SourceDownloaderResult) {
 	finalPath := utils.GetM3UFilePathByIndex(idx)
 	tmpPath := finalPath + ".new"
 
@@ -151,13 +151,13 @@ func handleRemoteURL(m3uURL, idx string, result *SourceDownloaderResult) {
 
 	useFallback := func(err error) {
 		if fallbackFile != nil {
-			scanAndStream(fallbackFile, result)
+			scanAndStream(ctx, fallbackFile, result)
 		} else {
 			result.Error <- err
 		}
 	}
 
-	resp, err := utils.CustomHttpRequest(context.Background(), nil, "GET", m3uURL)
+	resp, err := utils.CustomHttpRequest(ctx, nil, "GET", m3uURL)
 	if err != nil {
 		logger.Default.Warnf("HTTP request error for index %s: %v", idx, err)
 		useFallback(fmt.Errorf("HTTP request error: %v", err))
@@ -193,7 +193,7 @@ func handleRemoteURL(m3uURL, idx string, result *SourceDownloaderResult) {
 	}
 
 	reader := io.TeeReader(bufReader, newFile)
-	scanAndStream(reader, result)
+	scanAndStream(ctx, reader, result)
 }
 
 func handleXtreamSource(ctx context.Context, idx string, result *SourceDownloaderResult) {
@@ -214,7 +214,7 @@ func handleXtreamSource(ctx context.Context, idx string, result *SourceDownloade
 
 	useFallback := func(err error) {
 		if fallbackFile != nil {
-			scanAndStream(fallbackFile, result)
+			scanAndStream(ctx, fallbackFile, result)
 		} else {
 			result.Error <- err
 		}
@@ -288,7 +288,7 @@ const (
 	lineSlabSize   = 512
 )
 
-func scanAndStream(r io.Reader, result *SourceDownloaderResult) {
+func scanAndStream(ctx context.Context, r io.Reader, result *SourceDownloaderResult) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 
@@ -299,6 +299,9 @@ func scanAndStream(r io.Reader, result *SourceDownloaderResult) {
 
 	lineNum := 0
 	for scanner.Scan() {
+		if ctx.Err() != nil {
+			return
+		}
 		b := scanner.Bytes()
 		content := ""
 		if len(b) > 0 {

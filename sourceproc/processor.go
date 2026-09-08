@@ -51,9 +51,9 @@ func NewProcessor() *M3UProcessor {
 	return processor
 }
 
-func (p *M3UProcessor) Start(r *http.Request) {
+func (p *M3UProcessor) Start(ctx context.Context, r *http.Request) {
 	start := time.Now()
-	errors := p.processStreams(r)
+	errors := p.processStreams(ctx, r)
 
 	for err := range errors {
 		if err != nil {
@@ -109,7 +109,7 @@ func (p *M3UProcessor) Wait(ctx context.Context) error {
 }
 
 func (p *M3UProcessor) Run(ctx context.Context, r *http.Request) error {
-	p.Start(r)
+	p.Start(ctx, r)
 	return p.Wait(ctx)
 }
 
@@ -148,7 +148,7 @@ func (p *M3UProcessor) markCriticalError(err error) {
 	p.criticalErrorOccurred.Store(true)
 }
 
-func (p *M3UProcessor) processStreams(r *http.Request) chan error {
+func (p *M3UProcessor) processStreams(ctx context.Context, r *http.Request) chan error {
 	revalidating := true
 	select {
 	case _, revalidating = <-p.revalidatingDone:
@@ -160,7 +160,7 @@ func (p *M3UProcessor) processStreams(r *http.Request) chan error {
 	}
 
 	tracker := newIngestProgress(p.streamCount.Load)
-	results := streamDownloadM3USources(tracker)
+	results := streamDownloadM3USources(ctx, tracker)
 	baseURL := utils.DetermineBaseURL(r)
 
 	streamCh := make(chan pendingStream, 8192)
