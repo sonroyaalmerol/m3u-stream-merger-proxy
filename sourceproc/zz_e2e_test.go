@@ -50,12 +50,7 @@ func BenchmarkEndToEndIngest(b *testing.B) {
 	cases := []struct{ key string }{{""}, {"tvg-name"}}
 	for _, tc := range cases {
 		b.Run("sort="+tc.key, func(b *testing.B) {
-			if tc.key == "" {
-				os.Unsetenv("SORTING_KEY")
-			} else {
-				os.Setenv("SORTING_KEY", tc.key)
-				defer os.Unsetenv("SORTING_KEY")
-			}
+			b.Setenv("SORTING_KEY", tc.key)
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {

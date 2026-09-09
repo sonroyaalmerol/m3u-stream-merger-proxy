@@ -40,12 +40,13 @@ func setupXtreamHandler(t *testing.T) *XtreamHTTPHandler {
 		DataPath: filepath.Join(tempDir, "data"),
 		TempPath: filepath.Join(tempDir, "temp"),
 	})
-	utils.ResetCaches()
 
 	m3uPath := filepath.Join(tempDir, "merged.m3u")
 	require.NoError(t, os.WriteFile(m3uPath, []byte(xtreamTestM3U), 0644))
 	t.Setenv("M3U_URL_1", "file://"+m3uPath)
 	t.Setenv("BASE_URL", "http://example.com")
+	utils.ResetCaches()
+	t.Cleanup(utils.ResetCaches)
 
 	require.NoError(t, sourceproc.NewProcessor().Run(context.Background(), nil))
 

@@ -94,10 +94,11 @@ http://example.com/vevo
 	require.NoError(t, os.WriteFile(m3uPath3, []byte(testM3U3), 0644))
 
 	// Set environment variables for all three M3Us
-	os.Setenv("M3U_URL_1", fmt.Sprintf("file://%s", m3uPath1))
-	os.Setenv("M3U_URL_2", fmt.Sprintf("file://%s", m3uPath2))
-	os.Setenv("M3U_URL_3", fmt.Sprintf("file://%s", m3uPath3))
-	os.Setenv("BASE_URL", "http://example.com")
+	t.Setenv("M3U_URL_1", fmt.Sprintf("file://%s", m3uPath1))
+	t.Setenv("M3U_URL_2", fmt.Sprintf("file://%s", m3uPath2))
+	t.Setenv("M3U_URL_3", fmt.Sprintf("file://%s", m3uPath3))
+	t.Setenv("BASE_URL", "http://example.com")
+	utils.ResetCaches()
 
 	return func() {
 		testDataLock.Lock()
@@ -106,12 +107,9 @@ http://example.com/vevo
 		config.SetConfig(originalConfig)
 		utils.ResetCaches()
 
-		os.RemoveAll(tempDir)
-
-		os.Unsetenv("M3U_URL_1")
-		os.Unsetenv("M3U_URL_2")
-		os.Unsetenv("M3U_URL_3")
-		os.Unsetenv("BASE_URL")
+		if err := os.RemoveAll(tempDir); err != nil {
+			t.Errorf("remove test directory: %v", err)
+		}
 	}
 }
 
@@ -161,6 +159,8 @@ func TestRevalidatingGetM3U(t *testing.T) {
 			sortingKey: "",
 			sortingDir: "asc",
 			setup: func(t *testing.T) {
+				t.Setenv("SORTING_KEY", "")
+				t.Setenv("SORTING_DIRECTION", "asc")
 			},
 			validateOrder: func(t *testing.T, streams []testStreamInfo) {
 				// Verify all streams are present.
@@ -181,9 +181,8 @@ func TestRevalidatingGetM3U(t *testing.T) {
 			sortingKey: "tvg-chno",
 			sortingDir: "asc",
 			setup: func(t *testing.T) {
-				// Set the sorting environment variables.
-				os.Setenv("SORTING_KEY", "tvg-chno")
-				os.Setenv("SORTING_DIRECTION", "asc")
+				t.Setenv("SORTING_KEY", "tvg-chno")
+				t.Setenv("SORTING_DIRECTION", "asc")
 			},
 			validateOrder: func(t *testing.T, streams []testStreamInfo) {
 				// Verify that channel numbers are in ascending order.
@@ -210,9 +209,8 @@ func TestRevalidatingGetM3U(t *testing.T) {
 			sortingKey: "tvg-group",
 			sortingDir: "asc",
 			setup: func(t *testing.T) {
-				// Set group sorting to ascending.
-				os.Setenv("SORTING_KEY", "tvg-group")
-				os.Setenv("SORTING_DIRECTION", "asc")
+				t.Setenv("SORTING_KEY", "tvg-group")
+				t.Setenv("SORTING_DIRECTION", "asc")
 			},
 			validateOrder: func(t *testing.T, streams []testStreamInfo) {
 				// Check that the groups are sorted alphabetically.
@@ -448,13 +446,8 @@ func TestSortingVariations(t *testing.T) {
 			cleanup := setupTestEnvironment(t)
 			defer cleanup()
 
-			// Set sorting environment variables
-			os.Setenv("SORTING_KEY", tt.key)
-			os.Setenv("SORTING_DIRECTION", tt.direction)
-			defer func() {
-				os.Unsetenv("SORTING_KEY")
-				os.Unsetenv("SORTING_DIRECTION")
-			}()
+			t.Setenv("SORTING_KEY", tt.key)
+			t.Setenv("SORTING_DIRECTION", tt.direction)
 
 			req := httptest.NewRequest(http.MethodGet, "http://example.com", nil)
 			processor := NewProcessor()
@@ -476,8 +469,7 @@ func TestSortingVariations(t *testing.T) {
 }
 
 func TestMergeAttributesToM3UFile(t *testing.T) {
-	os.Setenv("BASE_URL", "http://example.com")
-	defer os.Unsetenv("BASE_URL")
+	t.Setenv("BASE_URL", "http://example.com")
 
 	m3u1 := `#EXTINF:-1 tvg-chno="010",First Channel`
 	url1 := "http://example.com/source1"

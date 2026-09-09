@@ -5,6 +5,7 @@ import (
 	"m3u-stream-merger/config"
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/sourceproc"
+	"m3u-stream-merger/utils"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -43,6 +44,7 @@ func setupTest(t *testing.T) (*M3UHTTPHandler, *httptest.ResponseRecorder, *http
 		DataPath: testDataPath,
 	})
 
+	utils.ResetCaches()
 	processor := sourceproc.NewProcessor()
 	err = processor.Run(context.Background(), nil)
 	if err != nil {
@@ -58,7 +60,7 @@ func setupTest(t *testing.T) (*M3UHTTPHandler, *httptest.ResponseRecorder, *http
 
 func TestM3UHTTPHandler_NoAuth(t *testing.T) {
 	// Setup
-	os.Setenv("CREDENTIALS", "")
+	t.Setenv("CREDENTIALS", "")
 	handler, recorder, request := setupTest(t)
 
 	// Test
@@ -118,7 +120,7 @@ func TestM3UHTTPHandler_BasicAuth(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup
-			os.Setenv("CREDENTIALS", tt.credentials)
+			t.Setenv("CREDENTIALS", tt.credentials)
 			handler, recorder, request := setupTest(t)
 
 			// Add auth parameters
@@ -175,7 +177,7 @@ func TestM3UHTTPHandler_ExpirationDate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup
-			os.Setenv("CREDENTIALS", tt.credentials)
+			t.Setenv("CREDENTIALS", tt.credentials)
 			handler, recorder, request := setupTest(t)
 
 			// Add auth parameters

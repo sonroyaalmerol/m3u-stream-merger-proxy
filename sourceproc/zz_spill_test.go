@@ -109,6 +109,7 @@ func TestSpillSorterOrderAndFold(t *testing.T) {
 }
 
 func TestSpillSorterProviderOrderDefault(t *testing.T) {
+	t.Setenv("SORTING_KEY", "")
 	config.SetConfig(&config.Config{DataPath: t.TempDir() + "/data/", TempPath: t.TempDir() + "/tmp/"})
 	s := newSpillSorter()
 	if s.sortingKey != "provider-order" {
