@@ -1,13 +1,42 @@
 ---
 name: Release
-on:  # yamllint disable-line rule:truthy
+on:
   release:
     types: [published]
 
 jobs:
-  # Builds the Dockerfile and pushes it to dockerhub and GHCR
+  validate:
+    name: Validate before publishing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: false
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+          args: --max-same-issues=0 --max-issues-per-linter=0
+
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Module tidiness
+        run: go mod tidy -diff
+      - name: Race and shuffled tests
+        run: go test -race -shuffle=on -count=1 ./...
+      - name: Vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
   release:
     name: Release - Docker image
+    needs: validate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -31,7 +60,6 @@ jobs:
         with:
           images: |
             ${{ github.repository }}
-          # generate Docker tags based on the following events/attributes
           tags: |
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}

@@ -1,6 +1,6 @@
 ---
 name: Linting
-on:  # yamllint disable-line rule:truthy
+on:
   pull_request:
   push:
     branches:
@@ -29,12 +29,29 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: "1.26"
           cache: false
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          # Require: The version of golangci-lint to use.
-          # When `install-mode` is `binary` (default) the value can be v1.2 or v1.2.3 or `latest` to use the latest version.
-          # When `install-mode` is `goinstall` the value can be v1.2.3, `latest`, or the hash of a commit.
           version: latest
+          args: --max-same-issues=0 --max-issues-per-linter=0
+
+  tests:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Module tidiness
+        run: go mod tidy -diff
+      - name: Race and shuffled tests
+        run: go test -race -shuffle=on -count=1 ./...
+      - name: Vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
