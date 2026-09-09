@@ -104,7 +104,7 @@ func (s *tlsSetup) redirectHandler() http.Handler {
 		}
 		if base == "" {
 			w.WriteHeader(http.StatusUpgradeRequired)
-			fmt.Fprintln(w, "this proxy requires HTTPS; configure BASE_URL to enable redirects")
+			_, _ = fmt.Fprintln(w, "this proxy requires HTTPS; configure BASE_URL to enable redirects")
 			return
 		}
 		target := s.redirectTarget(r, base)

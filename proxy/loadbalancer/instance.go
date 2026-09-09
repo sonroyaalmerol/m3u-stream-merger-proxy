@@ -391,7 +391,7 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 				return
 			}
 			if !isAcceptableStreamStatus(resp.StatusCode) {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				instance.logger.Errorf("Unacceptable status %d for %s %s",
 					resp.StatusCode, req.Method, url)
 				instance.markTested(streamId, candidateId)
@@ -403,7 +403,7 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 
 			health, evalErr := evaluateBufferHealth(healthCtx, resp, instance.config.HealthSampleBytes)
 			if evalErr != nil {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				instance.logger.Errorf("Error evaluating buffer health: %s", evalErr.Error())
 				instance.markTested(streamId, candidateId)
 				resultCh <- &streamTestResult{err: evalErr}
@@ -438,11 +438,11 @@ func (instance *LoadBalancerInstance) tryStreamUrls(
 		}
 		if bestResult == nil || res.health > bestResult.health {
 			if bestResult != nil {
-				bestResult.result.Response.Body.Close()
+				_ = bestResult.result.Response.Body.Close()
 			}
 			bestResult = res
 		} else {
-			res.result.Response.Body.Close()
+			_ = res.result.Response.Body.Close()
 		}
 	}
 

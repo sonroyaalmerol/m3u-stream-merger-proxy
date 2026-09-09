@@ -458,7 +458,7 @@ func TestHandleDirectStreamContextCancellation(t *testing.T) {
 
 	// Write some initial data, then hold — simulating an infinite live stream.
 	go func() {
-		pw.Write(bytes.Repeat([]byte("x"), 512))
+		_, _ = pw.Write(bytes.Repeat([]byte("x"), 512))
 		// deliberately does not write more; the next Read will block
 	}()
 
@@ -495,7 +495,7 @@ func TestHandleDirectStreamContextCancellation(t *testing.T) {
 		t.Fatal("HandleDirectStream did not return within 2 s of context cancellation")
 	}
 
-	pw.Close()
+	_ = pw.Close()
 }
 
 // TestHandleDirectStreamGoroutineCleanup verifies that no goroutines are

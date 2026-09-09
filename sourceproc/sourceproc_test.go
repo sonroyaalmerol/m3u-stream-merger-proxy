@@ -507,11 +507,11 @@ func TestMergeAttributesToM3UFile(t *testing.T) {
 
 	tempFile, err := os.CreateTemp("", "merged-*.m3u")
 	require.NoError(t, err)
-	defer os.Remove(tempFile.Name())
+	defer func() { _ = os.Remove(tempFile.Name()) }()
 
 	_, err = tempFile.Write([]byte(m3uContent))
 	require.NoError(t, err)
-	tempFile.Close()
+	require.NoError(t, tempFile.Close())
 
 	contentFromFile, err := os.ReadFile(tempFile.Name())
 	require.NoError(t, err)

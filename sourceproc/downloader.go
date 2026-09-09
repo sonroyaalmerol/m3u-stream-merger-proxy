@@ -44,12 +44,6 @@ func (r *SourceDownloaderResult) addLine() {
 	r.sp.lines.Add(1)
 }
 
-func (r *SourceDownloaderResult) setDetail(format string, args ...any) {
-	if r.sp != nil {
-		r.sp.setDetail(format, args...)
-	}
-}
-
 // streamDownloadM3USources runs one goroutine per source; progress goes through the shared tracker.
 func streamDownloadM3USources(ctx context.Context, tracker *ingestProgress) chan *SourceDownloaderResult {
 	resultChan := make(chan *SourceDownloaderResult)
@@ -128,7 +122,7 @@ func handleLocalFile(ctx context.Context, localPath string, result *SourceDownlo
 		result.Error <- fmt.Errorf("error opening local file: %v", err)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanAndStream(ctx, file, result)
 }
@@ -145,7 +139,7 @@ func handleRemoteURL(ctx context.Context, m3uURL, idx string, result *SourceDown
 	fallbackFile, _ := os.Open(finalPath)
 	defer func() {
 		if fallbackFile != nil {
-			fallbackFile.Close()
+			_ = fallbackFile.Close()
 		}
 	}()
 
@@ -163,7 +157,7 @@ func handleRemoteURL(ctx context.Context, m3uURL, idx string, result *SourceDown
 		useFallback(fmt.Errorf("HTTP request error: %v", err))
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		logger.Default.Warnf("HTTP status %d for index %s", resp.StatusCode, idx)
@@ -185,10 +179,10 @@ func handleRemoteURL(ctx context.Context, m3uURL, idx string, result *SourceDown
 		useFallback(fmt.Errorf("error creating tmp file: %v", err))
 		return
 	}
-	defer newFile.Close()
+	defer func() { _ = newFile.Close() }()
 
 	if fallbackFile != nil {
-		fallbackFile.Close()
+		_ = fallbackFile.Close()
 		fallbackFile = nil
 	}
 
@@ -208,7 +202,7 @@ func handleXtreamSource(ctx context.Context, idx string, result *SourceDownloade
 	fallbackFile, _ := os.Open(finalPath)
 	defer func() {
 		if fallbackFile != nil {
-			fallbackFile.Close()
+			_ = fallbackFile.Close()
 		}
 	}()
 
@@ -231,7 +225,7 @@ func handleXtreamSource(ctx context.Context, idx string, result *SourceDownloade
 		useFallback(fmt.Errorf("error creating tmp file for index %s: %v", idx, err))
 		return
 	}
-	defer newFile.Close()
+	defer func() { _ = newFile.Close() }()
 
 	writer := bufio.NewWriter(newFile)
 	if _, err := writer.WriteString("#EXTM3U\n"); err != nil {
@@ -277,7 +271,7 @@ func handleXtreamSource(ctx context.Context, idx string, result *SourceDownloade
 	}
 
 	if fallbackFile != nil {
-		fallbackFile.Close()
+		_ = fallbackFile.Close()
 		fallbackFile = nil
 	}
 }

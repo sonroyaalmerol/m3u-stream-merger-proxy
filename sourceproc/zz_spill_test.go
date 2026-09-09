@@ -175,7 +175,7 @@ func TestSpillSorterDescNumeric(t *testing.T) {
 		return renderedEntry{m3u: rb.m3u.Bytes()}
 	}, func(re renderedEntry) error {
 		var v int
-		fmt.Sscanf(string(re.m3u), "%d", &v)
+		_, _ = fmt.Sscanf(string(re.m3u), "%d", &v)
 		got = append(got, v)
 		return nil
 	})

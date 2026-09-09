@@ -27,21 +27,21 @@ func fakePanel() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		switch query.Get("action") {
 		case "get_live_categories":
-			fmt.Fprint(w, `[{"category_id":"1","category_name":"News","parent_id":0}]`)
+			_, _ = fmt.Fprint(w, `[{"category_id":"1","category_name":"News","parent_id":0}]`)
 		case "get_vod_categories":
-			fmt.Fprint(w, `[{"category_id":"2","category_name":"Movies","parent_id":0}]`)
+			_, _ = fmt.Fprint(w, `[{"category_id":"2","category_name":"Movies","parent_id":0}]`)
 		case "get_series_categories":
-			fmt.Fprint(w, `[{"category_id":"3","category_name":"Drama","parent_id":0}]`)
+			_, _ = fmt.Fprint(w, `[{"category_id":"3","category_name":"Drama","parent_id":0}]`)
 		case "get_live_streams":
-			fmt.Fprint(w, `[{"num":1,"name":"CNN","stream_type":"live","stream_id":100,"stream_icon":"http://img/cnn.png","epg_channel_id":"cnn.id","category_id":"1","tv_archive":"","tv_archive_duration":""}]`)
+			_, _ = fmt.Fprint(w, `[{"num":1,"name":"CNN","stream_type":"live","stream_id":100,"stream_icon":"http://img/cnn.png","epg_channel_id":"cnn.id","category_id":"1","tv_archive":"","tv_archive_duration":""}]`)
 		case "get_vod_streams":
-			fmt.Fprint(w, `[{"num":1,"name":"Cool Movie","stream_type":"movie","stream_id":200,"stream_icon":"http://img/m.png","category_id":"2","container_extension":"mp4"}]`)
+			_, _ = fmt.Fprint(w, `[{"num":1,"name":"Cool Movie","stream_type":"movie","stream_id":200,"stream_icon":"http://img/m.png","category_id":"2","container_extension":"mp4"}]`)
 		case "get_series":
-			fmt.Fprint(w, `[{"num":1,"name":"Test Show","series_id":300,"cover":"http://img/show.png","category_id":"3"}]`)
+			_, _ = fmt.Fprint(w, `[{"num":1,"name":"Test Show","series_id":300,"cover":"http://img/show.png","category_id":"3"}]`)
 		case "get_series_info":
-			fmt.Fprint(w, `{"info":{"name":"Test Show"},"episodes":{"1":[{"id":301,"episode_num":2,"title":"Episode 2","container_extension":"mkv","movie_image":"http://img/ep.png"}]}}`)
+			_, _ = fmt.Fprint(w, `{"info":{"name":"Test Show"},"episodes":{"1":[{"id":301,"episode_num":2,"title":"Episode 2","container_extension":"mkv","movie_image":"http://img/ep.png"}]}}`)
 		default:
-			fmt.Fprint(w, `[]`)
+			_, _ = fmt.Fprint(w, `[]`)
 		}
 	})
 	return mux

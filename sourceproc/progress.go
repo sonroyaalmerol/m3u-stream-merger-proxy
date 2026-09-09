@@ -17,15 +17,9 @@ const (
 
 // sourceProgress is one source's live line counter plus optional phase detail.
 type sourceProgress struct {
-	idx    string
-	kind   string
-	lines  atomic.Int64
-	detail atomic.Pointer[string]
-}
-
-func (s *sourceProgress) setDetail(format string, args ...any) {
-	d := fmt.Sprintf(format, args...)
-	s.detail.Store(&d)
+	idx   string
+	kind  string
+	lines atomic.Int64
 }
 
 // ingestProgress collapses all sources + the parser into one heartbeat line,
@@ -102,11 +96,7 @@ func (p *ingestProgress) describe(total int64) string {
 
 	parts := make([]string, 0, len(srcs))
 	for _, s := range srcs {
-		part := fmt.Sprintf("%s=%d", s.idx, s.lines.Load())
-		if d := s.detail.Load(); d != nil {
-			part += " " + *d
-		}
-		parts = append(parts, part)
+		parts = append(parts, fmt.Sprintf("%s=%d", s.idx, s.lines.Load()))
 	}
 	if len(parts) == 0 {
 		return fmt.Sprintf("%d lines", total)

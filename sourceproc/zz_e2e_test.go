@@ -17,16 +17,16 @@ func writeCorpus(tb testing.TB, path string, n, offset, overlapEvery int) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	w := bufio.NewWriterSize(f, 1<<20)
-	fmt.Fprint(w, "#EXTM3U\n")
+	_, _ = fmt.Fprint(w, "#EXTM3U\n")
 	for i := range n {
 		id := i + offset
 		if overlapEvery > 0 && i%overlapEvery == 0 {
 			id = i
 		}
-		fmt.Fprintf(w, "#EXTINF:-1 tvg-id=\"chan.%d.tv\" tvg-chno=\"%d\" tvg-name=\"Channel %d HD\" tvg-type=\"live\" tvg-logo=\"http://img.example.com/%d.png\" tvg-group=\"Group %d\" group-title=\"Group %d\",Channel %d HD\n", id, id, id, id, id%50, id%50, id)
-		fmt.Fprintf(w, "http://upstream.example.com/live/src%d/%d-%d.m3u8\n", offset, id, i)
+		_, _ = fmt.Fprintf(w, "#EXTINF:-1 tvg-id=\"chan.%d.tv\" tvg-chno=\"%d\" tvg-name=\"Channel %d HD\" tvg-type=\"live\" tvg-logo=\"http://img.example.com/%d.png\" tvg-group=\"Group %d\" group-title=\"Group %d\",Channel %d HD\n", id, id, id, id, id%50, id%50, id)
+		_, _ = fmt.Fprintf(w, "http://upstream.example.com/live/src%d/%d-%d.m3u8\n", offset, id, i)
 	}
 	if err := w.Flush(); err != nil {
 		tb.Fatal(err)

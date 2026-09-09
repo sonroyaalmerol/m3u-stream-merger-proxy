@@ -174,7 +174,7 @@ func (h *StreamHTTPHandler) handleSegmentStream(streamClient *client.StreamClien
 		_, _ = streamClient.Write([]byte("Failed to fetch segment"))
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	for key, values := range resp.Header {
 		for _, value := range values {

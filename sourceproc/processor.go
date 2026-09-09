@@ -74,7 +74,7 @@ func (p *M3UProcessor) Wait(ctx context.Context) error {
 		defer p.Unlock()
 
 		logger.Default.Errorf("Revalidation failed due to context cancellation, keeping old data.")
-		os.Remove(p.file.Name())
+		_ = os.Remove(p.file.Name())
 		p.cleanFailedRemoteFiles()
 
 		return ctx.Err()
@@ -99,7 +99,7 @@ func (p *M3UProcessor) Wait(ctx context.Context) error {
 		p.saveTvgIDs()
 	} else {
 		logger.Default.Errorf("Revalidation failed, keeping old data.")
-		os.Remove(p.file.Name())
+		_ = os.Remove(p.file.Name())
 		p.file = nil
 		p.cleanFailedRemoteFiles()
 		return errSourceProcessing
@@ -229,7 +229,7 @@ func (p *M3UProcessor) compileM3U(baseURL string) {
 	defer p.Unlock()
 
 	defer func() {
-		p.file.Close()
+		_ = p.file.Close()
 		p.sorter.Close()
 		close(p.revalidatingDone)
 	}()
@@ -403,10 +403,10 @@ func (p *M3UProcessor) cleanup() {
 	defer p.Unlock()
 
 	if p.writer != nil {
-		p.writer.Flush()
+		_ = p.writer.Flush()
 	}
 	if p.file != nil {
-		p.file.Close()
+		_ = p.file.Close()
 	}
 }
 

@@ -52,7 +52,7 @@ func parseMergedXML(t *testing.T, path string) xmltvDoc {
 	if err != nil {
 		t.Fatalf("open merged xml: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var doc xmltvDoc
 	if err := xml.NewDecoder(f).Decode(&doc); err != nil {
@@ -78,12 +78,12 @@ func xmltvSource(channels []xmlChannel, programmes []xmlProgramme) string {
 	sb.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	sb.WriteString("<tv>\n")
 	for _, ch := range channels {
-		sb.WriteString(fmt.Sprintf(`<channel id=%q><display-name>%s</display-name></channel>`+"\n",
-			ch.ID, ch.DisplayName))
+		fmt.Fprintf(&sb, `<channel id=%q><display-name>%s</display-name></channel>`+"\n",
+			ch.ID, ch.DisplayName)
 	}
 	for _, pr := range programmes {
-		sb.WriteString(fmt.Sprintf(`<programme channel=%q><title>%s</title></programme>`+"\n",
-			pr.Channel, pr.Title))
+		fmt.Fprintf(&sb, `<programme channel=%q><title>%s</title></programme>`+"\n",
+			pr.Channel, pr.Title)
 	}
 	sb.WriteString("</tv>\n")
 	return sb.String()
@@ -116,11 +116,11 @@ func TestMergeXMLTV_Basic(t *testing.T) {
 	src2 := filepath.Join(dir, "src2.xml")
 	out := filepath.Join(dir, "out.xml")
 
-	os.WriteFile(src1, []byte(xmltvSource(
+	_ = os.WriteFile(src1, []byte(xmltvSource(
 		[]xmlChannel{{ID: "ch1", DisplayName: "Channel 1"}},
 		[]xmlProgramme{{Channel: "ch1", Title: "Show A"}},
 	)), 0644)
-	os.WriteFile(src2, []byte(xmltvSource(
+	_ = os.WriteFile(src2, []byte(xmltvSource(
 		[]xmlChannel{{ID: "ch2", DisplayName: "Channel 2"}},
 		[]xmlProgramme{{Channel: "ch2", Title: "Show B"}},
 	)), 0644)
@@ -146,10 +146,10 @@ func TestMergeXMLTV_DeduplicatesChannels(t *testing.T) {
 	src2 := filepath.Join(dir, "src2.xml")
 	out := filepath.Join(dir, "out.xml")
 
-	os.WriteFile(src1, []byte(xmltvSource(
+	_ = os.WriteFile(src1, []byte(xmltvSource(
 		[]xmlChannel{{ID: "dup", DisplayName: "First"}}, nil,
 	)), 0644)
-	os.WriteFile(src2, []byte(xmltvSource(
+	_ = os.WriteFile(src2, []byte(xmltvSource(
 		[]xmlChannel{{ID: "dup", DisplayName: "Second"}}, nil,
 	)), 0644)
 
@@ -174,11 +174,11 @@ func TestMergeXMLTV_ProgrammesFromAllSources(t *testing.T) {
 	src2 := filepath.Join(dir, "src2.xml")
 	out := filepath.Join(dir, "out.xml")
 
-	os.WriteFile(src1, []byte(xmltvSource(
+	_ = os.WriteFile(src1, []byte(xmltvSource(
 		[]xmlChannel{{ID: "ch1", DisplayName: "Ch1"}},
 		[]xmlProgramme{{Channel: "ch1", Title: "Morning News"}},
 	)), 0644)
-	os.WriteFile(src2, []byte(xmltvSource(
+	_ = os.WriteFile(src2, []byte(xmltvSource(
 		[]xmlChannel{{ID: "ch1", DisplayName: "Ch1 Duplicate"}},
 		[]xmlProgramme{{Channel: "ch1", Title: "Evening News"}},
 	)), 0644)
@@ -203,7 +203,7 @@ func TestMergeXMLTV_FilterByTvgIDs(t *testing.T) {
 	src := filepath.Join(dir, "src.xml")
 	out := filepath.Join(dir, "out.xml")
 
-	os.WriteFile(src, []byte(xmltvSource(
+	_ = os.WriteFile(src, []byte(xmltvSource(
 		[]xmlChannel{
 			{ID: "keep", DisplayName: "Keep Me"},
 			{ID: "drop", DisplayName: "Drop Me"},
@@ -235,7 +235,7 @@ func TestMergeXMLTV_NilFilterKeepsAll(t *testing.T) {
 	src := filepath.Join(dir, "src.xml")
 	out := filepath.Join(dir, "out.xml")
 
-	os.WriteFile(src, []byte(xmltvSource(
+	_ = os.WriteFile(src, []byte(xmltvSource(
 		[]xmlChannel{{ID: "c1"}, {ID: "c2"}},
 		[]xmlProgramme{{Channel: "c1"}, {Channel: "c2"}},
 	)), 0644)
@@ -285,9 +285,9 @@ func TestProcessor_Run_DownloadsAndMerges(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/epg1.xml":
-			io.WriteString(w, src1Body)
+			_, _ = io.WriteString(w, src1Body)
 		case "/epg2.xml":
-			io.WriteString(w, src2Body)
+			_, _ = io.WriteString(w, src2Body)
 		default:
 			http.NotFound(w, r)
 		}
@@ -331,11 +331,11 @@ func TestProcessor_Run_GzippedSource(t *testing.T) {
 		switch r.URL.Path {
 		case "/epg.xml.gz":
 			w.Header().Set("Content-Type", "application/gzip")
-			w.Write(gzipBytes(t, plainBody))
+			_, _ = w.Write(gzipBytes(t, plainBody))
 		case "/epg_ct.xml":
 			// Content-Type signals gzip even though URL doesn't end in .gz
 			w.Header().Set("Content-Type", "application/x-gzip")
-			w.Write(gzipBytes(t, plainBody))
+			_, _ = w.Write(gzipBytes(t, plainBody))
 		default:
 			http.NotFound(w, r)
 		}
@@ -404,7 +404,7 @@ func TestDecompressIfNeeded_GzipByURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	got, err := io.ReadAll(rc)
 	if err != nil {
@@ -433,7 +433,7 @@ func TestProcessor_Run_DecompressionBombRejected(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/gzip")
-		w.Write(gzipBytes(t, bigBody))
+		_, _ = w.Write(gzipBytes(t, bigBody))
 	}))
 	defer srv.Close()
 
@@ -465,7 +465,7 @@ func TestMergeXMLTV_ChannelRemapping(t *testing.T) {
 	src := filepath.Join(dir, "src.xml")
 	out := filepath.Join(dir, "out.xml")
 
-	os.WriteFile(src, []byte(xmltvSource(
+	_ = os.WriteFile(src, []byte(xmltvSource(
 		[]xmlChannel{{ID: "epg.channel.id", DisplayName: "Remapped Channel"}},
 		[]xmlProgramme{{Channel: "epg.channel.id", Title: "Remapped Show"}},
 	)), 0644)
@@ -499,7 +499,7 @@ func TestMergeXMLTV_RemappingWithoutFilter(t *testing.T) {
 	src := filepath.Join(dir, "src.xml")
 	out := filepath.Join(dir, "out.xml")
 
-	os.WriteFile(src, []byte(xmltvSource(
+	_ = os.WriteFile(src, []byte(xmltvSource(
 		[]xmlChannel{
 			{ID: "epg.a", DisplayName: "A"},
 			{ID: "epg.b", DisplayName: "B"},
@@ -539,7 +539,7 @@ func TestMergeXMLTV_RemapEnablesFilterPass(t *testing.T) {
 	src := filepath.Join(dir, "src.xml")
 	out := filepath.Join(dir, "out.xml")
 
-	os.WriteFile(src, []byte(xmltvSource(
+	_ = os.WriteFile(src, []byte(xmltvSource(
 		[]xmlChannel{
 			{ID: "epg.old", DisplayName: "Old EPG ID"},
 			{ID: "epg.keep", DisplayName: "Already matching"},

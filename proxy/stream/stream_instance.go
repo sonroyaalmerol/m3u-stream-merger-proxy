@@ -103,7 +103,7 @@ func (instance *StreamInstance) ProxyStream(
 	}
 
 	if utils.IsAnM3U8Media(lbResult.Response) {
-		lbResult.Response.Body.Close()
+		_ = lbResult.Response.Body.Close()
 	}
 
 	statusChan <- result.Status

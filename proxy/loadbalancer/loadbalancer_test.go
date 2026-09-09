@@ -10,7 +10,6 @@ import (
 	"m3u-stream-merger/store"
 	"maps"
 	"net/http"
-	"os"
 	"slices"
 	"sort"
 	"strconv"
@@ -687,7 +686,7 @@ func TestLoadBalancerConcurrencyPriority(t *testing.T) {
 	})...)
 	tests := []struct {
 		name           string
-		setupEnv       func()
+		setupEnv       func(t *testing.T)
 		setupStreams   func() map[string]*sourceproc.StreamInfo
 		setupResponses func(client *mockHTTPClientWithTracking)
 		manipulateCM   func(*store.ConcurrencyManager)
@@ -695,10 +694,10 @@ func TestLoadBalancerConcurrencyPriority(t *testing.T) {
 	}{
 		{
 			name: "tries indexes in order of available slots",
-			setupEnv: func() {
-				os.Setenv("M3U_MAX_CONCURRENCY_1", "3")
-				os.Setenv("M3U_MAX_CONCURRENCY_2", "2")
-				os.Setenv("M3U_MAX_CONCURRENCY_3", "1")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("M3U_MAX_CONCURRENCY_1", "3")
+				t.Setenv("M3U_MAX_CONCURRENCY_2", "2")
+				t.Setenv("M3U_MAX_CONCURRENCY_3", "1")
 			},
 			setupStreams: func() map[string]*sourceproc.StreamInfo {
 				return map[string]*sourceproc.StreamInfo{
@@ -729,7 +728,7 @@ func TestLoadBalancerConcurrencyPriority(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup environment
 			if tt.setupEnv != nil {
-				tt.setupEnv()
+				tt.setupEnv(t)
 				t.Log("Environment variables set")
 			}
 
@@ -806,10 +805,6 @@ func TestLoadBalancerConcurrencyPriority(t *testing.T) {
 				t.Errorf("With error response, got %d attempts, want %d attempts", len(client.attempts), len(tt.expectedOrder))
 			}
 
-			// Cleanup
-			os.Unsetenv("M3U_MAX_CONCURRENCY_1")
-			os.Unsetenv("M3U_MAX_CONCURRENCY_2")
-			os.Unsetenv("M3U_MAX_CONCURRENCY_3")
 		})
 	}
 }
@@ -861,7 +856,7 @@ func TestResponseBodyClosedOnNonOKStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	result.Response.Body.Close()
+	_ = result.Response.Body.Close()
 
 	if !body404.IsClosed() {
 		t.Error("body for non-200 response was not closed; this leaks a TCP connection")
@@ -911,7 +906,7 @@ func TestResponseBodyClosedOnEvaluateError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	result.Response.Body.Close()
+	_ = result.Response.Body.Close()
 
 	if !badBody.IsClosed() {
 		t.Error("body for stream that errored during health check was not closed; this leaks a TCP connection")
@@ -975,8 +970,7 @@ func TestNonWinningResponseBodiesClosed(t *testing.T) {
 		t.Error("winning response body was closed prematurely by tryStreamUrls")
 	}
 
-	// Closing the winner should close the remaining body.
-	result.Response.Body.Close()
+	_ = result.Response.Body.Close()
 	if !body1.IsClosed() || !body2.IsClosed() {
 		t.Error("not all response bodies were closed after winner was closed")
 	}
@@ -999,8 +993,7 @@ func TestEvaluateBufferHealthBodyClose(t *testing.T) {
 		t.Fatal("original body was closed during measurement (should only be closed by caller)")
 	}
 
-	// Simulates what the caller does with the winning response.
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if !original.IsClosed() {
 		t.Error("closing resp.Body after evaluateBufferHealth did not close the original body; " +
@@ -1060,9 +1053,6 @@ func TestConcurrentHealthChecksCancelledAfterFirstSuccess(t *testing.T) {
 	}
 
 	// Override Do so we can count calls and simulate the slow URL.
-	type callTracker struct {
-		mockHTTPClient
-	}
 	tracker := &struct {
 		mu          sync.Mutex
 		requestURLs []string
@@ -1126,7 +1116,7 @@ func TestConcurrentHealthChecksCancelledAfterFirstSuccess(t *testing.T) {
 		t.Fatalf("Balance returned error: %v", err)
 	}
 	if result != nil {
-		result.Response.Body.Close()
+		_ = result.Response.Body.Close()
 	}
 
 	mu.Lock()
@@ -1246,9 +1236,8 @@ func TestWinnerContextNotCancelledAfterHealthCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tryStreamUrls error: %v", err)
 	}
-	defer result.Response.Body.Close()
+	defer func() { _ = result.Response.Body.Close() }()
 
-	// After tryStreamUrls returns, healthCancel() has been called internally.
 	// The winning request must have been made with the parent ctx (not healthCtx),
 	// so its context must still be valid.
 	winnerCtx := client.getContext(result.URL)

@@ -126,7 +126,7 @@ func TestStreamHTTPHandler(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -145,7 +145,7 @@ func TestStreamHTTPHandler(t *testing.T) {
 
 				req := httptest.NewRequest(http.MethodGet, line, nil).WithContext(ctx)
 				pr, pw := io.Pipe()
-				defer pr.Close()
+				defer func() { _ = pr.Close() }()
 
 				rw := &responseWriterPiper{
 					pw:     pw,
@@ -156,7 +156,7 @@ func TestStreamHTTPHandler(t *testing.T) {
 				// exits so any blocked pr.Read returns immediately.
 				go func() {
 					streamHandler.ServeHTTP(rw, req)
-					pw.Close()
+					_ = pw.Close()
 				}()
 
 				// Use a goroutine for the read so that the timer select case

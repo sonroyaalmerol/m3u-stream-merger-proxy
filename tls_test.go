@@ -40,9 +40,9 @@ func genCert(t *testing.T, dir string) (cert, key string) {
 		t.Fatal(err)
 	}
 	cert, key = filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
-	os.WriteFile(cert, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600)
+	_ = os.WriteFile(cert, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600)
 	keyDER, _ := x509.MarshalECPrivateKey(keyObj)
-	os.WriteFile(key, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0600)
+	_ = os.WriteFile(key, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0600)
 	return
 }
 
@@ -108,8 +108,8 @@ func TestServeTLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go setup.srv.ServeTLS(ln, cert, key)
-	t.Cleanup(func() { setup.srv.Close() })
+	go func() { _ = setup.srv.ServeTLS(ln, cert, key) }()
+	t.Cleanup(func() { _ = setup.srv.Close() })
 
 	roots := x509.NewCertPool()
 	pemBytes, err := os.ReadFile(cert)
@@ -126,7 +126,7 @@ func TestServeTLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || resp.TLS == nil {
 		t.Fatalf("expected 200 over TLS, got %d TLS=%v", resp.StatusCode, resp.TLS != nil)
 	}

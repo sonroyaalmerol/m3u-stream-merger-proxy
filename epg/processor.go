@@ -95,7 +95,7 @@ func (p *Processor) Run(ctx context.Context) error {
 
 	tmpPath := config.GetEPGTmpPath()
 	if err := mergeXMLTV(sources, tmpPath, tvgIDs, channelMap); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("epg: merge: %w", err)
 	}
 
@@ -127,7 +127,7 @@ func (p *Processor) downloadSource(ctx context.Context, idx string) (string, err
 	if err != nil {
 		return p.fallback(finalPath, fmt.Errorf("HTTP: %w", err))
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return p.fallback(finalPath, fmt.Errorf("HTTP status %d", resp.StatusCode))
@@ -140,24 +140,26 @@ func (p *Processor) downloadSource(ctx context.Context, idx string) (string, err
 
 	body, err := decompressIfNeeded(resp, epgURL)
 	if err != nil {
-		f.Close()
-		os.Remove(tmpPath)
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
 		return p.fallback(finalPath, fmt.Errorf("decompress: %w", err))
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	// Guard against decompression bombs: cap the amount written to disk.
 	// LimitReader returns EOF after maxEPGBytes, so we detect the breach by
 	// comparing the byte count against the limit after the copy.
 	limited := io.LimitReader(body, maxEPGBytes+1)
 	n, err := io.Copy(f, limited)
-	f.Close()
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
 	if err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return p.fallback(finalPath, fmt.Errorf("write: %w", err))
 	}
 	if n > maxEPGBytes {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return p.fallback(finalPath, fmt.Errorf("EPG source exceeds maximum allowed size (%d MB)", maxEPGBytes/1024/1024))
 	}
 
@@ -239,7 +241,7 @@ func mergeXMLTV(sources []string, outputPath string, tvgIDs utils.TvgIDFilter, c
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	if _, err := out.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n"); err != nil {
 		return err
@@ -264,8 +266,10 @@ func mergeXMLTV(sources []string, outputPath string, tvgIDs utils.TvgIDFilter, c
 		}
 	}
 
-	_, err = out.WriteString("</tv>\n")
-	return err
+	if _, err := out.WriteString("</tv>\n"); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 // streamXMLTVElements reads srcPath and copies every top-level element with the
@@ -280,7 +284,7 @@ func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, tvgI
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	dec := xml.NewDecoder(f)
 	dec.Strict = false

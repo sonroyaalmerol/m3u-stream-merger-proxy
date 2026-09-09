@@ -69,7 +69,7 @@ func (h *StreamHandler) HandleDirectStream(
 		remoteAddr = streamClient.Request.RemoteAddr
 	}
 
-	defer lbResult.Response.Body.Close()
+	defer func() { _ = lbResult.Response.Body.Close() }()
 	buf := make([]byte, 256*1024)
 
 	type readResult struct {
@@ -104,12 +104,12 @@ func (h *StreamHandler) HandleDirectStream(
 	for {
 		select {
 		case <-ctx.Done():
-			return StreamResult{bytesWritten, fmt.Errorf("Context canceled for stream: %s", remoteAddr), proxy.StatusClientClosed}
+			return StreamResult{bytesWritten, fmt.Errorf("context canceled for stream: %s", remoteAddr), proxy.StatusClientClosed}
 		case r := <-readChan:
 			if r.n > 0 {
 				bytesWritten += int64(r.n)
 				if _, werr := streamClient.Write(buf[:r.n]); werr != nil {
-					return StreamResult{bytesWritten, fmt.Errorf("Server error for stream: %s", remoteAddr), proxy.StatusClientClosed}
+					return StreamResult{bytesWritten, fmt.Errorf("server error for stream: %s", remoteAddr), proxy.StatusClientClosed}
 				}
 				streamClient.Flush()
 			}
@@ -117,9 +117,9 @@ func (h *StreamHandler) HandleDirectStream(
 			case nil:
 				doneCh <- struct{}{}
 			case io.EOF:
-				return StreamResult{bytesWritten, fmt.Errorf("EOF reached for stream: %s", remoteAddr), proxy.StatusEOF}
+				return StreamResult{bytesWritten, fmt.Errorf("reached EOF for stream: %s", remoteAddr), proxy.StatusEOF}
 			default:
-				return StreamResult{bytesWritten, fmt.Errorf("Server error for stream: %s", remoteAddr), proxy.StatusServerError}
+				return StreamResult{bytesWritten, fmt.Errorf("server error for stream: %s", remoteAddr), proxy.StatusServerError}
 			}
 		}
 	}
@@ -259,7 +259,7 @@ func (h *StreamHandler) HandleStream(
 
 						contentType := respHeaders.Get("Content-Type")
 						if !safeConcatTypes[strings.ToLower(contentType)] && utils.IsAnM3U8Media(lbResult.Response) {
-							return StreamResult{bytesWritten, fmt.Errorf("%s cannot be safely concatenated and is not supported by this proxy.", contentType), proxy.StatusIncompatible}
+							return StreamResult{bytesWritten, fmt.Errorf("%s cannot be safely concatenated and is not supported by this proxy", contentType), proxy.StatusIncompatible}
 						}
 						liveHeaders := respHeaders.Clone()
 						liveHeaders.Del("Content-Length")
@@ -287,7 +287,7 @@ func (h *StreamHandler) HandleStream(
 
 			// Handle any error chunk
 			if errChunk != nil {
-				h.safeFlush(streamClient)
+				_ = h.safeFlush(streamClient)
 				return StreamResult{bytesWritten, errChunk.Error, errChunk.Status}
 			}
 
