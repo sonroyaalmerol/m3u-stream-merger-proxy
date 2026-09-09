@@ -213,7 +213,7 @@ Xtream Codes providers can be used as sources directly alongside (or instead of)
 | RETRY_WAIT         | Set a wait time before retrying (looping) across all M3Us on stream initialization error.                                                                                                                                                                                                                  | 0             | Any integer greater than or equal 0 |
 | STREAM_TIMEOUT     | How long (in seconds) to retry a failing or stalled source before the proxy considers the stream down and fails over to the next M3U. Raise it if streams switch sources too eagerly; lower it if dead streams take too long to fail over. Keep it below the buffer's stall-bridging time (see tip below). | 3             | Any positive integer greater than 0 |
 | MINIMUM_THROUGHPUT | Minimum bytes per second a source must sustain (rolling 2-second window) to stay healthy; fall below it and the stream is considered down. Lower it if healthy but slow streams get cut off; raise it to drop degrading sources sooner. 0 disables the check.                                              | 0             | 0 or any positive integer           |
-| BUFFER_CHUNK_NUM   | Number of 1 MiB chunk "containers" in the **shared buffer** that bridges upstream stalls for all clients of a stream. See the [streaming docs](docs/streaming.md) for more information. If streams freeze briefly when the provider hiccups, raise this to bridge longer stalls (costs more memory).      | 16            | Any integer greater than or equal 2 |
+| BUFFER_CHUNK_NUM   | Number of 1 MiB chunk "containers" in the **shared buffer** that bridges upstream stalls for all clients of a stream. See the [streaming docs](docs/streaming.md) for more information. If streams freeze briefly when the provider hiccups, raise this to bridge longer stalls (costs more memory).       | 16            | Any integer greater than or equal 2 |
 | ENABLE_PCR_PACER   | Pace live TS reads from upstream to the stream's own program clock (~1x realtime) instead of reading as fast as the source sends. Enable when a source pumps much faster than realtime and players that pause reading (cache full) make the stream loop back or reconnect. Costs a small initial latency.  | true          | Boolean (true/false, 1/0)           |
 
 > [!TIP]
@@ -246,9 +246,9 @@ Xtream Codes providers can be used as sources directly alongside (or instead of)
 
 ### Logging Configs
 
-| ENV VAR | Description                    | Default Value | Possible Values |
-| ------- | ------------------------------ | ------------- | --------------- |
-| DEBUG   | Set if verbose logging is enabled | false      | true/false      |
+| ENV VAR | Description                       | Default Value | Possible Values |
+| ------- | --------------------------------- | ------------- | --------------- |
+| DEBUG   | Set if verbose logging is enabled | false         | true/false      |
 
 URLs and configured credentials are always redacted from logs.
 
@@ -322,3 +322,7 @@ And if you like the project, but just don't have time to contribute, that's fine
 - Star the project
 - Tweet about it
 - Mention the project and tell your friends/colleagues
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
