@@ -112,7 +112,10 @@ func Initialize(ctx context.Context, logger logger.Logger, m3uHandler *handlers.
 // the same cron schedule it also triggers an EPG update immediately after so
 // the new tvg-id filter is applied without waiting for a separate EPG cron.
 func (instance *Updater) UpdateM3USources(ctx context.Context) {
-	instance.m3uMu.Lock()
+	if !instance.m3uMu.TryLock() {
+		instance.logger.Log("M3U update already running; skipping this trigger.")
+		return
+	}
 	defer instance.m3uMu.Unlock()
 
 	processor := sourceproc.NewProcessor()
@@ -147,7 +150,10 @@ func (instance *Updater) UpdateM3USources(ctx context.Context) {
 // UpdateEPGSources rebuilds the merged EPG independently of the M3U schedule.
 // Called by the separate EPG cron when EPG_SYNC_CRON differs from SYNC_CRON.
 func (instance *Updater) UpdateEPGSources(ctx context.Context) {
-	instance.epgMu.Lock()
+	if !instance.epgMu.TryLock() {
+		instance.logger.Log("EPG update already running; skipping this trigger.")
+		return
+	}
 	defer instance.epgMu.Unlock()
 
 	select {
