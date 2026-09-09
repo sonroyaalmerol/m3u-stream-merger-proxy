@@ -99,3 +99,20 @@ func TestPopulateSourceAbortsOnFailures(t *testing.T) {
 	assert.Equal(t, 0, n)
 	assert.Less(t, calls.Load(), int32(len(stubs)), "aborts instead of draining every stub")
 }
+
+func TestPopulatePassDefersDuringM3UUpdate(t *testing.T) {
+	prev := config.GetConfig()
+	config.SetConfig(&config.Config{DataPath: t.TempDir()})
+	t.Cleanup(func() { config.SetConfig(prev) })
+
+	u := &Updater{logger: logger.Default}
+	u.m3uMu.Lock()
+	fetched, ran := u.tryPopulateSeriesPass(context.Background())
+	u.m3uMu.Unlock()
+	assert.False(t, ran)
+	assert.Zero(t, fetched)
+
+	fetched, ran = u.tryPopulateSeriesPass(context.Background())
+	assert.True(t, ran)
+	assert.Zero(t, fetched)
+}

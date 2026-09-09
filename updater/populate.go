@@ -41,7 +41,11 @@ func (instance *Updater) populateSeriesLoop(ctx context.Context) {
 		time.Sleep(30 * time.Second)
 		if ctx.Err() == nil {
 			start := time.Now()
-			fetched := instance.populateSeriesPass(ctx)
+			fetched, ok := instance.tryPopulateSeriesPass(ctx)
+			if !ok {
+				instance.logger.Log("Series populate: M3U update active; deferring pass")
+				continue
+			}
 			switch {
 			case fetched > 0:
 				instance.logger.Logf("Series populate: pass fetched %d series in %s, reingesting playlist", fetched, time.Since(start).Round(time.Second))
@@ -56,6 +60,14 @@ func (instance *Updater) populateSeriesLoop(ctx context.Context) {
 		case <-time.After(populatePassGap):
 		}
 	}
+}
+
+func (instance *Updater) tryPopulateSeriesPass(ctx context.Context) (int, bool) {
+	if !instance.m3uMu.TryLock() {
+		return 0, false
+	}
+	defer instance.m3uMu.Unlock()
+	return instance.populateSeriesPass(ctx), true
 }
 
 func (instance *Updater) populateSeriesPass(ctx context.Context) int {
