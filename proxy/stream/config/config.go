@@ -19,11 +19,11 @@ type StreamConfig struct {
 
 func NewDefaultStreamConfig() *StreamConfig {
 	chunkSize := 1024 * 1024
-	finalBufferSize := 8
+	finalBufferSize := 16
 	finalTimeoutSeconds := 3
 	finalMaxRetries := 5
 	finalExpectedThroughput := int64(0)
-	finalEnablePCRPacer := false
+	finalEnablePCRPacer := true
 
 	maxRetries, ok := os.LookupEnv("MAX_RETRIES")
 	if ok {

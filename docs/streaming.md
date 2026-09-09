@@ -25,7 +25,7 @@ How a playback request is served: from slug to bytes, including load balancing, 
 
 ## The shared ring buffer (coordinator)
 
-`proxy/stream/buffer/coordinator.go`. One `StreamCoordinator` per channel. At its core is a ring of `BUFFER_CHUNK_NUM` slots (default 8), each holding a 1 MiB chunk:
+`proxy/stream/buffer/coordinator.go`. One `StreamCoordinator` per channel. At its core is a ring of `BUFFER_CHUNK_NUM` slots (default 16), each holding a 1 MiB chunk:
 
 - **Writer** (`coordinator_media.go`): reads the upstream body into 1 MiB slabs, publishes each slab into the ring under a mutex, updates `lastSuccess` after every chunk, and exits on EOF, context cancel, terminal read error, or when no clients remain. A mid-stream EOF marks the coordinator closed; the handler's retry loop starts a fresh writer on the next provider.
 - **Readers** (`media_stream.go`): each client walks the ring from its own cursor, copying chunks out. A reader that laps the writer (pump faster than drain) is re-joined at the live edge, at the next TS packet boundary with payload-unit-start (PUSI) alignment (an <=8 KB scan for the 0x47 sync byte + PUSI flag) so decoders resync cleanly.
@@ -43,7 +43,7 @@ The ring's job is bridging: it covers `BUFFER_CHUNK_NUM MiB / bitrate` seconds o
 
 Some providers pump several times faster than realtime. A player (mpv and friends) fills its demuxer cache, stops reading for tens of seconds, and laps any fixed-size ring - showing up as the stream looping back a scene and reconnecting every 30-60s. No ring size fixes this; the fix is pacing.
 
-`ENABLE_PCR_PACER=true` (default false) enables `proxy/stream/buffer/pcr_pacer.go`, which wraps the writer's publish step:
+`ENABLE_PCR_PACER=true` (the default) enables `proxy/stream/buffer/pcr_pacer.go`, which wraps the writer's publish step:
 
 - It scans MPEG-TS packets for PCR (program clock reference) timestamps and derives the stream's true content bitrate from an EMA over observed PCR deltas.
 - The writer is allowed a bounded lead ahead of realtime - `min(10s, ring-duration / 2)` - then sleeps (in <=500ms context-aware slices) so PCR advances at 1x wall-clock. Delivery to clients stays smooth; upstream bandwidth drops to ~1x realtime instead of the pump rate.
@@ -54,7 +54,7 @@ Pacing applies only to the shared-buffer TS writer - never to VOD direct passthr
 
 ## Memory model
 
-Per actively-watched channel: one upstream connection, one ring (`BUFFER_CHUNK_NUM` x 1 MiB, lazily filled) plus one in-flight slab. Per additional viewer of the same channel: only a cursor and a copy buffer. The catalog is mmap'd, series fragments live on disk, so steady-state RSS is roughly `baseline + 26 MiB per active channel` at the default `BUFFER_CHUNK_NUM=8`. In memory-limited containers (k8s), the Go heap soft limit is auto-capped at 90% of the cgroup limit unless `GOMEMLIMIT` is set explicitly.
+Per actively-watched channel: one upstream connection, one ring (`BUFFER_CHUNK_NUM` x 1 MiB, lazily filled) plus one in-flight slab. Per additional viewer of the same channel: only a cursor and a copy buffer. The catalog is mmap'd, series fragments live on disk, so steady-state RSS is roughly `baseline + 34 MiB per active channel` at the default `BUFFER_CHUNK_NUM=16`. In memory-limited containers (k8s), the Go heap soft limit is auto-capped at 90% of the cgroup limit unless `GOMEMLIMIT` is set explicitly.
 
 Ingest, not streaming, sets the high-water mark. Measured on 800k streams with `GOMAXPROCS=2`: peak RSS 114.8 MiB at `GOMEMLIMIT=115MiB` (a 128 MB container's auto-cap), 93.6 MiB at `GOMEMLIMIT=90MiB`, same 2s runtime. Live heap at the peak is ~57 MiB, dominated by the catalog index slices, so a lower `GOMEMLIMIT` buys headroom for concurrent viewers at no measured throughput cost. For a 128 MB deployment: `GOMEMLIMIT=90MiB` and `BUFFER_CHUNK_NUM=2`.
 

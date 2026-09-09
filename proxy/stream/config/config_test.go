@@ -2,20 +2,27 @@ package config
 
 import "testing"
 
-func TestEnablePCRPacerDisabledByDefault(t *testing.T) {
-	cfg := NewDefaultStreamConfig()
-	if cfg.EnablePCRPacer {
-		t.Fatal("EnablePCRPacer = true by default, want false")
+func TestEnablePCRPacerEnabledByDefault(t *testing.T) {
+	t.Setenv("ENABLE_PCR_PACER", "")
+	if !NewDefaultStreamConfig().EnablePCRPacer {
+		t.Fatal("EnablePCRPacer = false by default, want true")
 	}
 
-	t.Setenv("ENABLE_PCR_PACER", "true")
-	if !NewDefaultStreamConfig().EnablePCRPacer {
-		t.Fatal("ENABLE_PCR_PACER=true not honored")
+	t.Setenv("ENABLE_PCR_PACER", "false")
+	if NewDefaultStreamConfig().EnablePCRPacer {
+		t.Fatal("ENABLE_PCR_PACER=false not honored")
 	}
 
 	t.Setenv("ENABLE_PCR_PACER", "garbage")
-	if NewDefaultStreamConfig().EnablePCRPacer {
-		t.Fatal("invalid ENABLE_PCR_PACER should leave pacer disabled")
+	if !NewDefaultStreamConfig().EnablePCRPacer {
+		t.Fatal("invalid ENABLE_PCR_PACER should keep pacer enabled")
+	}
+}
+
+func TestNewDefaultStreamConfigUsesSixteenChunks(t *testing.T) {
+	t.Setenv("BUFFER_CHUNK_NUM", "")
+	if got := NewDefaultStreamConfig().SharedBufferSize; got != 16 {
+		t.Fatalf("SharedBufferSize = %d, want 16", got)
 	}
 }
 
