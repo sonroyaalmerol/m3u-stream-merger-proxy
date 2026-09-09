@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -56,7 +55,7 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, streamClient *clie
 
 	streamURL := h.extractStreamURL(r.URL.Path)
 	if streamURL == "" {
-		h.logger.Logf("Invalid m3uID for request from %s: %s", r.RemoteAddr, r.URL.Path)
+		h.logger.Logf("Invalid m3uID for request from %s", r.RemoteAddr)
 		return
 	}
 
@@ -71,7 +70,7 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, streamClient *clie
 			h.logger.Debugf("Client %s executing load balancer.", r.RemoteAddr)
 			lbResult, err = h.manager.LoadBalancer(ctx, r, lbInstance)
 			if err != nil {
-				h.logger.Logf("Load balancer error (%s): %v", r.URL.Path, err)
+				h.logger.Logf("Load balancer error for stream %s: %v", streamURL, err)
 				return
 			}
 		} else {
@@ -81,7 +80,7 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, streamClient *clie
 		}
 
 		exitStatus := make(chan int, 1)
-		h.logger.Logf("Proxying %s to %s", r.URL.Path, lbResult.URL)
+		h.logger.Logf("Proxying stream %s via M3U_%s|%s", streamURL, lbResult.Index, lbResult.SubIndex)
 
 		proxyCtx, cancel := context.WithCancel(ctx)
 		go func() {
@@ -152,22 +151,19 @@ func (h *StreamHTTPHandler) handleExitCode(code int, r *http.Request) bool {
 func (h *StreamHTTPHandler) handleSegmentStream(streamClient *client.StreamClient) {
 	r := streamClient.Request
 
-	h.logger.Debugf("Received request from %s for URL: %s",
-		r.RemoteAddr, r.URL.Path)
+	h.logger.Debugf("Received segment request from %s", r.RemoteAddr)
 
 	streamId := h.extractStreamURL(r.URL.Path)
 	if streamId == "" {
-		h.logger.Errorf("Invalid m3uID for request from %s: %s",
-			r.RemoteAddr, r.URL.Path)
+		h.logger.Errorf("Invalid m3uID for request from %s", r.RemoteAddr)
 		return
 	}
 
 	segment, err := failovers.ParseSegmentId(streamId)
 	if err != nil {
-		h.logger.Errorf("Segment parsing error %s: %s",
-			r.RemoteAddr, r.URL.Path)
+		h.logger.Errorf("Segment parsing error for %s", r.RemoteAddr)
 		_ = streamClient.WriteHeader(http.StatusInternalServerError)
-		_, _ = streamClient.Write(fmt.Appendf(nil, "Segment parsing error: %v", err))
+		_, _ = streamClient.Write([]byte("Segment parsing error"))
 		return
 	}
 
@@ -175,7 +171,7 @@ func (h *StreamHTTPHandler) handleSegmentStream(streamClient *client.StreamClien
 	if err != nil {
 		h.logger.Errorf("Failed to fetch URL: %v", err)
 		_ = streamClient.WriteHeader(http.StatusInternalServerError)
-		_, _ = streamClient.Write(fmt.Appendf(nil, "Failed to fetch URL: %v", err))
+		_, _ = streamClient.Write([]byte("Failed to fetch segment"))
 		return
 	}
 	defer resp.Body.Close()

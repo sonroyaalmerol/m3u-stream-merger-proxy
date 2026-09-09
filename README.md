@@ -246,10 +246,11 @@ Xtream Codes providers can be used as sources directly alongside (or instead of)
 
 ### Logging Configs
 
-| ENV VAR   | Description                                                                                   | Default Value | Possible Values |
-| --------- | --------------------------------------------------------------------------------------------- | ------------- | --------------- |
-| DEBUG     | Set if verbose logging is enabled                                                             | false         | true/false      |
-| SAFE_LOGS | Set if sensitive info are removed from logs. Always enable this if submitting a log publicly. | false         | true/false      |
+| ENV VAR | Description                    | Default Value | Possible Values |
+| ------- | ------------------------------ | ------------- | --------------- |
+| DEBUG   | Set if verbose logging is enabled | false      | true/false      |
+
+URLs and configured credentials are always redacted from logs.
 
 ## Xtream API Support
 

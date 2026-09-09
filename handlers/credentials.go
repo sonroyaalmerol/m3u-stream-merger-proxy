@@ -40,16 +40,16 @@ func (a *CredentialsAuth) parseCredentials(raw string) [][]string {
 		cred := strings.Split(item, ":")
 		if len(cred) == 3 {
 			if d, err := time.ParseInLocation(time.DateOnly, cred[2], time.Local); err != nil {
-				a.logger.Warnf("invalid credential format: %s", item)
+				a.logger.Warn("invalid credential expiry")
 				continue
 			} else if time.Now().After(d) {
-				a.logger.Debugf("Credential expired: %s", item)
+				a.logger.Debug("credential expired")
 				continue
 			}
 			cred = cred[:2]
 		}
 		if !validCredentialPair(cred) {
-			a.logger.Warnf("skipping credential with unsafe or empty user/pass: %s", item)
+			a.logger.Warn("skipping unsafe or empty credential")
 			continue
 		}
 		result = append(result, cred)

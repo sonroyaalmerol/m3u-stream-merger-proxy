@@ -26,10 +26,7 @@ func BenchmarkDebugDisabled(b *testing.B) {
 	}
 }
 
-// BenchmarkSafeLogfRedacting covers SAFE_LOGS=true, which recompiles a regexp.
 func BenchmarkSafeLogfRedacting(b *testing.B) {
-	b.Setenv("SAFE_LOGS", "true")
-
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

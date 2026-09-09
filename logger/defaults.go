@@ -24,12 +24,7 @@ func cleanString(text string) string {
 }
 
 func safeLogf(format string, v ...any) string {
-	safeLogs := os.Getenv("SAFE_LOGS") == "true"
-	safeString := fmt.Sprintf(format, v...)
-	if safeLogs {
-		return cleanString(safeString)
-	}
-	return safeString
+	return cleanString(fmt.Sprintf(format, v...))
 }
 
 func (*DefaultLogger) Log(format string) {
