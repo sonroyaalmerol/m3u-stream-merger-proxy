@@ -590,12 +590,14 @@ type StreamStoreWriter struct {
 	series          map[uint64]*seriesBuild
 	episodes        []episodeEntry
 	scratch         []byte
+	mappings        []*mapping
 }
 
 func NewStreamStoreWriter() (*StreamStoreWriter, error) {
 	if err := os.MkdirAll(storeDir(), os.ModePerm); err != nil {
 		return nil, err
 	}
+	removeStaleBuildFiles()
 	gen := uint64(1)
 	if raw, err := os.ReadFile(currentPath()); err == nil {
 		if cur, err := strconv.ParseUint(strings.TrimSpace(string(raw)), 10, 64); err == nil {
@@ -619,10 +621,11 @@ func (w *StreamStoreWriter) reserve(n int) {
 	if n <= 0 {
 		return
 	}
-	w.offsets = make([]uint64, 0, n)
-	w.slugIndex = make([]lookupEntry, 0, n)
-	w.streamIDIndex = make([]lookupEntry, 0, n)
-	w.categoryMembers = make([]lookupEntry, 0, n)
+	w.offsets = mapIndex[uint64](w, "offsets", n)
+	w.slugIndex = mapIndex[lookupEntry](w, "slug", n)
+	w.streamIDIndex = mapIndex[lookupEntry](w, "streamid", n)
+	w.categoryMembers = mapIndex[lookupEntry](w, "members", n)
+	w.episodes = mapIndex[episodeEntry](w, "episodes", n)
 }
 
 func (w *StreamStoreWriter) Add(key uint64, stream *StreamInfo) error {
@@ -690,6 +693,7 @@ func (w *StreamStoreWriter) AddRaw(key uint64, record []byte) error {
 }
 
 func (w *StreamStoreWriter) Commit() error {
+	defer w.releaseMappings()
 	if err := w.buf.Flush(); err != nil {
 		_ = w.file.Close()
 		return err
@@ -956,6 +960,7 @@ func syncDir(path string) error {
 }
 
 func (w *StreamStoreWriter) Discard() {
+	w.releaseMappings()
 	_ = w.file.Close()
 	_ = os.Remove(dataPath(w.gen))
 	_ = os.Remove(indexPath(w.gen))
