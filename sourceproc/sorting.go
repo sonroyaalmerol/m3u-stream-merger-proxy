@@ -255,6 +255,7 @@ func (s *spillSorter) MergeRendered(render func(*StreamInfo, *renderBuf) rendere
 			return err
 		}
 		if err := r.next(); err != nil {
+			_ = r.f.Close()
 			return err
 		}
 		if r.ok {
