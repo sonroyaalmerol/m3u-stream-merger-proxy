@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -139,28 +142,134 @@ func AppendSeriesFragment(path string, entries []FragmentEntry) error {
 	return f.Close()
 }
 
+type fragmentSpan struct {
+	offset int64
+	length int64
+}
+
+func indexSeriesFragment(path string) (*os.File, map[uint64]fragmentSpan, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	fail := func(err error) (*os.File, map[uint64]fragmentSpan, error) {
+		_ = f.Close()
+		return nil, nil, err
+	}
+
+	spans := make(map[uint64]fragmentSpan)
+	r := bufio.NewReader(f)
+	var offset, bodyStart int64
+	var currentID uint64
+	haveCurrent := false
+	atLineStart := true
+	for {
+		partStart := offset
+		part, readErr := r.ReadSlice('\n')
+		offset += int64(len(part))
+		if atLineStart {
+			line := bytes.TrimSuffix(part, []byte{'\n'})
+			if len(line) > 9 && bytes.HasPrefix(line, []byte("#XSERIES ")) {
+				if errors.Is(readErr, bufio.ErrBufferFull) {
+					return fail(fmt.Errorf("fragment header too long at %d", partStart))
+				}
+				id, parseErr := strconv.ParseUint(string(line[9:]), 10, 64)
+				if parseErr != nil {
+					return fail(fmt.Errorf("bad fragment header %q", line))
+				}
+				if haveCurrent {
+					spans[currentID] = fragmentSpan{offset: bodyStart, length: partStart - bodyStart}
+				}
+				currentID = id
+				bodyStart = offset
+				haveCurrent = true
+			}
+		}
+		atLineStart = !errors.Is(readErr, bufio.ErrBufferFull)
+		if readErr == nil || errors.Is(readErr, bufio.ErrBufferFull) {
+			continue
+		}
+		if !errors.Is(readErr, io.EOF) {
+			return fail(readErr)
+		}
+		break
+	}
+	if haveCurrent {
+		spans[currentID] = fragmentSpan{offset: bodyStart, length: offset - bodyStart}
+	}
+	return f, spans, nil
+}
+
+func replaySeriesFragment(path string, stubs []SeriesStub, emit func(string) error) (int, error) {
+	f, spans, err := indexSeriesFragment(path)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = f.Close() }()
+
+	replayed := 0
+	for _, stub := range stubs {
+		span, ok := spans[stub.UpstreamID]
+		if !ok {
+			continue
+		}
+		r := bufio.NewReader(io.NewSectionReader(f, span.offset, span.length))
+		for {
+			line, readErr := r.ReadString('\n')
+			line = strings.TrimSuffix(line, "\n")
+			if line != "" {
+				if err := emit(line); err != nil {
+					return replayed, err
+				}
+				replayed++
+			}
+			if readErr == nil {
+				continue
+			}
+			if !errors.Is(readErr, io.EOF) {
+				return replayed, readErr
+			}
+			break
+		}
+	}
+	return replayed, nil
+}
+
 // CompactSeriesFragment keeps only the last version of each series (and only
 // IDs present in valid, when non-nil), rewriting the file atomically. Runs
 // once per populate pass, not per batch.
 func CompactSeriesFragment(path string, valid map[uint64]struct{}) error {
 	fragMu.Lock()
 	defer fragMu.Unlock()
-	// A corrupt or missing cache file is treated as empty; the atomic
-	// rewrite below heals it.
-	entries, _ := ReadSeriesFragment(path)
-	last := make(map[uint64]FragmentEntry, len(entries))
-	for _, e := range entries {
-		last[e.UpstreamID] = e
-	}
+	src, spans, _ := indexSeriesFragment(path)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
+	}
+	if src != nil {
+		defer func() { _ = src.Close() }()
 	}
 	tmp := path + ".tmp"
 	f, err := os.Create(tmp)
 	if err != nil {
 		return err
 	}
-	if err := writeEntries(bufio.NewWriter(f), mapValues(last, valid)); err != nil {
+	w := bufio.NewWriter(f)
+	for id, span := range spans {
+		if valid != nil {
+			if _, ok := valid[id]; !ok {
+				continue
+			}
+		}
+		if _, err := fmt.Fprintf(w, "#XSERIES %d\n", id); err != nil {
+			_ = f.Close()
+			return err
+		}
+		if _, err := io.CopyN(w, io.NewSectionReader(src, span.offset, span.length), span.length); err != nil {
+			_ = f.Close()
+			return err
+		}
+	}
+	if err := w.Flush(); err != nil {
 		_ = f.Close()
 		return err
 	}
@@ -185,19 +294,6 @@ func writeEntries(w *bufio.Writer, entries []FragmentEntry) error {
 		}
 	}
 	return w.Flush()
-}
-
-func mapValues(last map[uint64]FragmentEntry, valid map[uint64]struct{}) []FragmentEntry {
-	out := make([]FragmentEntry, 0, len(last))
-	for id, e := range last {
-		if valid != nil {
-			if _, ok := valid[id]; !ok {
-				continue
-			}
-		}
-		out = append(out, e)
-	}
-	return out
 }
 
 func ReadSeriesFragment(path string) ([]FragmentEntry, error) {

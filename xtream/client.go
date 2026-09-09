@@ -350,22 +350,9 @@ func FetchPlaylistLines(ctx context.Context, c *Client, cache *SeriesCachePaths,
 		logger.Default.Warnf("Xtream series stub write failed: %v", err)
 	}
 
-	entries, err := ReadSeriesFragment(cache.Frag)
+	replayed, err := replaySeriesFragment(cache.Frag, stubs, emit)
 	if err != nil {
 		return nil
-	}
-	byID := make(map[uint64][]string, len(entries))
-	for _, e := range entries {
-		byID[e.UpstreamID] = e.Lines
-	}
-	replayed := 0
-	for _, stub := range stubs {
-		for _, line := range byID[stub.UpstreamID] {
-			if err := emit(line); err != nil {
-				return err
-			}
-			replayed++
-		}
 	}
 	if replayed > 0 {
 		logger.Default.Logf("Xtream: replayed %d cached series lines", replayed)

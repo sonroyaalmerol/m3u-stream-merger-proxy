@@ -59,3 +59,22 @@ func TestSeriesCacheCodecs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, healed, "compact rewrites the corrupt file as a valid empty fragment")
 }
+
+func TestReplaySeriesFragmentUsesLastVersionInStubOrder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "frag.m3u")
+	require.NoError(t, WriteSeriesFragment(path, []FragmentEntry{
+		{UpstreamID: 1, Lines: []string{"old-1"}},
+		{UpstreamID: 2, Lines: []string{"new-2-a", "new-2-b"}},
+		{UpstreamID: 1, Lines: []string{"new-1"}},
+		{UpstreamID: 3, Lines: []string{"stale-3"}},
+	}))
+
+	var lines []string
+	n, err := replaySeriesFragment(path, []SeriesStub{{UpstreamID: 2}, {UpstreamID: 1}}, func(line string) error {
+		lines = append(lines, line)
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 3, n)
+	assert.Equal(t, []string{"new-2-a", "new-2-b", "new-1"}, lines)
+}
