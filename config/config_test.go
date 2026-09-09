@@ -47,3 +47,16 @@ func TestGetLatestProcessedM3UPath(t *testing.T) {
 		t.Fatalf("only-tmp dir: want error, got %q err %v", got, err)
 	}
 }
+
+func TestLargeWorkPathsUseDataPath(t *testing.T) {
+	prev := GetConfig()
+	SetConfig(&Config{DataPath: "/data", TempPath: "/tmp"})
+	t.Cleanup(func() { SetConfig(prev) })
+
+	if got, want := GetSourcesDirPath(), filepath.Join("/data", "sources"); got != want {
+		t.Fatalf("sources path = %q, want %q", got, want)
+	}
+	if got, want := GetSortDirPath(), filepath.Join("/data", "sorter"); got != want {
+		t.Fatalf("sort path = %q, want %q", got, want)
+	}
+}

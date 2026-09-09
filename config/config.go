@@ -30,7 +30,6 @@ func GetProcessedDirPath() string {
 	return filepath.Join(globalConfig.DataPath, "processed/")
 }
 
-
 func GetLockFile() string {
 	return filepath.Join(globalConfig.DataPath, ".lock")
 }
@@ -96,11 +95,11 @@ func GetStreamStoreDirPath() string {
 }
 
 func GetSourcesDirPath() string {
-	return filepath.Join(globalConfig.TempPath, "sources/")
+	return filepath.Join(globalConfig.DataPath, "sources/")
 }
 
 func GetSortDirPath() string {
-	return filepath.Join(globalConfig.TempPath, "sorter/")
+	return filepath.Join(globalConfig.DataPath, "sorter/")
 }
 
 func GetSeriesCacheDirPath() string {
