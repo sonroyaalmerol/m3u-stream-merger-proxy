@@ -57,10 +57,12 @@ func (h *XtreamHTTPHandler) writeJSON(w http.ResponseWriter, v any) {
 func deniedResponse(user string) xtream.RootResponse {
 	return xtream.RootResponse{
 		UserInfo: xtream.UserInfo{
-			Username: user,
-			Message:  "Invalid credentials",
-			Auth:     0,
-			Status:   "Disabled",
+			Username:   user,
+			Message:    "Invalid credentials",
+			Auth:       0,
+			Status:     "Disabled",
+			ActiveCons: "0",
+			IsTrial:    "0",
 		},
 	}
 }
@@ -209,11 +211,11 @@ func (h *XtreamHTTPHandler) rootResponse(r *http.Request, user, pass string) xtr
 			Message:              "M3U Stream Merger Proxy",
 			Auth:                 1,
 			Status:               "Active",
-			ExpDate:              "0",
+			ExpDate:              nil,
 			IsTrial:              "0",
-			ActiveCons:           0,
+			ActiveCons:           "0",
 			CreatedAt:            strconv.FormatInt(now.Unix(), 10),
-			MaxConnections:       "1",
+			MaxConnections:       "99",
 			AllowedOutputFormats: []string{"m3u8", "ts"},
 		},
 		ServerInfo: xtream.ServerInfo{

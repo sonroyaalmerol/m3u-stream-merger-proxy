@@ -6,17 +6,48 @@ import (
 	"m3u-stream-merger/logger"
 	"m3u-stream-merger/updater"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 )
+
+// redactQuery hides the password before a request line reaches the log.
+func redactQuery(raw string) string {
+	q, err := url.ParseQuery(raw)
+	if err != nil {
+		return "<unparseable>"
+	}
+	if q.Get("password") != "" {
+		q.Set("password", "***")
+	}
+	return q.Encode()
+}
+
+func requestLine(r *http.Request) string {
+	line := r.Method + " " + r.URL.Path
+	if r.URL.RawQuery != "" {
+		line += "?" + redactQuery(r.URL.RawQuery)
+	}
+	return line + " ua=\"" + r.UserAgent() + "\" from=" + r.RemoteAddr
+}
+
+// logXtream logs every Xtream client request so player compatibility issues are diagnosable from the logs alone.
+func logXtream(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		logger.Default.Logf("xtream: %s", requestLine(r))
+		next(w, r)
+	}
+}
 
 func rootHandler(serveAPI func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		if r.URL.Path == "/" && (q.Get("action") != "" || (q.Get("username") != "" && q.Get("password") != "")) {
+			logger.Default.Logf("xtream: %s", requestLine(r))
 			serveAPI(w, r)
 			return
 		}
+		logger.Default.Warnf("unhandled request (404): %s", requestLine(r))
 		http.NotFound(w, r)
 	}
 }
@@ -65,22 +96,12 @@ func main() {
 	http.HandleFunc("/epg.xml", func(w http.ResponseWriter, r *http.Request) {
 		epgHandler.ServeHTTP(w, r)
 	})
-	http.HandleFunc("/player_api.php", func(w http.ResponseWriter, r *http.Request) {
-		xtreamHandler.ServePlayerAPI(w, r)
-	})
-	http.HandleFunc("/get.php", func(w http.ResponseWriter, r *http.Request) {
-		xtreamHandler.ServeGetPHP(w, r)
-	})
-	http.HandleFunc("/xmltv.php", func(w http.ResponseWriter, r *http.Request) {
-		xtreamHandler.ServeXMLTV(w, r)
-	})
-	http.HandleFunc("/panel_api.php", func(w http.ResponseWriter, r *http.Request) {
-		xtreamHandler.ServePanelAPI(w, r)
-	})
+	http.HandleFunc("/player_api.php", logXtream(xtreamHandler.ServePlayerAPI))
+	http.HandleFunc("/get.php", logXtream(xtreamHandler.ServeGetPHP))
+	http.HandleFunc("/xmltv.php", logXtream(xtreamHandler.ServeXMLTV))
+	http.HandleFunc("/panel_api.php", logXtream(xtreamHandler.ServePanelAPI))
 	for _, prefix := range []string{"/live/", "/movie/", "/series/"} {
-		http.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
-			xtreamHandler.ServeStream(w, r)
-		})
+		http.HandleFunc(prefix, logXtream(xtreamHandler.ServeStream))
 	}
 
 	http.HandleFunc("/", rootHandler(xtreamHandler.ServePlayerAPI))

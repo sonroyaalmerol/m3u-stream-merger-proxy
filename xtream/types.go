@@ -53,9 +53,9 @@ type UserInfo struct {
 	Message              string   `json:"message"`
 	Auth                 int      `json:"auth"`
 	Status               string   `json:"status"`
-	ExpDate              string   `json:"exp_date"`
+	ExpDate              *string  `json:"exp_date"`
 	IsTrial              string   `json:"is_trial"`
-	ActiveCons           int      `json:"active_cons"`
+	ActiveCons           string   `json:"active_cons"`
 	CreatedAt            string   `json:"created_at"`
 	MaxConnections       string   `json:"max_connections"`
 	AllowedOutputFormats []string `json:"allowed_output_formats"`

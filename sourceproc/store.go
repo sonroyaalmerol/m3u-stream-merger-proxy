@@ -195,9 +195,19 @@ func catalogKind(tvgType string) byte {
 	}
 }
 
-// ponytail: 63-bit mask keeps every emitted ID inside a Java Long, unlike raw xxhash
+// xtreamIDMask keeps emitted IDs inside a signed 32-bit int, which Xtream clients (TiviMate) parse stream_id as.
+const xtreamIDMask = 0x7fffffff
+
+// clientID folds a hash into the client-safe ID range, never 0 (0 means "no category / not a series").
+func clientID(h uint64) uint64 {
+	if id := h & xtreamIDMask; id != 0 {
+		return id
+	}
+	return 1
+}
+
 func StreamIDFor(title string) uint64 {
-	return xxhash.Sum64String(title) & 0x7fffffffffffffff
+	return clientID(xxhash.Sum64String(title))
 }
 
 // SeriesCategoryID derives the egress category id for a series group title.
@@ -209,7 +219,7 @@ func SeriesIDFor(show string) uint64 {
 	h := xxhash.New()
 	_, _ = h.Write([]byte("series|"))
 	_, _ = h.Write([]byte(show))
-	return h.Sum64() & 0x7fffffffffffffff
+	return clientID(h.Sum64())
 }
 
 func catalogKindName(kind byte) string {
@@ -224,7 +234,7 @@ func catalogKindName(kind byte) string {
 }
 
 func categoryIDFor(kind byte, group string) uint64 {
-	return (xxhash.Sum64String(group) ^ (uint64(kind) * 0x9e3779b185ebca87)) & 0x7fffffff
+	return clientID(xxhash.Sum64String(group) ^ (uint64(kind) * 0x9e3779b185ebca87))
 }
 
 func parseEpisodeTitle(title string) (string, int, int) {

@@ -214,6 +214,46 @@ func TestXtreamVodInfo(t *testing.T) {
 	assert.Equal(t, strconv.FormatUint(vodID, 10), info.MovieData.StreamID.String())
 }
 
+// TiviMate parses stream_id/series_id/category_id as a signed 32-bit int and drops anything wider.
+func TestXtreamIDsFitInt32(t *testing.T) {
+	h := setupXtreamHandler(t)
+
+	for _, action := range []string{"get_live_streams", "get_vod_streams", "get_series", "get_live_categories"} {
+		rec := playerAPIRequest(t, h, "username=u&password=p&action="+action)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var rows []map[string]any
+		dec := json.NewDecoder(rec.Body)
+		dec.UseNumber()
+		require.NoError(t, dec.Decode(&rows), action)
+		require.NotEmpty(t, rows, action)
+		for _, row := range rows {
+			for _, field := range []string{"stream_id", "series_id", "category_id"} {
+				raw, ok := row[field]
+				if !ok {
+					continue
+				}
+				id, err := strconv.ParseInt(strings.Trim(fmt.Sprint(raw), `"`), 10, 32)
+				require.NoError(t, err, "%s.%s=%v exceeds int32", action, field, raw)
+				assert.Positive(t, id, "%s.%s", action, field)
+			}
+		}
+	}
+}
+
+func TestXtreamUserInfoWireTypes(t *testing.T) {
+	h := setupXtreamHandler(t)
+
+	rec := playerAPIRequest(t, h, "username=u&password=p")
+	var root map[string]map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &root))
+
+	user := root["user_info"]
+	assert.Nil(t, user["exp_date"])
+	assert.Equal(t, "0", user["active_cons"])
+	assert.Equal(t, "0", user["is_trial"])
+}
+
 func TestXtreamPanelAPI(t *testing.T) {
 	h := setupXtreamHandler(t)
 
