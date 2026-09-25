@@ -512,6 +512,7 @@ func (h *XtreamHTTPHandler) epgListings(streamID uint64, limit int, dataTable bo
 	dec := xml.NewDecoder(bufio.NewReaderSize(file, 128<<10))
 	listings := make([]xtream.EPGListingOut, 0, limit)
 	var p xmltvProgramme
+	unixNow := time.Now().Unix()
 	for len(listings) < limit {
 		tok, err := dec.Token()
 		if err != nil {
@@ -529,12 +530,15 @@ func (h *XtreamHTTPHandler) epgListings(streamID uint64, limit int, dataTable bo
 		}
 		startStr, startTS := xmltvTime(p.Start)
 		end, endTS := xmltvTime(p.Stop)
+		if endTS != 0 && endTS <= unixNow {
+			continue
+		}
 		lang := p.Title.Lang
 		if lang == "" {
 			lang = "en"
 		}
 		nowPlaying := 0
-		if unixNow := time.Now().Unix(); startTS <= unixNow && unixNow < endTS {
+		if startTS <= unixNow && unixNow < endTS {
 			nowPlaying = 1
 		}
 		listings = append(listings, xtream.EPGListingOut{
@@ -690,5 +694,17 @@ func (h *XtreamHTTPHandler) ServeXMLTV(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
-	http.ServeFile(w, r, config.GetEPGPath())
+
+	path := config.GetEPGPath()
+	info, err := os.Stat(path)
+	if err != nil || info.Size() == 0 {
+		h.logger.Warnf("xmltv.php: no EPG available at %s (set EPG_URL_1 and wait for a sync): %v", path, err)
+		w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+		_, _ = w.Write([]byte(xml.Header + "<tv generator-info-name=\"m3u-stream-merger-proxy\"></tv>\n"))
+		return
+	}
+
+	h.logger.Logf("xmltv.php: serving %s (%d bytes)", path, info.Size())
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	http.ServeFile(w, r, path)
 }

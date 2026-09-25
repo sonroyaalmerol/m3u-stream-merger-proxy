@@ -365,21 +365,41 @@ func TestXtreamShortEPG(t *testing.T) {
 
 	var short map[string][]xtream.EPGListingOut
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &short))
-	require.Len(t, short["epg_listings"], 2)
+	require.Len(t, short["epg_listings"], 1)
 	listing := short["epg_listings"][0]
-	assert.Equal(t, "2024-01-01 12:00:00", listing.Start)
-	assert.Equal(t, "1704110400", listing.StartTimestamp)
-	assert.Equal(t, "2024-01-01 13:00:00", listing.Stop)
 	assert.Equal(t, "cnn.id", listing.ChannelID)
 	assert.NotEmpty(t, listing.Title)
-	assert.Equal(t, 0, listing.NowPlaying)
-	assert.NotEqual(t, listing.ID, short["epg_listings"][1].ID)
+	assert.Equal(t, 1, listing.NowPlaying)
+	assert.NotEmpty(t, listing.StartTimestamp)
 
 	rec = playerAPIRequest(t, h, "action=get_simple_data_table&stream_id="+strconv.FormatUint(cnnID, 10))
 	require.Equal(t, http.StatusOK, rec.Code)
 	var table map[string][]xtream.EPGListingOut
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &table))
-	require.Len(t, table["epg_listings"], 2)
-	assert.Equal(t, 0, table["epg_listings"][0].NowPlaying)
-	assert.Equal(t, 1, table["epg_listings"][1].NowPlaying)
+	require.Len(t, table["epg_listings"], 1)
+	assert.Equal(t, 1, table["epg_listings"][0].NowPlaying)
+}
+
+func TestXtreamXMLTV(t *testing.T) {
+	h := setupXtreamHandler(t)
+	require.NoError(t, os.MkdirAll(config.GetEPGDirPath(), 0755))
+
+	serve := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/xmltv.php?username=u&password=p", nil)
+		rec := httptest.NewRecorder()
+		h.ServeXMLTV(rec, req)
+		return rec
+	}
+
+	rec := serve()
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Header().Get("Content-Type"), "xml")
+	assert.Contains(t, rec.Body.String(), "<tv")
+
+	require.NoError(t, os.WriteFile(config.GetEPGPath(),
+		[]byte(`<?xml version="1.0"?><tv><channel id="cnn.id"><display-name>CNN</display-name></channel></tv>`), 0644))
+	rec = serve()
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Header().Get("Content-Type"), "xml")
+	assert.Contains(t, rec.Body.String(), `id="cnn.id"`)
 }
