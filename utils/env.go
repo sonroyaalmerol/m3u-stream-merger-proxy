@@ -56,13 +56,22 @@ var (
 	epgIndexesOnce = new(sync.Once)
 )
 
+// GetEPGIndexes lists EPG_URL_X indexes plus XTREAM_URL_X ones, whose guide comes from the panel's own xmltv.php.
 func GetEPGIndexes() []string {
 	epgIndexesOnce.Do(func() {
-		for _, env := range os.Environ() {
-			pair := strings.SplitN(env, "=", 2)
-			if after, ok := strings.CutPrefix(pair[0], "EPG_URL_"); ok {
-				indexString := after
-				epgIndexes = append(epgIndexes, indexString)
+		seen := make(map[string]struct{})
+		for _, prefix := range []string{"EPG_URL_", "XTREAM_URL_"} {
+			for _, env := range os.Environ() {
+				pair := strings.SplitN(env, "=", 2)
+				after, ok := strings.CutPrefix(pair[0], prefix)
+				if !ok || pair[1] == "" {
+					continue
+				}
+				if _, dup := seen[after]; dup {
+					continue
+				}
+				seen[after] = struct{}{}
+				epgIndexes = append(epgIndexes, after)
 			}
 		}
 	})

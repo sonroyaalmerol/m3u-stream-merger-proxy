@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -43,9 +44,7 @@ func NewProcessor(log logger.Logger) *Processor {
 	return &Processor{logger: log}
 }
 
-// Run downloads all configured EPG_URL_X sources and merges them into
-// a single XMLTV file served at /epg.xml.  It is a no-op when no
-// EPG_URL_X variables are set.
+// Run merges every EPG_URL_X source, plus the xmltv.php of every XTREAM_URL_X panel, into the file served at /epg.xml.
 func (p *Processor) Run(ctx context.Context) error {
 	indexes := utils.GetEPGIndexes()
 	if len(indexes) == 0 {
@@ -102,11 +101,27 @@ func (p *Processor) Run(ctx context.Context) error {
 	return os.Rename(tmpPath, config.GetEPGPath())
 }
 
+// epgSourceURL returns EPG_URL_X, falling back to the xmltv.php of the Xtream panel configured under the same index.
+func epgSourceURL(idx string) string {
+	if u := os.Getenv(fmt.Sprintf("EPG_URL_%s", idx)); u != "" {
+		return u
+	}
+	host := strings.TrimSuffix(os.Getenv("XTREAM_URL_"+idx), "/")
+	if host == "" {
+		return ""
+	}
+	q := url.Values{
+		"username": {os.Getenv("XTREAM_USERNAME_" + idx)},
+		"password": {os.Getenv("XTREAM_PASSWORD_" + idx)},
+	}
+	return host + "/xmltv.php?" + q.Encode()
+}
+
 // downloadSource fetches one EPG source, caches it, and returns the local path.
 func (p *Processor) downloadSource(ctx context.Context, idx string) (string, error) {
-	epgURL := os.Getenv(fmt.Sprintf("EPG_URL_%s", idx))
+	epgURL := epgSourceURL(idx)
 	if epgURL == "" {
-		return "", fmt.Errorf("EPG_URL_%s is not set", idx)
+		return "", fmt.Errorf("neither EPG_URL_%s nor XTREAM_URL_%s is set", idx, idx)
 	}
 
 	// Local file passthrough.

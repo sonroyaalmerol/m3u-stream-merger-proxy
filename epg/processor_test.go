@@ -268,8 +268,43 @@ func TestProcessor_Run_NoEPGURLs(t *testing.T) {
 	}
 }
 
-// TestProcessor_Run_DownloadsAndMerges spins up a local HTTP server serving
-// two plain XMLTV files and verifies the processor produces a merged output.
+// TestProcessor_Run_XtreamSourceOnly: with no EPG_URL_X set, the guide must come from the panel's own xmltv.php.
+func TestProcessor_Run_XtreamSourceOnly(t *testing.T) {
+	setupTestConfig(t)
+
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/xmltv.php" {
+			http.NotFound(w, r)
+			return
+		}
+		gotQuery = r.URL.RawQuery
+		_, _ = io.WriteString(w, xmltvSource(
+			[]xmlChannel{{ID: "cnn.id", DisplayName: "CNN"}},
+			[]xmlProgramme{{Channel: "cnn.id", Title: "News"}},
+		))
+	}))
+	defer srv.Close()
+
+	t.Setenv("XTREAM_URL_1", srv.URL+"/")
+	t.Setenv("XTREAM_USERNAME_1", "user")
+	t.Setenv("XTREAM_PASSWORD_1", "p@ss word")
+	utils.ResetCaches()
+
+	p := NewProcessor(logger.Default)
+	if err := p.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if gotQuery != "password=p%40ss+word&username=user" {
+		t.Errorf("unexpected credentials on xmltv.php: %q", gotQuery)
+	}
+	doc := parseMergedXML(t, config.GetEPGPath())
+	if len(doc.Channels) != 1 || len(doc.Programmes) != 1 {
+		t.Errorf("expected the panel guide to be merged, got %d channels / %d programmes", len(doc.Channels), len(doc.Programmes))
+	}
+}
+
 func TestProcessor_Run_DownloadsAndMerges(t *testing.T) {
 	setupTestConfig(t)
 
