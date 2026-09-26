@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -34,6 +36,11 @@ http://base:8080/p/series/u/p/SLUG_EP2.mkv
 
 func setupXtreamHandler(t *testing.T) *XtreamHTTPHandler {
 	t.Helper()
+	return setupXtreamHandlerFrom(t, xtreamTestM3U)
+}
+
+func setupXtreamHandlerFrom(t *testing.T, m3u string) *XtreamHTTPHandler {
+	t.Helper()
 
 	tempDir := t.TempDir()
 	config.SetConfig(&config.Config{
@@ -42,7 +49,7 @@ func setupXtreamHandler(t *testing.T) *XtreamHTTPHandler {
 	})
 
 	m3uPath := filepath.Join(tempDir, "merged.m3u")
-	require.NoError(t, os.WriteFile(m3uPath, []byte(xtreamTestM3U), 0644))
+	require.NoError(t, os.WriteFile(m3uPath, []byte(m3u), 0644))
 	t.Setenv("M3U_URL_1", "file://"+m3uPath)
 	t.Setenv("BASE_URL", "http://example.com")
 	utils.ResetCaches()
@@ -273,6 +280,37 @@ func TestXtreamPanelAPI(t *testing.T) {
 	assert.NotEmpty(t, resp.AvailableChannels)
 }
 
+func TestXtreamGzipJSON(t *testing.T) {
+	h := setupXtreamHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/player_api.php?username=u&password=p&action=get_live_streams", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	h.ServePlayerAPI(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
+
+	gz, err := gzip.NewReader(rec.Body)
+	require.NoError(t, err)
+	body, err := io.ReadAll(gz)
+	require.NoError(t, err)
+	var streams []xtream.RawLiveStream
+	require.NoError(t, json.Unmarshal(body, &streams))
+	require.Len(t, streams, 1)
+}
+
+func TestXtreamGetPHPPlainType(t *testing.T) {
+	h := setupXtreamHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/get.php?username=u&password=p&type=m3u", nil)
+	rec := httptest.NewRecorder()
+	h.ServeGetPHP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	assert.Contains(t, body, "#EXTINF:-1,CNN")
+	assert.NotContains(t, body, "tvg-id=")
+}
+
 func TestXtreamGetPHP(t *testing.T) {
 	h := setupXtreamHandler(t)
 
@@ -287,6 +325,33 @@ func TestXtreamGetPHP(t *testing.T) {
 	assert.Contains(t, body, "http://example.com/movie/u/p/")
 	assert.Contains(t, body, fmt.Sprintf("http://example.com/movie/u/p/%d.mp4", sourceproc.StreamIDFor("Cool Movie")))
 	assert.Contains(t, body, fmt.Sprintf("http://example.com/series/u/p/%d.mkv", sourceproc.StreamIDFor("Test Show S01E02")))
+}
+
+func TestXtreamVODByteRange(t *testing.T) {
+	var gotRange string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRange = r.Header.Get("Range")
+		w.Header().Set("Content-Range", "bytes 5-9/10")
+		w.Header().Set("Accept-Ranges", "bytes")
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write([]byte("56789"))
+	}))
+	defer upstream.Close()
+
+	m3u := fmt.Sprintf("#EXTM3U\n#EXTINF:-1 tvg-type=%q tvg-group=%q,Cool Movie\n%s/movie.mp4\n",
+		"movie", "Movies", upstream.URL)
+	h := setupXtreamHandlerFrom(t, m3u)
+
+	id := sourceproc.StreamIDFor("Cool Movie")
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/movie/u/p/%d.mp4", id), nil)
+	req.Header.Set("Range", "bytes=5-9")
+	rec := httptest.NewRecorder()
+	h.ServeStream(rec, req)
+
+	require.Equal(t, http.StatusPartialContent, rec.Code)
+	assert.Equal(t, "bytes=5-9", gotRange)
+	assert.Equal(t, "bytes 5-9/10", rec.Header().Get("Content-Range"))
+	assert.Equal(t, "56789", rec.Body.String())
 }
 
 func TestXtreamGetPHPOutputFormat(t *testing.T) {

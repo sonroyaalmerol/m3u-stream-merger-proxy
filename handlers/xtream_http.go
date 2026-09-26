@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"bufio"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	stdjson "encoding/json"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -48,6 +50,24 @@ func NewXtreamHTTPHandler(streamHandler *StreamHTTPHandler, logger logger.Logger
 	}
 }
 
+type gzipResponseWriter struct {
+	http.ResponseWriter
+	gz *gzip.Writer
+}
+
+func (g *gzipResponseWriter) Write(p []byte) (int, error) { return g.gz.Write(p) }
+
+// gzipWriter compresses catalog-sized JSON, which real panels also serve gzipped.
+func gzipWriter(w http.ResponseWriter, r *http.Request) (http.ResponseWriter, func()) {
+	if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		return w, func() {}
+	}
+	w.Header().Set("Content-Encoding", "gzip")
+	w.Header().Add("Vary", "Accept-Encoding")
+	gz := gzip.NewWriter(w)
+	return &gzipResponseWriter{ResponseWriter: w, gz: gz}, func() { _ = gz.Close() }
+}
+
 func (h *XtreamHTTPHandler) writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
@@ -73,6 +93,9 @@ func (h *XtreamHTTPHandler) ServePlayerAPI(w http.ResponseWriter, r *http.Reques
 		h.writeJSON(w, deniedResponse(query.Get("username")))
 		return
 	}
+
+	w, done := gzipWriter(w, r)
+	defer done()
 
 	action := query.Get("action")
 	categoryID, _ := strconv.ParseUint(query.Get("category_id"), 10, 64)
@@ -121,6 +144,9 @@ func (h *XtreamHTTPHandler) ServePanelAPI(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	w, done := gzipWriter(w, r)
+	defer done()
+
 	root := h.rootResponse(r, query.Get("username"), query.Get("password"))
 	w.Header().Set("Content-Type", "application/json")
 	out := bufio.NewWriterSize(w, 64<<10)
@@ -166,6 +192,9 @@ func (h *XtreamHTTPHandler) ServePanelAPI(w http.ResponseWriter, r *http.Request
 		return emitChannel(idStr(e.StreamID), liveStreamOut(0, e))
 	})
 	_ = h.catalog.RangeEntries(xtream.TypeMovie, 0, func(_ int, e sourceproc.CatalogEntry) bool {
+		return emitChannel(idStr(e.StreamID), vodStreamOut(0, e))
+	})
+	_ = h.catalog.RangeEntries(xtream.TypeSeries, 0, func(_ int, e sourceproc.CatalogEntry) bool {
 		return emitChannel(idStr(e.StreamID), vodStreamOut(0, e))
 	})
 	if _, err := out.WriteString("}}\n"); err != nil {
@@ -626,9 +655,63 @@ func (h *XtreamHTTPHandler) ServeStream(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	if r.Header.Get("Range") != "" && entry.Type != xtream.TypeLive && h.serveByteRange(w, r, entry.Slug) {
+		return
+	}
+
 	h.logger.Debugf("Xtream stream %d -> slug %s", id, entry.Slug)
 	r.URL.Path = "/p/" + entry.BasePath + "/" + entry.Slug + ext
 	h.streamHandler.ServeHTTP(w, r)
+}
+
+// serveByteRange copies a ranged VOD request directly, since the shared live buffer has no notion of a byte offset.
+func (h *XtreamHTTPHandler) serveByteRange(w http.ResponseWriter, r *http.Request, slug string) bool {
+	info, err := sourceproc.GetStreamBySlug(slug)
+	if err != nil || info == nil {
+		return false
+	}
+	for _, u := range info.URLs {
+		if h.copyRange(w, r, u.URL) {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *XtreamHTTPHandler) copyRange(w http.ResponseWriter, r *http.Request, target string) bool {
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, target, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("User-Agent", utils.GetEnv("USER_AGENT"))
+	req.Header.Set("Accept", utils.GetEnv("HTTP_ACCEPT"))
+	for _, name := range []string{"Range", "If-Range", "User-Agent"} {
+		if v := r.Header.Get(name); v != "" {
+			req.Header.Set(name, v)
+		}
+	}
+
+	resp, err := utils.HTTPClient.Do(req)
+	if err != nil {
+		h.logger.Debugf("range request to %s failed: %v", target, err)
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= http.StatusBadRequest {
+		h.logger.Debugf("range request to %s returned %d", target, resp.StatusCode)
+		return false
+	}
+
+	for _, name := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified"} {
+		if v := resp.Header.Get(name); v != "" {
+			w.Header().Set(name, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		h.logger.Debugf("range copy for %s ended: %v", target, err)
+	}
+	return true
 }
 
 // ServeGetPHP exports the catalog as an Xtream-style M3U playlist.
@@ -645,6 +728,9 @@ func (h *XtreamHTTPHandler) ServeGetPHP(w http.ResponseWriter, r *http.Request) 
 	if query.Get("output") == "m3u8" {
 		liveExt = ".m3u8"
 	}
+	plain := query.Get("type") == "m3u"
+	w, done := gzipWriter(w, r)
+	defer done()
 
 	w.Header().Set("Content-Type", "application/x-mpegurl")
 	out := bufio.NewWriterSize(w, 64<<10)
@@ -655,6 +741,10 @@ func (h *XtreamHTTPHandler) ServeGetPHP(w http.ResponseWriter, r *http.Request) 
 	appendEntry := func(e sourceproc.CatalogEntry, streamType, ext string) bool {
 		if _, err := fmt.Fprint(out, "#EXTINF:-1"); err != nil {
 			return false
+		}
+		if plain {
+			_, err := fmt.Fprintf(out, ",%s\n%s/%s/%s/%s/%d%s\n", e.Title, baseURL, streamType, user, pass, e.StreamID, ext)
+			return err == nil
 		}
 		if e.TvgID != "" {
 			if _, err := fmt.Fprintf(out, ` tvg-id="%s"`, e.TvgID); err != nil {
