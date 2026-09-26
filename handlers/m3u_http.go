@@ -41,5 +41,5 @@ func (h *M3UHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *M3UHTTPHandler) handleAuth(r *http.Request) bool {
-	return h.auth.Authorize(r.URL.Query().Get("username"), r.URL.Query().Get("password"))
+	return h.auth.AuthorizeRequest(r)
 }

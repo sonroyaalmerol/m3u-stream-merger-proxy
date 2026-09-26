@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -12,9 +13,12 @@ import (
 
 // CredentialsAuth checks user/pass against CREDENTIALS (user:pass[:expiry]|...) then LDAP_URL; both unset disables auth.
 type CredentialsAuth struct {
-	logger logger.Logger
-	ldap   ldapCache
-	dial   func(serverURL string) (ldapConn, error)
+	logger  logger.Logger
+	ldap    ldapCache
+	dial    func(serverURL string) (ldapConn, error)
+	allow   netAllowList
+	trusted netAllowList
+	lookup  func(host string) ([]netip.Addr, error)
 }
 
 func NewCredentialsAuth(logger logger.Logger) *CredentialsAuth {
@@ -86,7 +90,12 @@ func validCredentialPair(cred []string) bool {
 	return true
 }
 
+// AuthorizeRequest accepts the caller's network before falling back to the credentials in the request.
 func (a *CredentialsAuth) AuthorizeRequest(r *http.Request) bool {
+	if a.allowedByNetwork(r) {
+		return true
+	}
+
 	values := RequestValues(r)
 
 	return a.Authorize(values.Get("username"), values.Get("password"))

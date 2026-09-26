@@ -89,7 +89,7 @@ func deniedResponse(user string) xtream.RootResponse {
 
 func (h *XtreamHTTPHandler) ServePlayerAPI(w http.ResponseWriter, r *http.Request) {
 	query := RequestValues(r)
-	if !h.auth.Authorize(query.Get("username"), query.Get("password")) {
+	if !h.auth.AuthorizeRequest(r) {
 		h.writeJSON(w, deniedResponse(query.Get("username")))
 		return
 	}
@@ -139,7 +139,7 @@ func (h *XtreamHTTPHandler) ServePlayerAPI(w http.ResponseWriter, r *http.Reques
 // ServePanelAPI answers the legacy panel_api.php probe some clients still make.
 func (h *XtreamHTTPHandler) ServePanelAPI(w http.ResponseWriter, r *http.Request) {
 	query := RequestValues(r)
-	if !h.auth.Authorize(query.Get("username"), query.Get("password")) {
+	if !h.auth.AuthorizeRequest(r) {
 		h.writeJSON(w, deniedResponse(query.Get("username")))
 		return
 	}
@@ -620,7 +620,7 @@ func (h *XtreamHTTPHandler) ServeStream(w http.ResponseWriter, r *http.Request) 
 	}
 
 	user, pass := segments[1], segments[2]
-	if !h.auth.Authorize(user, pass) {
+	if !h.auth.allowedByNetwork(r) && !h.auth.Authorize(user, pass) {
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}

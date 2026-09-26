@@ -236,6 +236,9 @@ Xtream Codes providers can be used as sources directly alongside (or instead of)
 | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | BASE_URL                                             | Sets the base URL for the stream URls in the M3U file to be generated.                                                                                                                                            | http/s://<request_hostname> (e.g. <http://192.168.1.10:8080>) | Any string that follows the URL format                                                                                                                                                                                                                |
 | CREDENTIALS                                          | Set authentication credentials for the M3U playlist. Enabling this will require query variables in the M3U playlist URL to be authenticated. (e.g. <http://test.test/playlist.m3u?username=user1&password=pass1>) | none                                                          | Format: `user1:pass1\|user2:pass2:2025-02-01` (separate multiple users with `\|`, each user's credentials with `:`). You can add an optional expiry date at the end with another colon (:) as shown. Set to `none` or leave it empty to disable auth. |
+| ALLOWED_NETWORKS                                     | Allow requests from these addresses without credentials. Entries are DDNS hostnames (re-resolved periodically), literal IPs or CIDRs, separated by `\|`. Credentials keep working from everywhere else.           | none                                                          | `home.duckdns.org\|192.168.1.0/24\|2001:db8::/64`                                                                                                                                                                                                     |
+| ALLOWED_NETWORKS_REFRESH_SECONDS                     | How often DDNS hostnames in `ALLOWED_NETWORKS` are re-resolved.                                                                                                                                                   | 60                                                            | Any positive integer                                                                                                                                                                                                                                  |
+| TRUSTED_PROXIES                                      | Peers whose `X-Forwarded-For` may be believed when matching `ALLOWED_NETWORKS`. Leave unset unless a reverse proxy fronts this one.                                                                               | none                                                          | `172.18.0.0/16\|10.0.0.5`                                                                                                                                                                                                                             |
 | LDAP_URL                                             | Authenticate users against an LDAP/AD server instead of (or alongside) `CREDENTIALS`. A user is accepted when a simple bind with their own credentials succeeds. Empty passwords are always rejected.             | none                                                          | `ldap://host:389`, `ldaps://host:636`                                                                                                                                                                                                                 |
 | LDAP_BIND_DN                                         | Bind DN template, used when `LDAP_BASE_DN` is unset. `%s` or `{username}` is replaced with the escaped username.                                                                                                  | none                                                          | `uid=%s,ou=people,dc=example,dc=com`, `{username}@corp.example.com`                                                                                                                                                                                   |
 | LDAP_BASE_DN                                         | Search base. When set, the user DN is looked up with a search instead of being derived from the username, and `LDAP_BIND_DN` is ignored.                                                                          | none                                                          | `dc=example,dc=com`                                                                                                                                                                                                                                   |
@@ -252,6 +255,34 @@ Xtream Codes providers can be used as sources directly alongside (or instead of)
 | INCLUDE_TITLE_1, INCLUDE_TITLE_2, INCLUDE_TITLE_X    | Set channels to include based on title (Takes precedence over EXCLUDE_TITLE_X)                                                                                                                                    | N/A                                                           | Go regexp                                                                                                                                                                                                                                             |
 | EXCLUDE_TITLE_1, EXCLUDE_TITLE_2, EXCLUDE_TITLE_X    | Set channels to exclude based on title                                                                                                                                                                            | N/A                                                           | Go regexp                                                                                                                                                                                                                                             |
 | TITLE_SUBSTR_FILTER                                  | Sets a regex pattern used to exclude substrings from channel titles. This modifies the title of the streams when rendered in `/playlist.m3u`.                                                                     | none                                                          | Go regexp                                                                                                                                                                                                                                             |
+
+#### Network allowlist (DDNS)
+
+`ALLOWED_NETWORKS` lets trusted locations in without credentials, which is handy
+for players that cannot store a password. It is purely additive: unset it and
+nothing changes, set it and `CREDENTIALS` / LDAP logins still work from anywhere
+else, so existing clients never break.
+
+```env
+ALLOWED_NETWORKS=home.duckdns.org|192.168.1.0/24
+ALLOWED_NETWORKS_REFRESH_SECONDS=60
+```
+
+Hostnames are re-resolved on the refresh interval so a changing home IP keeps
+working; if the lookup fails the previous answer is kept rather than locking you
+out. IPv6 matches on the /64, because privacy addresses rotate within it.
+
+> [!CAUTION]
+> The client address is taken from the TCP peer. `X-Forwarded-For` is only
+> believed when the peer is listed in `TRUSTED_PROXIES`, since anyone can send
+> that header. If a reverse proxy fronts this one, set `TRUSTED_PROXIES` to its
+> address or the allowlist will never match; if nothing fronts it, leave
+> `TRUSTED_PROXIES` unset.
+>
+> An allowlisted address means _anyone_ at that address: everyone behind your
+> home NAT, and everyone sharing a CGNAT pool with you. If your DDNS name ever
+> lapses, whoever registers it next inherits the access. Do not allowlist a
+> mobile carrier or workplace IP.
 
 #### LDAP examples
 
