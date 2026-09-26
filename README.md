@@ -253,6 +253,34 @@ Xtream Codes providers can be used as sources directly alongside (or instead of)
 | EXCLUDE_TITLE_1, EXCLUDE_TITLE_2, EXCLUDE_TITLE_X    | Set channels to exclude based on title                                                                                                                                                                            | N/A                                                           | Go regexp                                                                                                                                                                                                                                             |
 | TITLE_SUBSTR_FILTER                                  | Sets a regex pattern used to exclude substrings from channel titles. This modifies the title of the streams when rendered in `/playlist.m3u`.                                                                     | none                                                          | Go regexp                                                                                                                                                                                                                                             |
 
+#### LDAP examples
+
+A directory where the DN contains the login name needs no service account:
+
+```env
+LDAP_URL=ldaps://ldap.example.com:636
+LDAP_BIND_DN=uid=%s,ou=people,dc=example,dc=com
+```
+
+Active Directory, or any server that requires an admin/service bind before it will
+answer a search (authentik's LDAP outpost, FreeIPA, Okta LDAP interface):
+
+```env
+LDAP_URL=ldap://authentik-ldap:389
+LDAP_BASE_DN=dc=ldap,dc=goauthentik,dc=io
+LDAP_USER_FILTER=(cn=%s)
+LDAP_BIND_USER=cn=ldapservice,ou=users,dc=ldap,dc=goauthentik,dc=io
+LDAP_BIND_PASSWORD=<service account token>
+LDAP_REQUIRED_GROUP=cn=iptv,ou=groups,dc=ldap,dc=goauthentik,dc=io
+```
+
+Each login dials the server, binds as `LDAP_BIND_USER`, searches for the account,
+then binds as the account itself to verify the password. The group lookup runs as
+the service account again, because the user's own bind usually has no search
+rights. An empty password is always rejected, since servers answer an empty simple
+bind with a successful anonymous bind. authentik only exposes users bound to the
+application, so `LDAP_REQUIRED_GROUP` is often redundant there.
+
 ### Logging Configs
 
 | ENV VAR | Description                       | Default Value | Possible Values |
