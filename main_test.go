@@ -10,6 +10,9 @@ func TestRootHandlerDispatch(t *testing.T) {
 	handler := rootHandler(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"user_info":{"auth":1}}`))
+	}, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(r.URL.Path))
 	})
 
 	cases := []struct {
@@ -22,6 +25,9 @@ func TestRootHandlerDispatch(t *testing.T) {
 		{"/", 404, "404 page not found\n"},
 		{"/?action=", 404, "404 page not found\n"},
 		{"/anything", 404, "404 page not found\n"},
+		{"/u/p/123", 200, "/live/u/p/123"},
+		{"/u/p/123.ts", 200, "/live/u/p/123.ts"},
+		{"/u/p/notanid.ts", 404, "404 page not found\n"},
 	}
 	for _, c := range cases {
 		req := httptest.NewRequest(http.MethodGet, c.target, nil)

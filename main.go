@@ -8,6 +8,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -39,12 +42,31 @@ func logXtream(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func rootHandler(serveAPI func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
+// legacyStreamPath matches the /{user}/{pass}/{id}[.ext] live URL panels hand out, returning the equivalent /live/ path.
+func legacyStreamPath(urlPath string) string {
+	segments := strings.Split(strings.Trim(urlPath, "/"), "/")
+	if len(segments) != 3 {
+		return ""
+	}
+	id := strings.TrimSuffix(segments[2], path.Ext(segments[2]))
+	if _, err := strconv.ParseUint(id, 10, 64); err != nil {
+		return ""
+	}
+	return "/live/" + strings.Join(segments, "/")
+}
+
+func rootHandler(serveAPI, serveStream func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		if r.URL.Path == "/" && (q.Get("action") != "" || (q.Get("username") != "" && q.Get("password") != "")) {
 			logger.Default.Logf("xtream: %s", requestLine(r))
 			serveAPI(w, r)
+			return
+		}
+		if legacy := legacyStreamPath(r.URL.Path); legacy != "" {
+			logger.Default.Logf("xtream: %s", requestLine(r))
+			r.URL.Path = legacy
+			serveStream(w, r)
 			return
 		}
 		logger.Default.Warnf("unhandled request (404): %s", requestLine(r))
@@ -104,13 +126,13 @@ func main() {
 		http.HandleFunc(prefix, logXtream(xtreamHandler.ServeStream))
 	}
 
-	http.HandleFunc("/", rootHandler(xtreamHandler.ServePlayerAPI))
+	http.HandleFunc("/", rootHandler(xtreamHandler.ServePlayerAPI, xtreamHandler.ServeStream))
 
 	logger.Default.Logf("Server is running on port %s...", os.Getenv("PORT"))
 	logger.Default.Log("Playlist Endpoint is running (`/playlist.m3u`)")
 	logger.Default.Log("Stream Endpoint is running (`/p/{originalBasePath}/{streamID}.{fileExt}`)")
 	logger.Default.Log("EPG Endpoint is running (`/epg.xml`)")
-	logger.Default.Log("Xtream API is running (`/player_api.php`, `/panel_api.php`, `/live|movie|series/{user}/{pass}/{id}.{ext}`, `/get.php`, `/xmltv.php`)")
+	logger.Default.Log("Xtream API is running (`/player_api.php`, `/panel_api.php`, `/live|movie|series/{user}/{pass}/{id}.{ext}`, `/{user}/{pass}/{id}`, `/get.php`, `/xmltv.php`)")
 	setup, err := newTLSSetup(logger.Default)
 	if err != nil {
 		logger.Default.Fatalf("TLS setup error: %v", err)
