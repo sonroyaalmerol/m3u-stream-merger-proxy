@@ -10,10 +10,11 @@ import (
 	"m3u-stream-merger/logger"
 )
 
-// CredentialsAuth validates Xtream-style username/password pairs against the
-// CREDENTIALS env (user:pass[[:expiry]]|user:pass...). Empty or "none" disables auth.
+// CredentialsAuth checks user/pass against CREDENTIALS (user:pass[:expiry]|...) then LDAP_URL; both unset disables auth.
 type CredentialsAuth struct {
 	logger logger.Logger
+	ldap   ldapCache
+	bind   func(serverURL, dn, password string) error
 }
 
 func NewCredentialsAuth(logger logger.Logger) *CredentialsAuth {
@@ -22,14 +23,20 @@ func NewCredentialsAuth(logger logger.Logger) *CredentialsAuth {
 
 func (a *CredentialsAuth) Authorize(user, pass string) bool {
 	credentials := os.Getenv("CREDENTIALS")
-	if credentials == "" || strings.ToLower(credentials) == "none" {
+	staticOff := credentials == "" || strings.ToLower(credentials) == "none"
+	if staticOff && !ldapEnabled() {
 		return true
 	}
 
-	for _, cred := range a.parseCredentials(credentials) {
-		if user == cred[0] && pass == cred[1] {
-			return true
+	if !staticOff {
+		for _, cred := range a.parseCredentials(credentials) {
+			if user == cred[0] && pass == cred[1] {
+				return true
+			}
 		}
+	}
+	if ldapEnabled() {
+		return a.authorizeLDAP(user, pass)
 	}
 	return false
 }
