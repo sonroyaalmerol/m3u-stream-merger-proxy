@@ -107,6 +107,54 @@ func gzipBytes(t *testing.T, data string) []byte {
 // mergeXMLTV unit tests
 // ---------------------------------------------------------------------------
 
+// TestMergeXMLTV_LargeOutputStaysWellFormed: past 4 KiB the separator newlines used to land inside tags.
+func TestMergeXMLTV_LargeOutputStaysWellFormed(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.xml")
+	out := filepath.Join(dir, "out.xml")
+
+	channels := make([]xmlChannel, 0, 500)
+	programmes := make([]xmlProgramme, 0, 500)
+	for i := range 500 {
+		id := fmt.Sprintf("channel-with-a-longish-id-%03d.example", i)
+		channels = append(channels, xmlChannel{ID: id, DisplayName: fmt.Sprintf("Channel Number %03d", i)})
+		programmes = append(programmes, xmlProgramme{Channel: id, Title: fmt.Sprintf("Programme Number %03d", i)})
+	}
+	_ = os.WriteFile(src, []byte(xmltvSource(channels, programmes)), 0644)
+
+	stats, err := mergeXMLTV([]string{src}, out, nil, nil)
+	if err != nil {
+		t.Fatalf("mergeXMLTV: %v", err)
+	}
+	if stats.channels != 500 || stats.programmes != 500 {
+		t.Fatalf("got %d channels / %d programmes, want 500 / 500", stats.channels, stats.programmes)
+	}
+
+	f, err := os.Open(out)
+	if err != nil {
+		t.Fatalf("open merged: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	dec := xml.NewDecoder(f)
+	seen := 0
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("merged output is not well-formed XML: %v", err)
+		}
+		if start, ok := tok.(xml.StartElement); ok && start.Name.Local == "channel" {
+			seen++
+		}
+	}
+	if seen != 500 {
+		t.Errorf("a strict parser found %d channels, want 500", seen)
+	}
+}
+
 func TestMergeXMLTV_FilterIsCaseInsensitive(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.xml")

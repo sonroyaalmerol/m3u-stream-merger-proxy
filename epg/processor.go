@@ -401,7 +401,12 @@ func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, tvgI
 		} else {
 			stats.programmes++
 		}
-		out.Write([]byte("\n")) //nolint:errcheck
+		if err := enc.Flush(); err != nil {
+			return err
+		}
+		if _, err := out.Write([]byte("\n")); err != nil {
+			return err
+		}
 	}
 
 	return enc.Flush()
