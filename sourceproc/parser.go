@@ -2,6 +2,7 @@ package sourceproc
 
 import (
 	"encoding/base64"
+	"strconv"
 	"strings"
 
 	"m3u-stream-merger/utils"
@@ -54,6 +55,8 @@ func (p *streamParser) parseLine(line string, nextLine *LineDetails, m3uIndex st
 	cleanUrl := strings.TrimSpace(nextLine.Content)
 	p.stream = StreamInfo{URLs: p.url[:0]}
 	stream := &p.stream
+	catchupType := ""
+	catchupDays := 0
 
 	forEachAttr(line, func(key, value string) {
 		value = strings.TrimSpace(value)
@@ -71,6 +74,10 @@ func (p *streamParser) parseLine(line string, nextLine *LineDetails, m3uIndex st
 			stream.Group = utils.GroupTitleParser(value)
 		case "tvg-logo":
 			stream.LogoURL = utils.TvgLogoParser(value)
+		case "catchup":
+			catchupType = strings.ToLower(value)
+		case "catchup-days":
+			catchupDays, _ = strconv.Atoi(value)
 		}
 	})
 
@@ -84,7 +91,15 @@ func (p *streamParser) parseLine(line string, nextLine *LineDetails, m3uIndex st
 
 	stream.SourceM3U = m3uIndex
 	stream.SourceIndex = nextLine.LineNum
-	stream.AddURL(m3uIndex, nextLine.LineNum, cleanUrl)
+	if catchupType != "xtream" || catchupDays < 1 {
+		catchupDays = 0
+	}
+	stream.AddStreamURL(StreamURL{
+		M3UIndex:    m3uIndex,
+		LineNum:     nextLine.LineNum,
+		URL:         cleanUrl,
+		CatchupDays: catchupDays,
+	})
 
 	return stream
 }

@@ -206,7 +206,27 @@ func EpisodeTitle(seriesName, seasonNum string, epNum int) string {
 	return fmt.Sprintf("%s S%sE%d", seriesName, strings.TrimPrefix(seasonNum, "0"), epNum)
 }
 
-func entryPair(title, group, tvgType, logo, tvgID, streamURL string) (string, string) {
+// CatchupURL converts a standard Xtream live URL into its timeshift equivalent.
+func CatchupURL(liveURL, start string, duration int) (string, bool) {
+	u, err := url.Parse(liveURL)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", false
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	liveIndex := len(parts) - 4
+	if liveIndex < 0 || parts[liveIndex] != "live" {
+		return "", false
+	}
+
+	catchupParts := append([]string(nil), parts[:liveIndex]...)
+	catchupParts = append(catchupParts, "timeshift", parts[liveIndex+1], parts[liveIndex+2], strconv.Itoa(duration), start, parts[liveIndex+3])
+	u.Path = "/" + strings.Join(catchupParts, "/")
+	u.RawPath = ""
+
+	return u.String(), true
+}
+
+func entryPair(title, group, tvgType, logo, tvgID, streamURL string, catchupDays int) (string, string) {
 	attrs := fmt.Sprintf(`tvg-name="%s"`, escapeAttr(title))
 	if tvgID != "" {
 		attrs += fmt.Sprintf(` tvg-id="%s"`, escapeAttr(tvgID))
@@ -217,6 +237,9 @@ func entryPair(title, group, tvgType, logo, tvgID, streamURL string) (string, st
 	}
 	if group != "" {
 		attrs += fmt.Sprintf(` tvg-group="%s" group-title="%s"`, escapeAttr(group), escapeAttr(group))
+	}
+	if catchupDays > 0 {
+		attrs += fmt.Sprintf(` catchup="xtream" catchup-days="%d"`, catchupDays)
 	}
 	return fmt.Sprintf("#EXTINF:-1 %s,%s", attrs, title), streamURL
 }
@@ -238,7 +261,7 @@ func SeriesToLines(c *Client, seriesName, group string, info *RawSeriesInfo) []s
 				ext = "mkv"
 			}
 			streamURL := fmt.Sprintf("%s/series/%s/%s/%s.%s", c.Host, c.Username, c.Password, ep.ID.String(), ext)
-			inf, u := entryPair(EpisodeTitle(seriesName, seasonNum, epNum), group, "series", ep.Image(), "", streamURL)
+			inf, u := entryPair(EpisodeTitle(seriesName, seasonNum, epNum), group, "series", ep.Image(), "", streamURL, 0)
 			lines = append(lines, inf, u)
 		}
 	}
@@ -281,8 +304,8 @@ func FetchPlaylistLines(ctx context.Context, c *Client, cache *SeriesCachePaths,
 	vodNames := categoryMap(vodCats)
 	seriesNames := categoryMap(seriesCats)
 
-	writeEntry := func(title, group, tvgType, logo, tvgID, streamURL string) error {
-		extinf, u := entryPair(title, group, tvgType, logo, tvgID, streamURL)
+	writeEntry := func(title, group, tvgType, logo, tvgID, streamURL string, catchupDays int) error {
+		extinf, u := entryPair(title, group, tvgType, logo, tvgID, streamURL, catchupDays)
 		if err := emit(extinf); err != nil {
 			return err
 		}
@@ -297,7 +320,11 @@ func FetchPlaylistLines(ctx context.Context, c *Client, cache *SeriesCachePaths,
 		}
 		liveCount++
 		streamURL := fmt.Sprintf("%s/live/%s/%s/%s.ts", c.Host, c.Username, c.Password, s.StreamID.String())
-		return writeEntry(s.Name, liveNames[s.CategoryID.String()], "live", s.StreamIcon, s.EPGChannelID, streamURL)
+		catchupDays := 0
+		if s.TVArchive.Int() > 0 {
+			catchupDays = s.TVArchiveDuration.Int()
+		}
+		return writeEntry(s.Name, liveNames[s.CategoryID.String()], "live", s.StreamIcon, s.EPGChannelID, streamURL, catchupDays)
 	}); err != nil {
 		return fmt.Errorf("get_live_streams: %w", err)
 	}
@@ -317,7 +344,7 @@ func FetchPlaylistLines(ctx context.Context, c *Client, cache *SeriesCachePaths,
 			ext = "mp4"
 		}
 		streamURL := fmt.Sprintf("%s/movie/%s/%s/%s.%s", c.Host, c.Username, c.Password, s.StreamID.String(), ext)
-		return writeEntry(s.Name, vodNames[s.CategoryID.String()], "movie", s.StreamIcon, "", streamURL)
+		return writeEntry(s.Name, vodNames[s.CategoryID.String()], "movie", s.StreamIcon, "", streamURL, 0)
 	}); err != nil {
 		return fmt.Errorf("get_vod_streams: %w", err)
 	}

@@ -85,20 +85,21 @@ type episodeEntry struct {
 }
 
 type CatalogEntry struct {
-	StreamID   uint64
-	CategoryID uint64
-	SeriesID   uint64
-	Title      string
-	Show       string
-	TvgID      string
-	Group      string
-	Logo       string
-	Type       string
-	Slug       string
-	BasePath   string
-	Ext        string
-	Season     int
-	Episode    int
+	StreamID    uint64
+	CategoryID  uint64
+	SeriesID    uint64
+	Title       string
+	Show        string
+	TvgID       string
+	Group       string
+	Logo        string
+	Type        string
+	Slug        string
+	BasePath    string
+	Ext         string
+	Season      int
+	Episode     int
+	CatchupDays int
 }
 
 type CatalogCategory struct {
@@ -178,7 +179,8 @@ func appendCatalogRecord(dst []byte, sum [28]byte, s *StreamInfo) []byte {
 	dst = binary.LittleEndian.AppendUint32(dst, uint32(len(show)))
 	dst = binary.LittleEndian.AppendUint16(dst, uint16(season))
 	dst = binary.LittleEndian.AppendUint16(dst, uint16(episode))
-	dst = append(dst, kind, byte(len(ext)), 0, 0)
+	dst = append(dst, kind, byte(len(ext)))
+	dst = binary.LittleEndian.AppendUint16(dst, uint16(min(max(s.CatchupDays, 0), math.MaxUint16)))
 	dst = append(dst, ext...)
 
 	return appendStreamInfo(dst, s)
@@ -337,18 +339,19 @@ func decodeCatalogEntry(rec []byte) (CatalogEntry, error) {
 	kind := rec[60]
 	extLen := int(rec[61])
 	entry := CatalogEntry{
-		StreamID:   binary.LittleEndian.Uint64(rec[28:]),
-		CategoryID: binary.LittleEndian.Uint64(rec[36:]),
-		SeriesID:   binary.LittleEndian.Uint64(rec[44:]),
-		Title:      info.Title,
-		Show:       info.Title[:showLen],
-		TvgID:      info.TvgID,
-		Group:      info.Group,
-		Logo:       info.LogoURL,
-		Type:       catalogKindName(kind),
-		Ext:        string(rec[catalogRecordFixedLen : catalogRecordFixedLen+extLen]),
-		Season:     int(binary.LittleEndian.Uint16(rec[56:])),
-		Episode:    int(binary.LittleEndian.Uint16(rec[58:])),
+		StreamID:    binary.LittleEndian.Uint64(rec[28:]),
+		CategoryID:  binary.LittleEndian.Uint64(rec[36:]),
+		SeriesID:    binary.LittleEndian.Uint64(rec[44:]),
+		Title:       info.Title,
+		Show:        info.Title[:showLen],
+		TvgID:       info.TvgID,
+		Group:       info.Group,
+		Logo:        info.LogoURL,
+		Type:        catalogKindName(kind),
+		Ext:         string(rec[catalogRecordFixedLen : catalogRecordFixedLen+extLen]),
+		Season:      int(binary.LittleEndian.Uint16(rec[56:])),
+		Episode:     int(binary.LittleEndian.Uint16(rec[58:])),
+		CatchupDays: int(binary.LittleEndian.Uint16(rec[62:])),
 	}
 	return entry, nil
 }

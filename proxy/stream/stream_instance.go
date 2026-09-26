@@ -67,9 +67,9 @@ func (instance *StreamInstance) ProxyStream(
 	handler := NewStreamHandler(instance.config, coordinator, instance.logger)
 
 	var result StreamResult
-	if (lbResult.Response.StatusCode == 206 && !utils.IsATSMedia(lbResult.Response)) || strings.HasSuffix(lbResult.URL, ".mp4") {
-		handler.logger.Logf("VOD request detected from: %s", streamClient.Request.RemoteAddr)
-		handler.logger.Warn("VODs do not support shared buffer.")
+	if lbResult.Direct || (lbResult.Response.StatusCode == 206 && !utils.IsATSMedia(lbResult.Response)) || strings.HasSuffix(lbResult.URL, ".mp4") {
+		handler.logger.Logf("Direct stream request detected from: %s", streamClient.Request.RemoteAddr)
+		handler.logger.Warn("Direct streams do not support shared buffer.")
 		result = handler.HandleDirectStream(ctx, lbResult, streamClient)
 	} else {
 		if _, ok := instance.Cm.Invalid.Load(lbResult.URL); !ok {

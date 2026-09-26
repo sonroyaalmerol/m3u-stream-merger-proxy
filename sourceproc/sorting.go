@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -468,7 +469,7 @@ func mergeStreamInfoAttributes(base, new *StreamInfo) *StreamInfo {
 	}
 
 	for _, u := range new.URLs {
-		base.AddURL(u.M3UIndex, u.LineNum, u.URL)
+		base.AddStreamURL(u)
 	}
 
 	if new.SourceM3U < base.SourceM3U || (new.SourceM3U == base.SourceM3U && new.SourceIndex < base.SourceIndex) {
@@ -493,6 +494,8 @@ func appendBytes(dst, b []byte) []byte {
 	return append(dst, b...)
 }
 
+const catchupTrailerMagic = 0x31505543
+
 func appendStreamInfo(dst []byte, s *StreamInfo) []byte {
 	dst = appendStr(dst, s.Title)
 	dst = appendStr(dst, s.TvgID)
@@ -503,10 +506,18 @@ func appendStreamInfo(dst []byte, s *StreamInfo) []byte {
 	dst = appendStr(dst, s.SourceM3U)
 	dst = binary.LittleEndian.AppendUint32(dst, uint32(int32(s.SourceIndex)))
 	dst = binary.LittleEndian.AppendUint32(dst, uint32(len(s.URLs)))
+	hasCatchup := false
 	for _, u := range s.URLs {
 		dst = appendStr(dst, u.M3UIndex)
 		dst = binary.LittleEndian.AppendUint32(dst, uint32(int32(u.LineNum)))
 		dst = appendStr(dst, u.URL)
+		hasCatchup = hasCatchup || u.CatchupDays > 0
+	}
+	if hasCatchup {
+		dst = binary.LittleEndian.AppendUint32(dst, catchupTrailerMagic)
+		for _, u := range s.URLs {
+			dst = binary.LittleEndian.AppendUint16(dst, uint16(min(max(u.CatchupDays, 0), math.MaxUint16)))
+		}
 	}
 
 	return dst
@@ -516,6 +527,16 @@ func appendStreamInfo(dst []byte, s *StreamInfo) []byte {
 type binReader struct {
 	b   []byte
 	off int
+}
+
+func (r *binReader) u16() (uint16, error) {
+	if r.off+2 > len(r.b) {
+		return 0, errShortRecord
+	}
+	v := binary.LittleEndian.Uint16(r.b[r.off:])
+	r.off += 2
+
+	return v, nil
 }
 
 func (r *binReader) u32() (uint32, error) {
@@ -613,8 +634,12 @@ func decodeStreamInfoInto(rec []byte, s *StreamInfo, urlBuf []StreamURL) (int, e
 	if uint64(n) > uint64(len(rec)-r.off)/12 {
 		return 0, errShortRecord
 	}
+	s.CatchupDays = 0
 	if n == 0 {
 		s.URLs = nil
+		if r.off != len(rec) {
+			return 0, errShortRecord
+		}
 		return 0, nil
 	}
 
@@ -634,8 +659,28 @@ func decodeStreamInfoInto(rec []byte, s *StreamInfo, urlBuf []StreamURL) (int, e
 		if urls[i].URL, err = r.str(); err != nil {
 			return 0, err
 		}
+		urls[i].CatchupDays = 0
 	}
 	s.URLs = urls
+
+	if r.off == len(rec) {
+		return len(urls), nil
+	}
+	magic, err := r.u32()
+	if err != nil || magic != catchupTrailerMagic {
+		return 0, errShortRecord
+	}
+	for i := range urls {
+		days, err := r.u16()
+		if err != nil {
+			return 0, err
+		}
+		urls[i].CatchupDays = int(days)
+		s.CatchupDays = max(s.CatchupDays, int(days))
+	}
+	if r.off != len(rec) {
+		return 0, errShortRecord
+	}
 
 	return len(urls), nil
 }

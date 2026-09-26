@@ -13,11 +13,13 @@ type RawCategory struct {
 }
 
 type RawLiveStream struct {
-	Name         string    `json:"name"`
-	StreamID     rawNumber `json:"stream_id"`
-	StreamIcon   string    `json:"stream_icon"`
-	EPGChannelID string    `json:"epg_channel_id"`
-	CategoryID   rawNumber `json:"category_id"`
+	Name              string    `json:"name"`
+	StreamID          rawNumber `json:"stream_id"`
+	StreamIcon        string    `json:"stream_icon"`
+	EPGChannelID      string    `json:"epg_channel_id"`
+	CategoryID        rawNumber `json:"category_id"`
+	TVArchive         rawNumber `json:"tv_archive"`
+	TVArchiveDuration rawNumber `json:"tv_archive_duration"`
 }
 
 type RawVodStream struct {

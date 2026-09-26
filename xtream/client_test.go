@@ -33,7 +33,7 @@ func fakePanel() http.Handler {
 		case "get_series_categories":
 			_, _ = fmt.Fprint(w, `[{"category_id":"3","category_name":"Drama","parent_id":0}]`)
 		case "get_live_streams":
-			_, _ = fmt.Fprint(w, `[{"num":1,"name":"CNN","stream_type":"live","stream_id":100,"stream_icon":"http://img/cnn.png","epg_channel_id":"cnn.id","category_id":"1","tv_archive":"","tv_archive_duration":""}]`)
+			_, _ = fmt.Fprint(w, `[{"num":1,"name":"CNN","stream_type":"live","stream_id":100,"stream_icon":"http://img/cnn.png","epg_channel_id":"cnn.id","category_id":"1","tv_archive":"1","tv_archive_duration":"7"}]`)
 		case "get_vod_streams":
 			_, _ = fmt.Fprint(w, `[{"num":1,"name":"Cool Movie","stream_type":"movie","stream_id":200,"stream_icon":"http://img/m.png","category_id":"2","container_extension":"mp4"}]`)
 		case "get_series":
@@ -64,7 +64,7 @@ func TestFetchPlaylistLines(t *testing.T) {
 
 	joined := strings.Join(lines, "\n")
 	wantSubstrings := []string{
-		`#EXTINF:-1 tvg-name="CNN" tvg-id="cnn.id" tvg-type="live" tvg-logo="http://img/cnn.png" tvg-group="News" group-title="News",CNN`,
+		`#EXTINF:-1 tvg-name="CNN" tvg-id="cnn.id" tvg-type="live" tvg-logo="http://img/cnn.png" tvg-group="News" group-title="News" catchup="xtream" catchup-days="7",CNN`,
 		fmt.Sprintf("%s/live/user/pass/100.ts", server.URL),
 		`#EXTINF:-1 tvg-name="Cool Movie" tvg-type="movie" tvg-logo="http://img/m.png" tvg-group="Movies" group-title="Movies",Cool Movie`,
 		fmt.Sprintf("%s/movie/user/pass/200.mp4", server.URL),
@@ -76,6 +76,20 @@ func TestFetchPlaylistLines(t *testing.T) {
 	}
 	if strings.Contains(joined, "Test Show") {
 		t.Fatal("series episodes must not be fetched at ingest")
+	}
+}
+
+func TestCatchupURL(t *testing.T) {
+	got, ok := CatchupURL("https://panel.example/base/live/user/pass/100.ts?token=x", "2026-09-25:12-30", 90)
+	if !ok {
+		t.Fatal("expected Xtream live URL to be recognized")
+	}
+	want := "https://panel.example/base/timeshift/user/pass/90/2026-09-25:12-30/100.ts?token=x"
+	if got != want {
+		t.Fatalf("CatchupURL() = %q, want %q", got, want)
+	}
+	if _, ok := CatchupURL("https://panel.example/channel/100.ts", "2026-09-25:12-30", 90); ok {
+		t.Fatal("expected non-Xtream URL to be rejected")
 	}
 }
 

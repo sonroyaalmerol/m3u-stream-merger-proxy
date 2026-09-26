@@ -16,7 +16,7 @@ Ingestion runs on boot (`SYNC_ON_BOOT=true`, default) and on the `SYNC_CRON` sch
 
 - Each configured source (`M3U_URL_X` / `XTREAM_URL_X`) is downloaded line-by-line and streamed to parsers - the full file is never held in memory (`sourceproc/downloader.go`, `sourceproc/processor.go`).
 - Xtream sources are converted to M3U text first: `get_live_streams`, `get_vod_streams` and `get_series` are fetched from the provider and rendered as M3U lines (`xtream/`). Series are rendered lazily (see below).
-- The parser (`sourceproc/parser.go`) walks `#EXTINF` attribute pairs (`tvg-id`, `tvg-chno`/`channel-id`/`channel-number`, `tvg-name`, `tvg-type`, `tvg-group`/`group-title`, `tvg-logo`), then the display name after the last unquoted comma. A stream without a title is dropped.
+- The parser (`sourceproc/parser.go`) walks `#EXTINF` attribute pairs (`tvg-id`, `tvg-chno`/`channel-id`/`channel-number`, `tvg-name`, `tvg-type`, `tvg-group`/`group-title`, `tvg-logo`, `catchup`, `catchup-days`), then the display name after the last unquoted comma. A stream without a title is dropped.
 - Each parsed stream becomes a `StreamInfo` (`sourceproc/stream_info.go`) carrying its provider index (`SourceM3U`, the `X` of `M3U_URL_X`), the physical line number in that provider's file (`SourceIndex`), and the URL list. Streams are then handed to the spill sorter (`processor.go` `addStream`).
 - `M3U_FILTER_INCLUDE` / `M3U_FILTER_EXCLUDE` regex filters drop streams before they reach the sorter (`sourceproc/filter.go`).
 - Parsing is parallel: one producer goroutine per source, `NumCPU x 2` parser workers consuming a buffered channel.

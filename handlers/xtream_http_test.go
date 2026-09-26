@@ -364,6 +364,50 @@ func TestXtreamGetPHPOutputFormat(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), ".m3u8\n")
 }
 
+func TestXtreamCatchup(t *testing.T) {
+	var gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "video/mp2t")
+		_, _ = w.Write([]byte("archived stream"))
+	}))
+	defer upstream.Close()
+
+	m3u := fmt.Sprintf("#EXTM3U\n#EXTINF:-1 tvg-id=%q tvg-name=%q tvg-type=%q catchup=%q catchup-days=%q,CNN\n%s/live/provider/secret/100.ts\n#EXTINF:-1 tvg-id=%q tvg-name=%q tvg-type=%q,CNN\nhttp://127.0.0.1:1/live/other/secret/100.ts\n",
+		"cnn.id", "CNN", "live", "xtream", "7", upstream.URL, "cnn.id", "CNN", "live")
+	h := setupXtreamHandlerFrom(t, m3u)
+
+	rec := playerAPIRequest(t, h, "action=get_live_streams")
+	var streams []xtream.LiveStreamOut
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &streams))
+	require.Len(t, streams, 1)
+	assert.Equal(t, 1, streams[0].TVArchive)
+	assert.Equal(t, 7, streams[0].TVArchiveDuration)
+
+	id := sourceproc.StreamIDFor("CNN")
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/timeshift/u/p/90/2026-09-25:12-30/%d.ts", id), nil)
+	rec = httptest.NewRecorder()
+	h.ServeCatchup(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "/timeshift/provider/secret/90/2026-09-25:12-30/100.ts", gotPath)
+	assert.Equal(t, "archived stream", rec.Body.String())
+
+	for _, path := range []string{
+		fmt.Sprintf("/timeshift/u/p/0/2026-09-25:12-30/%d.ts", id),
+		fmt.Sprintf("/timeshift/u/p/90/not-a-date/%d.ts", id),
+	} {
+		rec = httptest.NewRecorder()
+		h.ServeCatchup(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	path := fmt.Sprintf("/timeshift/u/p/10081/2026-09-25:12-30/%d.ts", id)
+	h.ServeCatchup(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
 func TestXtreamPlayerAPIPostForm(t *testing.T) {
 	h := setupXtreamHandler(t)
 	t.Setenv("CREDENTIALS", "u:p")
@@ -443,6 +487,35 @@ func TestXtreamShortEPG(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &table))
 	require.Len(t, table["epg_listings"], 1)
 	assert.Equal(t, 1, table["epg_listings"][0].NowPlaying)
+}
+
+func TestXtreamCatchupEPG(t *testing.T) {
+	m3u := `#EXTM3U
+#EXTINF:-1 tvg-id="cnn.id" tvg-name="CNN" tvg-type="live" catchup="xtream" catchup-days="7",CNN
+http://panel/live/u/p/100.ts
+`
+	h := setupXtreamHandlerFrom(t, m3u)
+	require.NoError(t, os.MkdirAll(config.GetEPGDirPath(), 0755))
+	now := time.Now().UTC()
+	epgXML := fmt.Sprintf(`<?xml version="1.0"?><tv>
+<programme start="%s +0000" stop="%s +0000" channel="cnn.id"><title>Archived</title></programme>
+<programme start="%s +0000" stop="%s +0000" channel="cnn.id"><title>Current</title></programme>
+</tv>`,
+		now.Add(-3*time.Hour).Format("20060102150405"), now.Add(-2*time.Hour).Format("20060102150405"),
+		now.Add(-time.Hour).Format("20060102150405"), now.Add(time.Hour).Format("20060102150405"))
+	require.NoError(t, os.WriteFile(config.GetEPGPath(), []byte(epgXML), 0644))
+
+	id := strconv.FormatUint(sourceproc.StreamIDFor("CNN"), 10)
+	rec := playerAPIRequest(t, h, "action=get_simple_data_table&stream_id="+id)
+	var table map[string][]xtream.EPGListingOut
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &table))
+	require.Len(t, table["epg_listings"], 2)
+	assert.Equal(t, 1, table["epg_listings"][0].HasArchive)
+
+	rec = playerAPIRequest(t, h, "action=get_short_epg&stream_id="+id)
+	var short map[string][]xtream.EPGListingOut
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &short))
+	assert.Len(t, short["epg_listings"], 1)
 }
 
 func TestXtreamXMLTV(t *testing.T) {

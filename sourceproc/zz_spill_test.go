@@ -19,8 +19,9 @@ func TestStreamInfoCodecRoundTrip(t *testing.T) {
 		Group:       "News",
 		SourceM3U:   "2",
 		SourceIndex: 7,
+		CatchupDays: 7,
 		URLs: []StreamURL{
-			{M3UIndex: "1", LineNum: 3, URL: "http://a/1.ts"},
+			{M3UIndex: "1", LineNum: 3, URL: "http://a/1.ts", CatchupDays: 7},
 			{M3UIndex: "2", LineNum: 900001, URL: ""},
 		},
 	}
@@ -34,10 +35,25 @@ func TestStreamInfoCodecRoundTrip(t *testing.T) {
 		t.Fatalf("round trip mismatch:\n got %+v\nwant %+v", got, want)
 	}
 
+	legacy := *want
+	legacy.CatchupDays = 0
+	legacy.URLs = append([]StreamURL(nil), want.URLs...)
+	legacy.URLs[0].CatchupDays = 0
+	legacyRec := appendStreamInfo(nil, &legacy)
 	for n := range len(rec) {
+		if n == len(legacyRec) {
+			continue
+		}
 		if err := decodeStreamInfo(rec[:n], new(StreamInfo)); err == nil {
 			t.Fatalf("truncation at %d decoded without error", n)
 		}
+	}
+	var legacyGot StreamInfo
+	if err := decodeStreamInfo(legacyRec, &legacyGot); err != nil {
+		t.Fatal("legacy decode:", err)
+	}
+	if !reflect.DeepEqual(&legacy, &legacyGot) {
+		t.Fatalf("legacy round trip mismatch:\n got %+v\nwant %+v", legacyGot, legacy)
 	}
 
 	var empty StreamInfo

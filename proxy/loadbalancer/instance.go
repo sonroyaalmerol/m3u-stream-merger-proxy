@@ -89,6 +89,7 @@ type LoadBalancerResult struct {
 	URL      string
 	Index    string
 	SubIndex string
+	Direct   bool
 }
 
 func (instance *LoadBalancerInstance) setHealthClient() {
@@ -152,32 +153,53 @@ func (instance *LoadBalancerInstance) GetStreamId(req *http.Request) string {
 }
 
 func (instance *LoadBalancerInstance) Balance(ctx context.Context, req *http.Request) (*LoadBalancerResult, error) {
+	if err := validateBalanceRequest(ctx, req); err != nil {
+		return nil, err
+	}
+
+	streamID := instance.GetStreamId(req)
+	if err := instance.fetchBackendUrls(streamID); err != nil {
+		return nil, fmt.Errorf("error fetching sources for: %s", streamID)
+	}
+
+	return instance.balance(ctx, req, streamID)
+}
+
+func (instance *LoadBalancerInstance) BalanceStream(ctx context.Context, req *http.Request, streamID string, info *sourceproc.StreamInfo) (*LoadBalancerResult, error) {
+	if err := validateBalanceRequest(ctx, req); err != nil {
+		return nil, err
+	}
+	if streamID == "" || info == nil || len(info.URLs) == 0 {
+		return nil, fmt.Errorf("stream info cannot be empty")
+	}
+	instance.SetStreamInfo(info)
+
+	return instance.balance(ctx, req, streamID)
+}
+
+func validateBalanceRequest(ctx context.Context, req *http.Request) error {
 	if ctx == nil {
-		return nil, fmt.Errorf("context cannot be nil")
+		return fmt.Errorf("context cannot be nil")
 	}
 	if req == nil {
-		return nil, fmt.Errorf("req cannot be nil")
+		return fmt.Errorf("req cannot be nil")
 	}
 	if req.Method == "" {
-		return nil, fmt.Errorf("req.Method cannot be empty")
+		return fmt.Errorf("req.Method cannot be empty")
 	}
 	if req.URL == nil {
-		return nil, fmt.Errorf("req.URL cannot be empty")
+		return fmt.Errorf("req.URL cannot be empty")
 	}
+	return nil
+}
 
-	streamId := instance.GetStreamId(req)
-
-	err := instance.fetchBackendUrls(streamId)
-	if err != nil {
-		return nil, fmt.Errorf("error fetching sources for: %s", streamId)
-	}
-
+func (instance *LoadBalancerInstance) balance(ctx context.Context, req *http.Request, streamID string) (*LoadBalancerResult, error) {
 	backoff := proxy.NewBackoffStrategy(time.Duration(instance.config.RetryWait)*time.Second, 0)
 
 	for lap := 0; lap < instance.config.MaxRetries || instance.config.MaxRetries == 0; lap++ {
 		instance.logger.Debugf("Stream attempt %d out of %d", lap+1, instance.config.MaxRetries)
 
-		result, err := instance.tryAllStreams(ctx, req, streamId)
+		result, err := instance.tryAllStreams(ctx, req, streamID)
 		if err == nil {
 			return result, nil
 		}
@@ -187,7 +209,7 @@ func (instance *LoadBalancerInstance) Balance(ctx context.Context, req *http.Req
 			return nil, fmt.Errorf("cancelling load balancer")
 		}
 
-		instance.clearTested(streamId)
+		instance.clearTested(streamID)
 
 		timer := time.NewTimer(backoff.Next())
 		select {

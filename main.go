@@ -125,6 +125,7 @@ func main() {
 	for _, prefix := range []string{"/live/", "/movie/", "/series/"} {
 		http.HandleFunc(prefix, logXtream(xtreamHandler.ServeStream))
 	}
+	http.HandleFunc("/timeshift/", logXtream(xtreamHandler.ServeCatchup))
 
 	http.HandleFunc("/", rootHandler(xtreamHandler.ServePlayerAPI, xtreamHandler.ServeStream))
 
@@ -132,7 +133,7 @@ func main() {
 	logger.Default.Log("Playlist Endpoint is running (`/playlist.m3u`)")
 	logger.Default.Log("Stream Endpoint is running (`/p/{originalBasePath}/{streamID}.{fileExt}`)")
 	logger.Default.Log("EPG Endpoint is running (`/epg.xml`)")
-	logger.Default.Log("Xtream API is running (`/player_api.php`, `/panel_api.php`, `/live|movie|series/{user}/{pass}/{id}.{ext}`, `/{user}/{pass}/{id}`, `/get.php`, `/xmltv.php`)")
+	logger.Default.Log("Xtream API is running (`/player_api.php`, `/panel_api.php`, `/live|movie|series/{user}/{pass}/{id}.{ext}`, `/timeshift/{user}/{pass}/{duration}/{start}/{id}.{ext}`, `/{user}/{pass}/{id}`, `/get.php`, `/xmltv.php`)")
 	setup, err := newTLSSetup(logger.Default)
 	if err != nil {
 		logger.Default.Fatalf("TLS setup error: %v", err)

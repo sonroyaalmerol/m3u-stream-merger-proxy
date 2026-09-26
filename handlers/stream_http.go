@@ -14,6 +14,7 @@ import (
 	"m3u-stream-merger/proxy"
 	"m3u-stream-merger/proxy/client"
 	"m3u-stream-merger/proxy/stream/failovers"
+	"m3u-stream-merger/sourceproc"
 	"m3u-stream-merger/utils"
 )
 
@@ -30,9 +31,11 @@ func NewStreamHTTPHandler(manager ProxyInstance, logger logger.Logger) *StreamHT
 }
 
 func (h *StreamHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	streamClient := client.NewStreamClient(w, r)
+	h.handleStream(r.Context(), client.NewStreamClient(w, r))
+}
 
-	h.handleStream(r.Context(), streamClient)
+func (h *StreamHTTPHandler) ServeCatchupHTTP(w http.ResponseWriter, r *http.Request, streamID string, info *sourceproc.StreamInfo) {
+	h.handleStreamInfo(r.Context(), client.NewStreamClient(w, r), streamID, info, true)
 }
 
 func (h *StreamHTTPHandler) ServeSegmentHTTP(w http.ResponseWriter, r *http.Request) {
@@ -51,36 +54,43 @@ func (h *StreamHTTPHandler) extractStreamURL(urlPath string) string {
 }
 
 func (h *StreamHTTPHandler) handleStream(ctx context.Context, streamClient *client.StreamClient) {
-	r := streamClient.Request
-
-	streamURL := h.extractStreamURL(r.URL.Path)
-	if streamURL == "" {
-		h.logger.Logf("Invalid m3uID for request from %s", r.RemoteAddr)
+	streamID := h.extractStreamURL(streamClient.Request.URL.Path)
+	if streamID == "" {
+		h.logger.Logf("Invalid m3uID for request from %s", streamClient.Request.RemoteAddr)
 		return
 	}
+	h.handleStreamInfo(ctx, streamClient, streamID, nil, false)
+}
 
-	coordinator := h.manager.GetStreamRegistry().GetOrCreateCoordinator(streamURL)
+func (h *StreamHTTPHandler) handleStreamInfo(ctx context.Context, streamClient *client.StreamClient, streamID string, info *sourceproc.StreamInfo, finite bool) {
+	r := streamClient.Request
+	coordinator := h.manager.GetStreamRegistry().GetOrCreateCoordinator(streamID)
 	lbInstance := h.manager.NewLBInstance()
 
 	for {
 		lbResult := coordinator.GetWriterLBResult()
 		var err error
 		if lbResult == nil {
-			h.logger.Debugf("No existing shared buffer found for %s", streamURL)
+			h.logger.Debugf("No existing shared buffer found for %s", streamID)
 			h.logger.Debugf("Client %s executing load balancer.", r.RemoteAddr)
-			lbResult, err = h.manager.LoadBalancer(ctx, r, lbInstance)
+			if info == nil {
+				lbResult, err = h.manager.LoadBalancer(ctx, r, lbInstance)
+			} else {
+				lbResult, err = h.manager.LoadBalancerStream(ctx, r, lbInstance, streamID, info)
+				if lbResult != nil {
+					lbResult.Direct = true
+				}
+			}
 			if err != nil {
-				h.logger.Logf("Load balancer error for stream %s: %v", streamURL, err)
+				h.logger.Logf("Load balancer error for stream %s: %v", streamID, err)
 				return
 			}
-		} else {
-			if _, ok := h.manager.GetConcurrencyManager().Invalid.Load(lbResult.URL); !ok {
-				h.logger.Logf("Existing shared buffer found for %s", streamURL)
-			}
+		} else if _, ok := h.manager.GetConcurrencyManager().Invalid.Load(lbResult.URL); !ok {
+			h.logger.Logf("Existing shared buffer found for %s", streamID)
 		}
 
 		exitStatus := make(chan int, 1)
-		h.logger.Logf("Proxying stream %s via M3U_%s|%s", streamURL, lbResult.Index, lbResult.SubIndex)
+		h.logger.Logf("Proxying stream %s via M3U_%s|%s", streamID, lbResult.Index, lbResult.SubIndex)
 
 		proxyCtx, cancel := context.WithCancel(ctx)
 		go func() {
@@ -96,6 +106,9 @@ func (h *StreamHTTPHandler) handleStream(ctx context.Context, streamClient *clie
 		case code = <-exitStatus:
 		}
 
+		if finite && code == proxy.StatusEOF {
+			return
+		}
 		if h.shouldExcludeURL(code) {
 			lbInstance.ExcludeURL(lbResult.URL)
 		}

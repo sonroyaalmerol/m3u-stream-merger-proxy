@@ -310,17 +310,23 @@ func writeJSONArray[T any](w http.ResponseWriter, iter func(yield func(T) bool))
 
 func liveStreamOut(position int, e sourceproc.CatalogEntry) xtream.LiveStreamOut {
 	catID := jsonNumber(e.CategoryID)
+	tvArchive := 0
+	if e.CatchupDays > 0 {
+		tvArchive = 1
+	}
 	return xtream.LiveStreamOut{
-		Num:          position,
-		Name:         e.Title,
-		StreamType:   xtream.TypeLive,
-		StreamID:     jsonNumber(e.StreamID),
-		StreamIcon:   e.Logo,
-		EPGChannelID: e.TvgID,
-		Added:        "0",
-		IsAdult:      "0",
-		CategoryID:   string(catID),
-		CategoryIDs:  []json.Number{catID},
+		Num:               position,
+		Name:              e.Title,
+		StreamType:        xtream.TypeLive,
+		StreamID:          jsonNumber(e.StreamID),
+		StreamIcon:        e.Logo,
+		EPGChannelID:      e.TvgID,
+		Added:             "0",
+		IsAdult:           "0",
+		CategoryID:        string(catID),
+		CategoryIDs:       []json.Number{catID},
+		TVArchive:         tvArchive,
+		TVArchiveDuration: e.CatchupDays,
 	}
 }
 
@@ -542,6 +548,7 @@ func (h *XtreamHTTPHandler) epgListings(streamID uint64, limit int, dataTable bo
 	listings := make([]xtream.EPGListingOut, 0, limit)
 	var p xmltvProgramme
 	unixNow := time.Now().Unix()
+	archiveCutoff := unixNow - int64(entry.CatchupDays)*24*60*60
 	for len(listings) < limit {
 		tok, err := dec.Token()
 		if err != nil {
@@ -559,7 +566,7 @@ func (h *XtreamHTTPHandler) epgListings(streamID uint64, limit int, dataTable bo
 		}
 		startStr, startTS := xmltvTime(p.Start)
 		end, endTS := xmltvTime(p.Stop)
-		if endTS != 0 && endTS <= unixNow {
+		if endTS != 0 && endTS <= unixNow && (!dataTable || entry.CatchupDays == 0 || endTS <= archiveCutoff) {
 			continue
 		}
 		lang := p.Title.Lang
@@ -569,6 +576,10 @@ func (h *XtreamHTTPHandler) epgListings(streamID uint64, limit int, dataTable bo
 		nowPlaying := 0
 		if startTS <= unixNow && unixNow < endTS {
 			nowPlaying = 1
+		}
+		hasArchive := 0
+		if entry.CatchupDays > 0 && startTS >= archiveCutoff && startTS <= unixNow {
+			hasArchive = 1
 		}
 		listings = append(listings, xtream.EPGListingOut{
 			ID:             idStr(sourceproc.StreamIDFor(entry.TvgID + "|" + p.Start)),
@@ -583,6 +594,7 @@ func (h *XtreamHTTPHandler) epgListings(streamID uint64, limit int, dataTable bo
 			StopTimestamp:  strconv.FormatInt(endTS, 10),
 			Stop:           end,
 			NowPlaying:     nowPlaying,
+			HasArchive:     hasArchive,
 		})
 	}
 
@@ -664,7 +676,69 @@ func (h *XtreamHTTPHandler) ServeStream(w http.ResponseWriter, r *http.Request) 
 	h.streamHandler.ServeHTTP(w, r)
 }
 
-// serveByteRange copies a ranged VOD request directly, since the shared live buffer has no notion of a byte offset.
+func (h *XtreamHTTPHandler) ServeCatchup(w http.ResponseWriter, r *http.Request) {
+	segments := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(segments) != 6 || segments[0] != "timeshift" {
+		http.Error(w, "Invalid catch-up path", http.StatusBadRequest)
+		return
+	}
+	if !h.auth.allowedByNetwork(r) && !h.auth.Authorize(segments[1], segments[2]) {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+
+	duration, err := strconv.Atoi(segments[3])
+	if err != nil || duration < 1 {
+		http.Error(w, "Invalid catch-up duration", http.StatusBadRequest)
+		return
+	}
+	start := segments[4]
+	if _, err := time.Parse("2006-01-02:15-04", start); err != nil {
+		http.Error(w, "Invalid catch-up start", http.StatusBadRequest)
+		return
+	}
+	idPart := segments[5]
+	requestedExt := path.Ext(idPart)
+	idText := strings.TrimSuffix(idPart, requestedExt)
+	id, err := strconv.ParseUint(idText, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid stream id", http.StatusBadRequest)
+		return
+	}
+
+	entry := h.catalog.FindStream(id)
+	if entry == nil || entry.Slug == "" || entry.Type != xtream.TypeLive || entry.CatchupDays == 0 {
+		http.Error(w, "Catch-up stream not found", http.StatusNotFound)
+		return
+	}
+	info, err := sourceproc.GetStreamBySlug(entry.Slug)
+	if err != nil || info == nil {
+		http.Error(w, "Catch-up stream not found", http.StatusNotFound)
+		return
+	}
+
+	catchupInfo := *info
+	catchupInfo.URLs = make([]sourceproc.StreamURL, 0, len(info.URLs))
+	for _, streamURL := range info.URLs {
+		if streamURL.CatchupDays < 1 || (duration-1)/1440 >= streamURL.CatchupDays {
+			continue
+		}
+		catchupURL, ok := xtream.CatchupURL(streamURL.URL, start, duration)
+		if !ok {
+			continue
+		}
+		streamURL.URL = catchupURL
+		catchupInfo.URLs = append(catchupInfo.URLs, streamURL)
+	}
+	if len(catchupInfo.URLs) == 0 {
+		http.Error(w, "Catch-up stream not found", http.StatusNotFound)
+		return
+	}
+
+	streamID := entry.Slug + "-" + sourceproc.URLKey(start+"|"+strconv.Itoa(duration))
+	h.streamHandler.ServeCatchupHTTP(w, r, streamID, &catchupInfo)
+}
+
 func (h *XtreamHTTPHandler) serveByteRange(w http.ResponseWriter, r *http.Request, slug string) bool {
 	info, err := sourceproc.GetStreamBySlug(slug)
 	if err != nil || info == nil {

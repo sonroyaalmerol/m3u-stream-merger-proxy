@@ -11,6 +11,7 @@ import (
 	"m3u-stream-merger/proxy/loadbalancer"
 	"m3u-stream-merger/proxy/stream/buffer"
 	"m3u-stream-merger/proxy/stream/config"
+	"m3u-stream-merger/sourceproc"
 	"m3u-stream-merger/store"
 	"net/http"
 	"net/http/httptest"
@@ -40,6 +41,10 @@ func (m *mockStreamManager) LoadBalancer(ctx context.Context, req *http.Request,
 		return m.loadBalancerFunc(ctx, req, instance)
 	}
 	return nil, errors.New("loadBalancerFunc not implemented")
+}
+
+func (m *mockStreamManager) LoadBalancerStream(ctx context.Context, req *http.Request, instance *loadbalancer.LoadBalancerInstance, streamID string, info *sourceproc.StreamInfo) (*loadbalancer.LoadBalancerResult, error) {
+	return instance.BalanceStream(ctx, req, streamID, info)
 }
 
 func (m *mockStreamManager) ProxyStream(ctx context.Context, coordinator *buffer.StreamCoordinator, lbRes *loadbalancer.LoadBalancerResult, sClient *client.StreamClient, exitStatus chan<- int) {

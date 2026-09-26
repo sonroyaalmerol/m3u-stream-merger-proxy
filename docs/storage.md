@@ -45,6 +45,7 @@ Title, TvgID, TvgChNo, TvgType, LogoURL, Group, SourceM3U  (strings)
 SourceIndex                                                (int32)
 URL count                                                  (uint32)
   per URL: M3UIndex (string), LineNum (int32), URL (string)
+optional catch-up trailer: magic (uint32), URL count (uint32), days per URL (uint16)
 ```
 
 Partition files (`p0000.bin`...) exist only during a sync pass; the `sort/` directory is wiped at pass start and end.
@@ -74,7 +75,7 @@ offset  len  field
 58      2    episode (uint16)
 60      1    kind: 1=live 2=movie 3=series
 61      1    ext length  (e.g. ".ts"; from first URL's path)
-62      2    padding
+62      2    catch-up days (uint16)
 64      var  ext bytes, then StreamInfo payload (same encoding as spill records)
 ```
 
