@@ -9,6 +9,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -688,12 +689,13 @@ func (h *XtreamHTTPHandler) ServeCatchup(w http.ResponseWriter, r *http.Request)
 	}
 
 	duration, err := strconv.Atoi(segments[3])
-	if err != nil || duration < 1 {
+	if err != nil || duration < 1 || duration > 65535*1440 {
 		http.Error(w, "Invalid catch-up duration", http.StatusBadRequest)
 		return
 	}
-	start := segments[4]
-	if _, err := time.Parse("2006-01-02:15-04", start); err != nil {
+	startText := segments[4]
+	start, err := time.ParseInLocation("2006-01-02:15-04", startText, time.Local)
+	if err != nil {
 		http.Error(w, "Invalid catch-up start", http.StatusBadRequest)
 		return
 	}
@@ -717,13 +719,36 @@ func (h *XtreamHTTPHandler) ServeCatchup(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	h.serveCatchup(w, r, entry.Slug, info, start, duration*60)
+}
+
+func (h *XtreamHTTPHandler) ServeM3UCatchup(w http.ResponseWriter, r *http.Request) {
+	slug := strings.TrimPrefix(r.URL.Path, "/p/catchup/")
+	startUnix, startErr := strconv.ParseInt(r.URL.Query().Get("start"), 10, 64)
+	duration64, durationErr := strconv.ParseInt(r.URL.Query().Get("duration"), 10, 32)
+	if slug == "" || strings.Contains(slug, "/") || startErr != nil || durationErr != nil || duration64 < 1 || startUnix > math.MaxInt64-duration64 {
+		http.Error(w, "Invalid catch-up request", http.StatusBadRequest)
+		return
+	}
+	duration := int(duration64)
+
+	info, err := sourceproc.GetStreamBySlug(slug)
+	if err != nil || info == nil || info.CatchupDays == 0 {
+		http.Error(w, "Catch-up stream not found", http.StatusNotFound)
+		return
+	}
+
+	h.serveCatchup(w, r, slug, info, time.Unix(startUnix, 0), duration)
+}
+
+func (h *XtreamHTTPHandler) serveCatchup(w http.ResponseWriter, r *http.Request, slug string, info *sourceproc.StreamInfo, start time.Time, duration int) {
 	catchupInfo := *info
 	catchupInfo.URLs = make([]sourceproc.StreamURL, 0, len(info.URLs))
 	for _, streamURL := range info.URLs {
-		if streamURL.CatchupDays < 1 || (duration-1)/1440 >= streamURL.CatchupDays {
+		if streamURL.CatchupDays < 1 || (duration-1)/86400 >= streamURL.CatchupDays {
 			continue
 		}
-		catchupURL, ok := xtream.CatchupURL(streamURL.URL, start, duration)
+		catchupURL, ok := streamCatchupURL(streamURL, start, duration)
 		if !ok {
 			continue
 		}
@@ -735,8 +760,56 @@ func (h *XtreamHTTPHandler) ServeCatchup(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	streamID := entry.Slug + "-" + sourceproc.URLKey(start+"|"+strconv.Itoa(duration))
-	h.streamHandler.ServeCatchupHTTP(w, r, streamID, &catchupInfo)
+	requestKey := strconv.FormatInt(start.Unix(), 10) + "|" + strconv.Itoa(duration)
+	h.streamHandler.ServeCatchupHTTP(w, r, slug+"-"+sourceproc.URLKey(requestKey), &catchupInfo)
+}
+
+func streamCatchupURL(streamURL sourceproc.StreamURL, start time.Time, duration int) (string, bool) {
+	if streamURL.CatchupType == "xtream" || streamURL.CatchupType == "xc" || streamURL.CatchupSource == "" {
+		minutes := (duration + 59) / 60
+		return xtream.CatchupURL(streamURL.URL, start.In(time.Local).Format("2006-01-02:15-04"), minutes)
+	}
+
+	startUnix := start.Unix()
+	source := strings.NewReplacer(
+		"${start}", strconv.FormatInt(startUnix, 10),
+		"${duration}", strconv.Itoa(duration),
+		"${end}", strconv.FormatInt(startUnix+int64(duration), 10),
+	).Replace(streamURL.CatchupSource)
+	if strings.Contains(source, "${") {
+		return "", false
+	}
+	if streamURL.CatchupType == "append" {
+		return validCatchupURL(streamURL.URL + source)
+	}
+	if strings.HasPrefix(source, "?") {
+		separator := "?"
+		if strings.Contains(streamURL.URL, "?") {
+			separator = "&"
+		}
+		return validCatchupURL(streamURL.URL + separator + strings.TrimPrefix(source, "?"))
+	}
+	if strings.HasPrefix(source, "&") {
+		return validCatchupURL(streamURL.URL + source)
+	}
+
+	base, err := url.Parse(streamURL.URL)
+	if err != nil {
+		return "", false
+	}
+	reference, err := url.Parse(source)
+	if err != nil {
+		return "", false
+	}
+	return validCatchupURL(base.ResolveReference(reference).String())
+}
+
+func validCatchupURL(rawURL string) (string, bool) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", false
+	}
+	return u.String(), true
 }
 
 func (h *XtreamHTTPHandler) serveByteRange(w http.ResponseWriter, r *http.Request, slug string) bool {
@@ -832,6 +905,11 @@ func (h *XtreamHTTPHandler) ServeGetPHP(w http.ResponseWriter, r *http.Request) 
 		}
 		if e.Group != "" {
 			if _, err := fmt.Fprintf(out, ` tvg-group="%s" group-title="%s"`, e.Group, e.Group); err != nil {
+				return false
+			}
+		}
+		if streamType == "live" && e.CatchupDays > 0 {
+			if _, err := fmt.Fprintf(out, ` catchup="default" catchup-days="%d" catchup-source="%s/p/catchup/%s?start=${start}&duration=${duration}"`, e.CatchupDays, baseURL, e.Slug); err != nil {
 				return false
 			}
 		}

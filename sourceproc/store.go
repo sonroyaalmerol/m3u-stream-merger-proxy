@@ -998,6 +998,7 @@ func (s *StreamStore) RangeEntries(kind string, categoryID uint64, yield func(in
 		if err != nil {
 			return true
 		}
+		entry.Slug = base64.RawURLEncoding.EncodeToString(rec[:28])
 		position++
 		return yield(position, entry)
 	}

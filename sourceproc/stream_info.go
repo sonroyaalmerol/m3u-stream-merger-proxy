@@ -9,10 +9,12 @@ import (
 
 // StreamURL: flat slice costs 87 B/stream vs 3416 B for a per-stream xsync map.
 type StreamURL struct {
-	M3UIndex    string `json:"i"`
-	LineNum     int    `json:"n"`
-	URL         string `json:"u"`
-	CatchupDays int    `json:"c,omitempty"`
+	M3UIndex      string `json:"i"`
+	LineNum       int    `json:"n"`
+	URL           string `json:"u"`
+	CatchupDays   int    `json:"c,omitempty"`
+	CatchupType   string `json:"t,omitempty"`
+	CatchupSource string `json:"s,omitempty"`
 }
 
 type StreamInfo struct {
@@ -38,6 +40,8 @@ func (s *StreamInfo) AddStreamURL(streamURL StreamURL) {
 		if s.URLs[i].M3UIndex == streamURL.M3UIndex && s.URLs[i].URL == streamURL.URL {
 			if streamURL.CatchupDays > s.URLs[i].CatchupDays {
 				s.URLs[i].CatchupDays = streamURL.CatchupDays
+				s.URLs[i].CatchupType = streamURL.CatchupType
+				s.URLs[i].CatchupSource = streamURL.CatchupSource
 			}
 			if streamURL.CatchupDays > s.CatchupDays {
 				s.CatchupDays = streamURL.CatchupDays

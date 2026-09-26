@@ -40,6 +40,9 @@ Uses the channel title or `tvg-name` (as fallback) to merge multiple identical c
      - `streamToken`: An encoded string that contains the stream title and an array of the original stream URLs associated with the stream title. This token allows the proxy to be **stateless** as the M3U itself is the "database".
      - `fileExt`: Parsed file extension from one of the original source.
 
+   - **Catch-up endpoint:**
+     - `/p/catchup/{streamToken}?start={unixTime}&duration={seconds}`: Provider-backed M3U catch-up playback generated from `catchup-source` attributes.
+
    - **Xtream API endpoints (see [Xtream API Support](#xtream-api-support)):**
      - `/player_api.php`: Full Xtream Codes API for clients like TiviMate or IPTV Smarters.
      - `/live/{user}/{pass}/{id}.ts`, `/movie/{user}/{pass}/{id}.{ext}`, `/series/{user}/{pass}/{id}.{ext}`: Stream playback.
@@ -354,7 +357,7 @@ The proxy works in both directions with the Xtream Codes API:
    - Username/password: any credentials configured in `CREDENTIALS`, or an LDAP account when `LDAP_URL` is set (leave both unset to disable auth).
    - Note: the Xtream protocol sends credentials in plaintext URLs, so enable TLS (see [TLS Configs](#tls-configs)) or put a TLS-terminating reverse proxy in front when exposing the proxy to the internet.
 
-   Supported client actions on `/player_api.php`: `get_live_categories`, `get_live_streams`, `get_vod_categories`, `get_vod_streams`, `get_series_categories`, `get_series`, `get_series_info`, `get_vod_info`, `get_short_epg`, `get_simple_data_table`. Playback uses `/live/{user}/{pass}/{id}.ts`, `/movie/{user}/{pass}/{id}.{ext}`, `/series/{user}/{pass}/{id}.{ext}` and `/timeshift/{user}/{pass}/{duration}/{start}/{id}.ts` for provider-backed catch-up. `/get.php?type=m3u_plus` exports the whole merged catalog as an Xtream-style M3U and `/xmltv.php` serves the merged XMLTV EPG.
+   Supported client actions on `/player_api.php`: `get_live_categories`, `get_live_streams`, `get_vod_categories`, `get_vod_streams`, `get_series_categories`, `get_series`, `get_series_info`, `get_vod_info`, `get_short_epg`, `get_simple_data_table`. Playback uses `/live/{user}/{pass}/{id}.ts`, `/movie/{user}/{pass}/{id}.{ext}`, `/series/{user}/{pass}/{id}.{ext}` and `/timeshift/{user}/{pass}/{duration}/{start}/{id}.ts` for provider-backed catch-up. `/get.php?type=m3u_plus` exports the whole merged catalog as an Xtream-style M3U, including proxy `catchup-source` attributes for archived channels, and `/xmltv.php` serves the merged XMLTV EPG.
 
    Streams are classified as live, movie or series from the source `tvg-type` attribute (set automatically for Xtream ingested sources) or the original URL path (`live/`, `movie/`, `series/`), defaulting to live. Series episodes are detected by `SxxExx` title patterns (e.g. `Show S01E02`), grouped into series by show name. Stream IDs are stable hashes of the stream title.
 

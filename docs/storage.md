@@ -45,7 +45,8 @@ Title, TvgID, TvgChNo, TvgType, LogoURL, Group, SourceM3U  (strings)
 SourceIndex                                                (int32)
 URL count                                                  (uint32)
   per URL: M3UIndex (string), LineNum (int32), URL (string)
-optional catch-up trailer: magic (uint32), URL count (uint32), days per URL (uint16)
+optional catch-up trailer: magic (uint32), URL count (uint32)
+  per URL: days (uint16), type (string), source template (string)
 ```
 
 Partition files (`p0000.bin`...) exist only during a sync pass; the `sort/` directory is wiped at pass start and end.

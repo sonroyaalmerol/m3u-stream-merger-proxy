@@ -489,6 +489,46 @@ func TestXtreamShortEPG(t *testing.T) {
 	assert.Equal(t, 1, table["epg_listings"][0].NowPlaying)
 }
 
+func TestM3UCatchup(t *testing.T) {
+	var gotPath, gotQuery string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "video/mp2t")
+		_, _ = w.Write([]byte("archived stream"))
+	}))
+	defer upstream.Close()
+
+	m3u := fmt.Sprintf(`#EXTM3U
+#EXTINF:-1 tvg-id="cnn.id" tvg-name="CNN" tvg-type="live" catchup="default" catchup-days="7" catchup-source="%s/archive?start=${start}&duration=${duration}&end=${end}",CNN
+%s/live.ts
+`, upstream.URL, upstream.URL)
+	h := setupXtreamHandlerFrom(t, m3u)
+	entry := h.catalog.FindStream(sourceproc.StreamIDFor("CNN"))
+	require.NotNil(t, entry)
+
+	playlistPath, err := config.GetLatestProcessedM3UPath()
+	require.NoError(t, err)
+	playlist, err := os.ReadFile(filepath.Join(config.GetProcessedDirPath(), playlistPath))
+	require.NoError(t, err)
+	assert.Contains(t, string(playlist), `catchup="default" catchup-days="7"`)
+	assert.Contains(t, string(playlist), "/p/catchup/"+entry.Slug+`?start=${start}&duration=${duration}`)
+
+	req := httptest.NewRequest(http.MethodGet, "/p/catchup/"+entry.Slug+"?start=1700000000&duration=3600", nil)
+	rec := httptest.NewRecorder()
+	h.ServeM3UCatchup(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "/archive", gotPath)
+	assert.Equal(t, "start=1700000000&duration=3600&end=1700003600", gotQuery)
+	assert.Equal(t, "archived stream", rec.Body.String())
+
+	req = httptest.NewRequest(http.MethodGet, "/get.php?username=u&password=p&type=m3u_plus", nil)
+	rec = httptest.NewRecorder()
+	h.ServeGetPHP(rec, req)
+	assert.Contains(t, rec.Body.String(), "/p/catchup/"+entry.Slug+`?start=${start}&duration=${duration}`)
+}
+
 func TestXtreamCatchupEPG(t *testing.T) {
 	m3u := `#EXTM3U
 #EXTINF:-1 tvg-id="cnn.id" tvg-name="CNN" tvg-type="live" catchup="xtream" catchup-days="7",CNN

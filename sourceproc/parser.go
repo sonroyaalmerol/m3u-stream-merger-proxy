@@ -56,6 +56,7 @@ func (p *streamParser) parseLine(line string, nextLine *LineDetails, m3uIndex st
 	p.stream = StreamInfo{URLs: p.url[:0]}
 	stream := &p.stream
 	catchupType := ""
+	catchupSource := ""
 	catchupDays := 0
 
 	forEachAttr(line, func(key, value string) {
@@ -78,6 +79,8 @@ func (p *streamParser) parseLine(line string, nextLine *LineDetails, m3uIndex st
 			catchupType = strings.ToLower(value)
 		case "catchup-days":
 			catchupDays, _ = strconv.Atoi(value)
+		case "catchup-source", "catchup-url":
+			catchupSource = value
 		}
 	})
 
@@ -91,14 +94,21 @@ func (p *streamParser) parseLine(line string, nextLine *LineDetails, m3uIndex st
 
 	stream.SourceM3U = m3uIndex
 	stream.SourceIndex = nextLine.LineNum
-	if catchupType != "xtream" || catchupDays < 1 {
+	if catchupType == "" && catchupSource != "" {
+		catchupType = "default"
+	}
+	if catchupDays < 1 || (catchupType != "xtream" && catchupType != "xc" && catchupSource == "") {
 		catchupDays = 0
+		catchupType = ""
+		catchupSource = ""
 	}
 	stream.AddStreamURL(StreamURL{
-		M3UIndex:    m3uIndex,
-		LineNum:     nextLine.LineNum,
-		URL:         cleanUrl,
-		CatchupDays: catchupDays,
+		M3UIndex:      m3uIndex,
+		LineNum:       nextLine.LineNum,
+		URL:           cleanUrl,
+		CatchupDays:   catchupDays,
+		CatchupType:   catchupType,
+		CatchupSource: catchupSource,
 	})
 
 	return stream
@@ -138,6 +148,12 @@ func (e *entrySink) str(s string) {
 	}
 }
 
+func (e *entrySink) bytes(value []byte) {
+	if e.err == nil {
+		_, e.err = e.w.Write(value)
+	}
+}
+
 func (e *entrySink) tag(key, value string) {
 	if value == "" {
 		return
@@ -153,6 +169,7 @@ func (e *entrySink) tag(key, value string) {
 // slugBuf is caller-owned scratch; a local array would escape through the writer interface.
 func writeStreamEntry(w entryWriter, baseURL string, sum [28]byte, stream *StreamInfo, slugBuf []byte) error {
 	e := entrySink{w: w}
+	slug := base64.RawURLEncoding.AppendEncode(slugBuf[:0], sum[:])
 
 	e.str("#EXTINF:-1")
 	e.tag("tvg-id", stream.TvgID)
@@ -162,17 +179,22 @@ func writeStreamEntry(w entryWriter, baseURL string, sum [28]byte, stream *Strea
 	e.tag("group-title", stream.Group)
 	e.tag("tvg-type", stream.TvgType)
 	e.tag("tvg-name", stream.Title)
+	if stream.CatchupDays > 0 {
+		e.tag("catchup", "default")
+		e.tag("catchup-days", strconv.Itoa(stream.CatchupDays))
+		e.str(` catchup-source="`)
+		e.str(baseURL)
+		e.str("/p/catchup/")
+		e.bytes(slug)
+		e.str(`?start=${start}&duration=${duration}"`)
+	}
 
 	e.str(",")
 	e.str(stream.Title)
 	e.str("\n")
 	e.str(baseURL)
 	e.str("/p/stream/")
-
-	slug := base64.RawURLEncoding.AppendEncode(slugBuf[:0], sum[:])
-	if e.err == nil {
-		_, e.err = e.w.Write(slug)
-	}
+	e.bytes(slug)
 	e.str("\n")
 
 	return e.err

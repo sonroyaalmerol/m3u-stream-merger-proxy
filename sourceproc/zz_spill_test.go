@@ -21,7 +21,7 @@ func TestStreamInfoCodecRoundTrip(t *testing.T) {
 		SourceIndex: 7,
 		CatchupDays: 7,
 		URLs: []StreamURL{
-			{M3UIndex: "1", LineNum: 3, URL: "http://a/1.ts", CatchupDays: 7},
+			{M3UIndex: "1", LineNum: 3, URL: "http://a/1.ts", CatchupDays: 7, CatchupType: "default", CatchupSource: "http://a/archive?start=${start}&duration=${duration}"},
 			{M3UIndex: "2", LineNum: 900001, URL: ""},
 		},
 	}
@@ -39,6 +39,8 @@ func TestStreamInfoCodecRoundTrip(t *testing.T) {
 	legacy.CatchupDays = 0
 	legacy.URLs = append([]StreamURL(nil), want.URLs...)
 	legacy.URLs[0].CatchupDays = 0
+	legacy.URLs[0].CatchupType = ""
+	legacy.URLs[0].CatchupSource = ""
 	legacyRec := appendStreamInfo(nil, &legacy)
 	for n := range len(rec) {
 		if n == len(legacyRec) {

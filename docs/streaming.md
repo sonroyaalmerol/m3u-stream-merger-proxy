@@ -7,6 +7,7 @@ How a playback request is served: from slug to bytes, including load balancing, 
 | Route                                                                  | Serves                                             |
 | ---------------------------------------------------------------------- | -------------------------------------------------- |
 | `/p/stream/{slug}`                                                     | TS media proxy (the URL written into the playlist) |
+| `/p/catchup/{slug}?start=...&duration=...`                             | M3U catch-up proxy                                 |
 | `/a/{url}`                                                             | upstream URL passthrough (URL-encoded in the path) |
 | `/segment/{url}`                                                       | HLS segment proxy for m3u8 sources                 |
 | `/playlist.m3u`, `/epg.xml`                                            | file sends                                         |
@@ -20,7 +21,7 @@ How a playback request is served: from slug to bytes, including load balancing, 
 3. Otherwise the load balancer (`proxy/loadbalancer/`) picks a provider URL: sources are ordered by current connection load (the concurrency manager tracks per-source up/down state, connection counts, and per-source `M3U_MAX_CONCURRENCY_X` caps), and the channel's URLs within the chosen source are tested in order.
 4. `StreamInstance.ProxyStream` (`proxy/stream/stream_instance.go`) classifies the response:
    - **Shared buffer path** (default): live TS (`video/mp2t` or `.ts`), including 206 replies to the player's `Range:` header - an upstream 206 on a TS stream is still live.
-   - **Direct path**: VOD (`206` on non-TS content, e.g. `.mp4` range requests) and finite catch-up streams are proxied 1:1 without the ring buffer. Catch-up requests rewrite only provider URLs that advertise archive support and stop successfully at EOF.
+   - **Direct path**: VOD (`206` on non-TS content, e.g. `.mp4` range requests) and finite catch-up streams are proxied 1:1 without the ring buffer. Catch-up requests expand each provider URL's `catchup-source` template, or rewrite Xtream live URLs, and stop successfully at EOF.
    - m3u8 sources are handled by the HLS failover processor, segment by segment.
 5. On handler exit codes the loop either returns, or excludes the failed URL, waits 500ms, and tries the next candidate.
 

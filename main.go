@@ -106,6 +106,7 @@ func main() {
 	http.HandleFunc("/playlist.m3u", func(w http.ResponseWriter, r *http.Request) {
 		m3uHandler.ServeHTTP(w, r)
 	})
+	http.HandleFunc("/p/catchup/", logXtream(xtreamHandler.ServeM3UCatchup))
 	http.HandleFunc("/p/", func(w http.ResponseWriter, r *http.Request) {
 		streamHandler.ServeHTTP(w, r)
 	})
@@ -131,7 +132,7 @@ func main() {
 
 	logger.Default.Logf("Server is running on port %s...", os.Getenv("PORT"))
 	logger.Default.Log("Playlist Endpoint is running (`/playlist.m3u`)")
-	logger.Default.Log("Stream Endpoint is running (`/p/{originalBasePath}/{streamID}.{fileExt}`)")
+	logger.Default.Log("Stream Endpoint is running (`/p/{originalBasePath}/{streamID}.{fileExt}`, `/p/catchup/{streamID}`)")
 	logger.Default.Log("EPG Endpoint is running (`/epg.xml`)")
 	logger.Default.Log("Xtream API is running (`/player_api.php`, `/panel_api.php`, `/live|movie|series/{user}/{pass}/{id}.{ext}`, `/timeshift/{user}/{pass}/{duration}/{start}/{id}.{ext}`, `/{user}/{pass}/{id}`, `/get.php`, `/xmltv.php`)")
 	setup, err := newTLSSetup(logger.Default)
