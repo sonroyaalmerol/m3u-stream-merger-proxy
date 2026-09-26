@@ -5,15 +5,16 @@ import (
 	"encoding/binary"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/cespare/xxhash"
 )
 
 const tvgIDsMagic = "TVGH0001"
 
-// TvgIDHash returns the 64-bit fingerprint stored for a tvg-id.
+// TvgIDHash fingerprints a tvg-id case-insensitively: providers spell the same id differently in the playlist and EPG.
 func TvgIDHash(id string) uint64 {
-	return xxhash.Sum64String(id)
+	return xxhash.Sum64String(strings.ToLower(strings.TrimSpace(id)))
 }
 
 type TvgIDFilter []uint64

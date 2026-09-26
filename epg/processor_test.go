@@ -107,8 +107,45 @@ func gzipBytes(t *testing.T, data string) []byte {
 // mergeXMLTV unit tests
 // ---------------------------------------------------------------------------
 
-// TestMergeXMLTV_Basic verifies that channels and programmes from two sources
-// end up in the merged output.
+func TestMergeXMLTV_FilterIsCaseInsensitive(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.xml")
+	out := filepath.Join(dir, "out.xml")
+	_ = os.WriteFile(src, []byte(xmltvSource(
+		[]xmlChannel{{ID: "CNN.us", DisplayName: "CNN"}},
+		[]xmlProgramme{{Channel: "CNN.us", Title: "News"}},
+	)), 0644)
+
+	stats, err := mergeXMLTV([]string{src}, out, utils.TvgIDFilter{utils.TvgIDHash("cnn.us")}, nil)
+	if err != nil {
+		t.Fatalf("mergeXMLTV: %v", err)
+	}
+	if stats.channels != 1 || stats.programmes != 1 {
+		t.Errorf("got %d channels / %d programmes, want 1 / 1", stats.channels, stats.programmes)
+	}
+}
+
+func TestMergeXMLTV_StatsReportDroppedIDs(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.xml")
+	out := filepath.Join(dir, "out.xml")
+	_ = os.WriteFile(src, []byte(xmltvSource(
+		[]xmlChannel{{ID: "orphan.id", DisplayName: "Orphan"}},
+		[]xmlProgramme{{Channel: "orphan.id", Title: "Show"}},
+	)), 0644)
+
+	stats, err := mergeXMLTV([]string{src}, out, utils.TvgIDFilter{utils.TvgIDHash("something.else")}, nil)
+	if err != nil {
+		t.Fatalf("mergeXMLTV: %v", err)
+	}
+	if stats.channels != 0 || stats.filtered != 2 {
+		t.Errorf("got %d channels / %d filtered, want 0 / 2", stats.channels, stats.filtered)
+	}
+	if len(stats.samples) != 1 || stats.samples[0] != "orphan.id" {
+		t.Errorf("expected the dropped id in the log samples, got %v", stats.samples)
+	}
+}
+
 func TestMergeXMLTV_Basic(t *testing.T) {
 	dir := t.TempDir()
 
@@ -125,7 +162,7 @@ func TestMergeXMLTV_Basic(t *testing.T) {
 		[]xmlProgramme{{Channel: "ch2", Title: "Show B"}},
 	)), 0644)
 
-	if err := mergeXMLTV([]string{src1, src2}, out, nil, nil); err != nil {
+	if _, err := mergeXMLTV([]string{src1, src2}, out, nil, nil); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
@@ -153,7 +190,7 @@ func TestMergeXMLTV_DeduplicatesChannels(t *testing.T) {
 		[]xmlChannel{{ID: "dup", DisplayName: "Second"}}, nil,
 	)), 0644)
 
-	if err := mergeXMLTV([]string{src1, src2}, out, nil, nil); err != nil {
+	if _, err := mergeXMLTV([]string{src1, src2}, out, nil, nil); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
@@ -183,7 +220,7 @@ func TestMergeXMLTV_ProgrammesFromAllSources(t *testing.T) {
 		[]xmlProgramme{{Channel: "ch1", Title: "Evening News"}},
 	)), 0644)
 
-	if err := mergeXMLTV([]string{src1, src2}, out, nil, nil); err != nil {
+	if _, err := mergeXMLTV([]string{src1, src2}, out, nil, nil); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
@@ -215,7 +252,7 @@ func TestMergeXMLTV_FilterByTvgIDs(t *testing.T) {
 	)), 0644)
 
 	tvgIDs := testTvgIDFilter("keep")
-	if err := mergeXMLTV([]string{src}, out, tvgIDs, nil); err != nil {
+	if _, err := mergeXMLTV([]string{src}, out, tvgIDs, nil); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
@@ -240,7 +277,7 @@ func TestMergeXMLTV_NilFilterKeepsAll(t *testing.T) {
 		[]xmlProgramme{{Channel: "c1"}, {Channel: "c2"}},
 	)), 0644)
 
-	if err := mergeXMLTV([]string{src}, out, nil, nil); err != nil {
+	if _, err := mergeXMLTV([]string{src}, out, nil, nil); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
@@ -508,7 +545,7 @@ func TestMergeXMLTV_ChannelRemapping(t *testing.T) {
 	channelMap := map[string]string{"epg.channel.id": "m3u.tvg.id"}
 	tvgIDs := testTvgIDFilter("m3u.tvg.id")
 
-	if err := mergeXMLTV([]string{src}, out, tvgIDs, channelMap); err != nil {
+	if _, err := mergeXMLTV([]string{src}, out, tvgIDs, channelMap); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
@@ -546,7 +583,7 @@ func TestMergeXMLTV_RemappingWithoutFilter(t *testing.T) {
 	)), 0644)
 
 	channelMap := map[string]string{"epg.a": "tvg.a"} // only remap a
-	if err := mergeXMLTV([]string{src}, out, nil, channelMap); err != nil {
+	if _, err := mergeXMLTV([]string{src}, out, nil, channelMap); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 
@@ -589,7 +626,7 @@ func TestMergeXMLTV_RemapEnablesFilterPass(t *testing.T) {
 	tvgIDs := testTvgIDFilter("m3u.new", "epg.keep")
 	channelMap := map[string]string{"epg.old": "m3u.new"}
 
-	if err := mergeXMLTV([]string{src}, out, tvgIDs, channelMap); err != nil {
+	if _, err := mergeXMLTV([]string{src}, out, tvgIDs, channelMap); err != nil {
 		t.Fatalf("mergeXMLTV: %v", err)
 	}
 

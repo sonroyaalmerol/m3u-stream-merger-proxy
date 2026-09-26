@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -93,9 +94,19 @@ func (p *Processor) Run(ctx context.Context) error {
 	channelMap := utils.GetEPGChannelMappings()
 
 	tmpPath := config.GetEPGTmpPath()
-	if err := mergeXMLTV(sources, tmpPath, tvgIDs, channelMap); err != nil {
+	stats, err := mergeXMLTV(sources, tmpPath, tvgIDs, channelMap)
+	if err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("epg: merge: %w", err)
+	}
+	for _, warning := range stats.warnings {
+		p.logger.Warnf("epg: %s", warning)
+	}
+	p.logger.Logf("EPG merged: %d channels, %d programmes (%d dropped by the playlist tvg-id filter)",
+		stats.channels, stats.programmes, stats.filtered)
+	if stats.channels == 0 {
+		p.logger.Warnf("epg: no channels survived. Source ids look like %v; the playlist tvg-ids they must match come from your M3U/Xtream streams. Use EPG_CHANNEL_MAP to bridge them.",
+			stats.samples)
 	}
 
 	return os.Rename(tmpPath, config.GetEPGPath())
@@ -251,40 +262,59 @@ func (mc multiCloser) Close() error {
 // When tvgIDs is non-nil only channels/programmes whose id/channel attribute
 // appears in that set are written; a nil map means "keep everything".
 // channelMap remaps EPG channel ids to M3U tvg-ids (epgID → tvgID); may be nil.
-func mergeXMLTV(sources []string, outputPath string, tvgIDs utils.TvgIDFilter, channelMap map[string]string) error {
+// mergeStats reports what the merge wrote, so a silently empty guide is diagnosable from the logs.
+type mergeStats struct {
+	channels   int
+	programmes int
+	filtered   int
+	samples    []string
+	warnings   []string
+}
+
+func (s *mergeStats) sample(id string) {
+	if id == "" || len(s.samples) >= 3 {
+		return
+	}
+	if slices.Contains(s.samples, id) {
+		return
+	}
+	s.samples = append(s.samples, id)
+}
+
+func mergeXMLTV(sources []string, outputPath string, tvgIDs utils.TvgIDFilter, channelMap map[string]string) (mergeStats, error) {
+	var stats mergeStats
+
 	out, err := os.Create(outputPath)
 	if err != nil {
-		return err
+		return stats, err
 	}
 	defer func() { _ = out.Close() }()
 
 	if _, err := out.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n"); err != nil {
-		return err
+		return stats, err
 	}
 	if _, err := out.WriteString(`<tv generator-info-name="m3u-stream-merger-proxy">` + "\n"); err != nil {
-		return err
+		return stats, err
 	}
 
 	seenChannels := make(map[string]bool)
 
-	// First pass: unique <channel> elements.
 	for _, src := range sources {
-		if err := streamXMLTVElements(src, "channel", seenChannels, tvgIDs, channelMap, out); err != nil {
-			_ = err
+		if err := streamXMLTVElements(src, "channel", seenChannels, tvgIDs, channelMap, out, &stats); err != nil {
+			stats.warnings = append(stats.warnings, err.Error())
 		}
 	}
 
-	// Second pass: all <programme> elements.
 	for _, src := range sources {
-		if err := streamXMLTVElements(src, "programme", nil, tvgIDs, channelMap, out); err != nil {
-			_ = err
+		if err := streamXMLTVElements(src, "programme", nil, tvgIDs, channelMap, out, &stats); err != nil {
+			stats.warnings = append(stats.warnings, err.Error())
 		}
 	}
 
 	if _, err := out.WriteString("</tv>\n"); err != nil {
-		return err
+		return stats, err
 	}
-	return out.Close()
+	return stats, out.Close()
 }
 
 // streamXMLTVElements reads srcPath and copies every top-level element with the
@@ -294,7 +324,7 @@ func mergeXMLTV(sources []string, outputPath string, tvgIDs utils.TvgIDFilter, c
 //     channels, channel for programmes) is not in the set
 //   - channelMap: when non-nil, remaps EPG channel ids to M3U tvg-ids before
 //     filtering and deduplication; the identity attribute is rewritten in output
-func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, tvgIDs utils.TvgIDFilter, channelMap map[string]string, out io.Writer) error {
+func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, tvgIDs utils.TvgIDFilter, channelMap map[string]string, out io.Writer, stats *mergeStats) error {
 	f, err := os.Open(srcPath)
 	if err != nil {
 		return err
@@ -341,8 +371,11 @@ func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, tvgI
 			}
 		}
 
-		// Filter: skip elements whose identity is not in the tvg-id set.
 		if identity != "" && !tvgIDs.Has(identity) {
+			stats.filtered++
+			if elementName == "channel" {
+				stats.sample(identity)
+			}
 			if err := dec.Skip(); err != nil {
 				return err
 			}
@@ -362,6 +395,11 @@ func streamXMLTVElements(srcPath, elementName string, seen map[string]bool, tvgI
 
 		if err := copyElement(dec, enc, start); err != nil {
 			return err
+		}
+		if elementName == "channel" {
+			stats.channels++
+		} else {
+			stats.programmes++
 		}
 		out.Write([]byte("\n")) //nolint:errcheck
 	}
