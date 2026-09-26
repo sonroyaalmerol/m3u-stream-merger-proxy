@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ const (
 	defaultLDAPCacheTTL = 5 * time.Minute
 	ldapFailureTTL      = 30 * time.Second
 	ldapCacheMaxEntries = 1000
+	defaultUserFilter   = "(uid=%s)"
 )
 
 type ldapVerdict struct {
@@ -28,6 +30,13 @@ type ldapVerdict struct {
 type ldapCache struct {
 	mu      sync.Mutex
 	entries map[string]ldapVerdict
+}
+
+// ldapConn is the slice of *ldap.Conn this package uses, so tests can substitute a fake directory.
+type ldapConn interface {
+	Bind(username, password string) error
+	Search(request *ldap.SearchRequest) (*ldap.SearchResult, error)
+	Close() error
 }
 
 func ldapEnabled() bool { return os.Getenv("LDAP_URL") != "" }
@@ -43,6 +52,18 @@ func ldapBindDN(user string) string {
 		return strings.ReplaceAll(template, "{username}", escaped)
 	}
 	return strings.ReplaceAll(template, "%s", escaped)
+}
+
+func ldapUserFilter(user string) string {
+	filter := os.Getenv("LDAP_USER_FILTER")
+	if filter == "" {
+		filter = defaultUserFilter
+	}
+	escaped := ldap.EscapeFilter(user)
+	if strings.Contains(filter, "{username}") {
+		return strings.ReplaceAll(filter, "{username}", escaped)
+	}
+	return strings.ReplaceAll(filter, "%s", escaped)
 }
 
 func ldapCacheTTL() time.Duration {
@@ -86,25 +107,24 @@ func (c *ldapCache) store(key string, ok bool, ttl time.Duration) {
 	c.entries[key] = ldapVerdict{ok: ok, expiresAt: time.Now().Add(ttl)}
 }
 
-// ldapBind performs the real simple bind; CredentialsAuth.bind swaps it out in tests.
-func ldapBind(serverURL, dn, password string) error {
+// dialLDAP opens the connection CredentialsAuth.dial replaces in tests.
+func dialLDAP(serverURL string) (ldapConn, error) {
+	skipVerify := strings.EqualFold(os.Getenv("LDAP_TLS_SKIP_VERIFY"), "true")
 	opts := []ldap.DialOpt{}
-	if strings.EqualFold(os.Getenv("LDAP_TLS_SKIP_VERIFY"), "true") {
+	if skipVerify {
 		opts = append(opts, ldap.DialWithTLSConfig(&tls.Config{InsecureSkipVerify: true}))
 	}
 	conn, err := ldap.DialURL(serverURL, opts...)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer func() { _ = conn.Close() }()
-
 	if strings.EqualFold(os.Getenv("LDAP_START_TLS"), "true") {
-		skip := strings.EqualFold(os.Getenv("LDAP_TLS_SKIP_VERIFY"), "true")
-		if err := conn.StartTLS(&tls.Config{InsecureSkipVerify: skip}); err != nil {
-			return err
+		if err := conn.StartTLS(&tls.Config{InsecureSkipVerify: skipVerify}); err != nil {
+			_ = conn.Close()
+			return nil, err
 		}
 	}
-	return conn.Bind(dn, password)
+	return conn, nil
 }
 
 // authorizeLDAP binds as the user; an empty password is refused because servers answer that with an anonymous bind.
@@ -113,28 +133,105 @@ func (a *CredentialsAuth) authorizeLDAP(user, pass string) bool {
 	if serverURL == "" || user == "" || pass == "" {
 		return false
 	}
-	dn := ldapBindDN(user)
-	if dn == "" {
-		a.logger.Warn("LDAP_URL is set but LDAP_BIND_DN is empty, rejecting login")
-		return false
-	}
 
 	key := ldapCacheKey(user, pass)
 	if ok, found := a.ldap.lookup(key); found {
 		return ok
 	}
 
-	bind := a.bind
-	if bind == nil {
-		bind = ldapBind
+	ok := a.ldapLogin(serverURL, user, pass)
+	ttl := ldapFailureTTL
+	if ok {
+		ttl = ldapCacheTTL()
 	}
-	if err := bind(serverURL, dn, pass); err != nil {
+	a.ldap.store(key, ok, ttl)
+	return ok
+}
+
+func (a *CredentialsAuth) ldapLogin(serverURL, user, pass string) bool {
+	dial := a.dial
+	if dial == nil {
+		dial = dialLDAP
+	}
+	conn, err := dial(serverURL)
+	if err != nil {
+		a.logger.Warnf("LDAP dial %s failed: %v", serverURL, err)
+		return false
+	}
+	defer func() { _ = conn.Close() }()
+
+	dn, err := resolveUserDN(conn, user)
+	if err != nil {
+		a.logger.Warnf("LDAP lookup for %q failed: %v", user, err)
+		return false
+	}
+
+	if err := conn.Bind(dn, pass); err != nil {
 		a.logger.Warnf("LDAP bind failed for %s: %v", dn, err)
-		a.ldap.store(key, false, ldapFailureTTL)
+		return false
+	}
+
+	group := os.Getenv("LDAP_REQUIRED_GROUP")
+	if group != "" && !inLDAPGroup(conn, dn, user, group) {
+		a.logger.Warnf("LDAP user %s is not a member of %s", dn, group)
 		return false
 	}
 
 	a.logger.Debugf("LDAP bind succeeded for %s", dn)
-	a.ldap.store(key, true, ldapCacheTTL())
 	return true
+}
+
+// resolveUserDN searches under LDAP_BASE_DN when set, otherwise renders the LDAP_BIND_DN template.
+func resolveUserDN(conn ldapConn, user string) (string, error) {
+	baseDN := os.Getenv("LDAP_BASE_DN")
+	if baseDN == "" {
+		dn := ldapBindDN(user)
+		if dn == "" {
+			return "", fmt.Errorf("set LDAP_BIND_DN or LDAP_BASE_DN")
+		}
+		return dn, nil
+	}
+
+	if svcUser := os.Getenv("LDAP_BIND_USER"); svcUser != "" {
+		if err := conn.Bind(svcUser, os.Getenv("LDAP_BIND_PASSWORD")); err != nil {
+			return "", fmt.Errorf("service account bind: %w", err)
+		}
+	}
+
+	result, err := conn.Search(ldap.NewSearchRequest(
+		baseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 2, 10, false,
+		ldapUserFilter(user), []string{"dn"}, nil,
+	))
+	if err != nil {
+		return "", err
+	}
+	if len(result.Entries) != 1 {
+		return "", fmt.Errorf("expected exactly one entry, got %d", len(result.Entries))
+	}
+	return result.Entries[0].DN, nil
+}
+
+// inLDAPGroup checks memberOf on the user entry, falling back to a member lookup on the group for directories without the memberof overlay.
+func inLDAPGroup(conn ldapConn, dn, user, group string) bool {
+	result, err := conn.Search(ldap.NewSearchRequest(
+		dn, ldap.ScopeBaseObject, ldap.NeverDerefAliases, 0, 10, false,
+		"(objectClass=*)", []string{"memberOf"}, nil,
+	))
+	if err == nil {
+		for _, entry := range result.Entries {
+			for _, value := range entry.GetAttributeValues("memberOf") {
+				if strings.EqualFold(strings.TrimSpace(value), group) {
+					return true
+				}
+			}
+		}
+	}
+
+	filter := fmt.Sprintf("(|(member=%s)(uniqueMember=%s)(memberUid=%s))",
+		ldap.EscapeFilter(dn), ldap.EscapeFilter(dn), ldap.EscapeFilter(user))
+	members, err := conn.Search(ldap.NewSearchRequest(
+		group, ldap.ScopeBaseObject, ldap.NeverDerefAliases, 1, 10, false,
+		filter, []string{"dn"}, nil,
+	))
+	return err == nil && len(members.Entries) == 1
 }

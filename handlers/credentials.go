@@ -14,7 +14,7 @@ import (
 type CredentialsAuth struct {
 	logger logger.Logger
 	ldap   ldapCache
-	bind   func(serverURL, dn, password string) error
+	dial   func(serverURL string) (ldapConn, error)
 }
 
 func NewCredentialsAuth(logger logger.Logger) *CredentialsAuth {
