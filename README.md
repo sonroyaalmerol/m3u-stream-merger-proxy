@@ -281,6 +281,28 @@ rights. An empty password is always rejected, since servers answer an empty simp
 bind with a successful anonymous bind. authentik only exposes users bound to the
 application, so `LDAP_REQUIRED_GROUP` is often redundant there.
 
+> [!WARNING]
+> **Use app passwords, not primary directory passwords.** The Xtream protocol puts
+> the credentials in the URL (`?username=...&password=...`) on every request, and
+> clients store them on disk. With LDAP that means a user's directory password
+> ends up in client config files, in `x-tvg-url` inside exported playlists, and in
+> the access logs of any reverse proxy in front of this one. Whatever you type into
+> TiviMate should therefore be a credential that only unlocks IPTV.
+>
+> Recommended setup:
+>
+> - Issue an **app password / access token** per user (authentik: _Tokens and App
+>   passwords_; Okta, Google Workspace and Atlassian have equivalents) and have
+>   users enter that in their player instead of their real password.
+> - Restrict those accounts to this application with `LDAP_REQUIRED_GROUP` or a
+>   dedicated LDAP bind group, so a leaked credential cannot reach anything else.
+> - Always enable TLS (see [TLS Configs](#tls-configs)) or terminate TLS in front
+>   of the proxy. Without it, the credential travels in cleartext on every request.
+> - Turn off query-string logging in any reverse proxy in front of the proxy. This
+>   proxy's own logs already redact the password.
+> - If your directory cannot issue app passwords, create separate IPTV-only
+>   accounts rather than reusing primary logins.
+
 ### Logging Configs
 
 | ENV VAR | Description                       | Default Value | Possible Values |
