@@ -81,7 +81,7 @@ func (instance *StreamInstance) ProxyStream(
 		}
 	}
 	if result.Error != nil {
-		if result.Status != proxy.StatusIncompatible && result.Status != proxy.StatusClientClosed {
+		if result.Status != proxy.StatusIncompatible && result.Status != proxy.StatusClientClosed && !(lbResult.Direct && result.Status == proxy.StatusEOF) {
 			instance.logger.Errorf("Stream handler status: %v", result.Error)
 		}
 	}
