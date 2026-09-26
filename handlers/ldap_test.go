@@ -131,6 +131,28 @@ func TestLDAPRequiredGroup(t *testing.T) {
 	assert.True(t, auth3.Authorize("alice", "secret"))
 }
 
+// TestLDAPServiceAccountRebind covers authentik-style outposts where only the service account may search.
+func TestLDAPServiceAccountRebind(t *testing.T) {
+	const (
+		userDN = "cn=alice,ou=users,dc=ldap,dc=goauthentik,dc=io"
+		svcDN  = "cn=ldapservice,ou=users,dc=ldap,dc=goauthentik,dc=io"
+	)
+	dir := &fakeLDAP{
+		userDN:    userDN,
+		passwords: map[string]string{svcDN: "svcpass", userDN: "secret"},
+		groupHas:  true,
+	}
+	auth := ldapTestAuth(t, dir)
+	t.Setenv("LDAP_BASE_DN", "dc=ldap,dc=goauthentik,dc=io")
+	t.Setenv("LDAP_BIND_USER", svcDN)
+	t.Setenv("LDAP_BIND_PASSWORD", "svcpass")
+	t.Setenv("LDAP_REQUIRED_GROUP", "cn=iptv,ou=groups,dc=ldap,dc=goauthentik,dc=io")
+
+	require.True(t, auth.Authorize("alice", "secret"))
+	assert.Equal(t, []string{svcDN, userDN, svcDN}, dir.binds,
+		"the group lookup must run as the service account, not as the just-bound user")
+}
+
 func TestLDAPRejectsEmptyPassword(t *testing.T) {
 	dir := &fakeLDAP{passwords: map[string]string{"": ""}}
 	auth := ldapTestAuth(t, dir)

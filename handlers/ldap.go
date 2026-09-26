@@ -160,7 +160,7 @@ func (a *CredentialsAuth) ldapLogin(serverURL, user, pass string) bool {
 	}
 	defer func() { _ = conn.Close() }()
 
-	dn, err := resolveUserDN(conn, user)
+	dn, memberOf, err := resolveUser(conn, user)
 	if err != nil {
 		a.logger.Warnf("LDAP lookup for %q failed: %v", user, err)
 		return false
@@ -171,58 +171,75 @@ func (a *CredentialsAuth) ldapLogin(serverURL, user, pass string) bool {
 		return false
 	}
 
-	group := os.Getenv("LDAP_REQUIRED_GROUP")
-	if group != "" && !inLDAPGroup(conn, dn, user, group) {
-		a.logger.Warnf("LDAP user %s is not a member of %s", dn, group)
-		return false
+	if group := os.Getenv("LDAP_REQUIRED_GROUP"); group != "" {
+		if err := serviceBind(conn); err != nil {
+			a.logger.Warnf("LDAP service account re-bind failed: %v", err)
+			return false
+		}
+		if !inLDAPGroup(conn, dn, user, group, memberOf) {
+			a.logger.Warnf("LDAP user %s is not a member of %s", dn, group)
+			return false
+		}
 	}
 
 	a.logger.Debugf("LDAP bind succeeded for %s", dn)
 	return true
 }
 
-// resolveUserDN searches under LDAP_BASE_DN when set, otherwise renders the LDAP_BIND_DN template.
-func resolveUserDN(conn ldapConn, user string) (string, error) {
+// serviceBind authenticates as LDAP_BIND_USER; a no-op when no service account is configured.
+func serviceBind(conn ldapConn) error {
+	svcUser := os.Getenv("LDAP_BIND_USER")
+	if svcUser == "" {
+		return nil
+	}
+	if err := conn.Bind(svcUser, os.Getenv("LDAP_BIND_PASSWORD")); err != nil {
+		return fmt.Errorf("service account bind: %w", err)
+	}
+	return nil
+}
+
+// resolveUser searches under LDAP_BASE_DN when set, otherwise renders the LDAP_BIND_DN template, and returns any memberOf it already saw.
+func resolveUser(conn ldapConn, user string) (string, []string, error) {
 	baseDN := os.Getenv("LDAP_BASE_DN")
 	if baseDN == "" {
 		dn := ldapBindDN(user)
 		if dn == "" {
-			return "", fmt.Errorf("set LDAP_BIND_DN or LDAP_BASE_DN")
+			return "", nil, fmt.Errorf("set LDAP_BIND_DN or LDAP_BASE_DN")
 		}
-		return dn, nil
+		return dn, nil, nil
 	}
 
-	if svcUser := os.Getenv("LDAP_BIND_USER"); svcUser != "" {
-		if err := conn.Bind(svcUser, os.Getenv("LDAP_BIND_PASSWORD")); err != nil {
-			return "", fmt.Errorf("service account bind: %w", err)
-		}
+	if err := serviceBind(conn); err != nil {
+		return "", nil, err
 	}
 
 	result, err := conn.Search(ldap.NewSearchRequest(
 		baseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 2, 10, false,
-		ldapUserFilter(user), []string{"dn"}, nil,
+		ldapUserFilter(user), []string{"dn", "memberOf"}, nil,
 	))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if len(result.Entries) != 1 {
-		return "", fmt.Errorf("expected exactly one entry, got %d", len(result.Entries))
+		return "", nil, fmt.Errorf("expected exactly one entry, got %d", len(result.Entries))
 	}
-	return result.Entries[0].DN, nil
+	return result.Entries[0].DN, result.Entries[0].GetAttributeValues("memberOf"), nil
 }
 
 // inLDAPGroup checks memberOf on the user entry, falling back to a member lookup on the group for directories without the memberof overlay.
-func inLDAPGroup(conn ldapConn, dn, user, group string) bool {
+func inLDAPGroup(conn ldapConn, dn, user, group string, known []string) bool {
+	if hasGroup(known, group) {
+		return true
+	}
+
 	result, err := conn.Search(ldap.NewSearchRequest(
 		dn, ldap.ScopeBaseObject, ldap.NeverDerefAliases, 0, 10, false,
 		"(objectClass=*)", []string{"memberOf"}, nil,
 	))
 	if err == nil {
 		for _, entry := range result.Entries {
-			for _, value := range entry.GetAttributeValues("memberOf") {
-				if strings.EqualFold(strings.TrimSpace(value), group) {
-					return true
-				}
+			if hasGroup(entry.GetAttributeValues("memberOf"), group) {
+				return true
 			}
 		}
 	}
@@ -234,4 +251,13 @@ func inLDAPGroup(conn ldapConn, dn, user, group string) bool {
 		filter, []string{"dn"}, nil,
 	))
 	return err == nil && len(members.Entries) == 1
+}
+
+func hasGroup(values []string, group string) bool {
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), group) {
+			return true
+		}
+	}
+	return false
 }
